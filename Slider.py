@@ -7,7 +7,8 @@ from keras.layers import Dense
 from keras.layers import LSTM
 from keras.layers import Dropout
 from keras.callbacks import History
-import warnings
+import warnings, os, tensorflow as tf
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 warnings.filterwarnings('ignore')
 
 class Slider:
@@ -155,6 +156,7 @@ class Slider:
             df1 = df0.iloc[st:, :]
             principalCompsDf = pd.DataFrame(pcaComps, columns=df0.columns, index=df1.index).abs()
             exPostProjections = df1 * Slider.S(principalCompsDf)
+
             return [df1, principalCompsDf, exPostProjections]
 
         def gRNN(dataset_all, params):
