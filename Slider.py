@@ -134,28 +134,35 @@ class Slider:
                 RollMode = 'RollWindow'
 
             # st = 50; pcaN = 5; eigsPC = [0];
-            pcaComps = []
             for i in range(st, len(df0)):
-                print("Step:", i, " of ", len(df0))
-                if RollMode == 'RollWindow':
-                    df = df0.iloc[i - st:i, :]
-                else:
-                    df = df0.iloc[0:i, :]
+                try:
 
-                features = df.columns.values
-                x = df.loc[:, features].values
-                x = StandardScaler().fit_transform(x)
+                    print("Step:", i, " of ", len(df0))
+                    if RollMode == 'RollWindow':
+                        df = df0.iloc[i - st:i, :]
+                    else:
+                        df = df0.iloc[0:i, :]
 
-                pca = PCA(n_components=pcaN)
-                principalComponents = pca.fit_transform(x)
-                # if i == st:
-                #    print(pca.explained_variance_ratio_)
-                pcaComps = [[] for j in range(len(eigsPC))]
-                c = 0
-                for eig in eigsPC:
-                    wContribs = pd.DataFrame(pca.components_[eig], columns=['Projection'])
-                    pcaComps[c].append(wContribs['Projection'].tolist())
-                    c+=1
+                    features = df.columns.values
+                    x = df.loc[:, features].values
+                    x = StandardScaler().fit_transform(x)
+
+                    pca = PCA(n_components=pcaN)
+                    principalComponents = pca.fit_transform(x)
+                    # if i == st:
+                    #    print(pca.explained_variance_ratio_)
+                    pcaComps = [[] for j in range(len(eigsPC))]
+                    c = 0
+                    for eig in eigsPC:
+                        wContribs = pd.DataFrame(pca.components_[eig], columns=['Projection'])
+                        pcaComps[c].append(wContribs['Projection'].tolist())
+                        c+=1
+
+                except Exception as e:
+                    print(e)
+                    pcaComps = [[] for j in range(len(eigsPC))]
+                    for c in len(eigsPC):
+                        pcaComps[c].append(list(np.zeros(len(df0.columns), 1)))
 
             df1 = df0.iloc[st:, :]
             principalCompsDf = [[] for j in range(len(pcaComps))]
