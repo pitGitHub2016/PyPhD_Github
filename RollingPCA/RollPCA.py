@@ -16,18 +16,28 @@ def DataBuilder():
     P.to_sql('FxData', conn, if_exists='replace')
     pd.read_csv('BasketTS.csv', delimiter=' ').to_sql('BasketTS', conn, if_exists='replace')
 
-#DataBuilder()
-
 def RunRollPcaOnFXPairs():
     df = pd.read_sql('SELECT * FROM FxData', conn).set_index('Dates', drop=True)
     specNames = pd.read_sql('SELECT * FROM BasketTS', conn)['Names'].tolist()
     df = df[specNames]
-    df = df.iloc[:300]
+    #df = df.iloc[:100]
 
     out = sl.AI.gRollingPca(df, 50, 5, [0,1,2,3,4])
     out[0].to_sql('df1', conn, if_exists='replace')
-    out[1].to_sql('principalCompsDf', conn, if_exists='replace')
-    out[2].to_sql('exPostProjections', conn, if_exists='replace')
+    principalCompsDfList = out[1]; exPostProjectionsList = out[2]
+    k = 0
+    for k in range(len(principalCompsDfList)):
+        principalCompsDfList[k].to_sql('principalCompsDf_'+str(k), conn, if_exists='replace')
+        exPostProjectionsList[k].to_sql('exPostProjections_'+str(k), conn, if_exists='replace')
 
-RunRollPcaOnFXPairs()
+def semaOnPCAProjections():
+    exPostProjections_0 = pd.read_sql('SELECT * FROM exPostProjections_0', conn).set_index('Dates', drop=True)
+    print(exPostProjections_0)
+    pnl = sl.S(sl.sema(exPostProjections_0, nperiods=3)) * sl.d(exPostProjections_0)
+    print(sl.sharpe(pnl))
 
+    #print(pnl)
+
+#DataBuilder()
+#RunRollPcaOnFXPairs()
+semaOnPCAProjections()

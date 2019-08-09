@@ -81,7 +81,7 @@ class Slider:
     def CorrMatrix(df):
         return df.corr()
 
-    def bma(df, **kwargs):
+    def sma(df, **kwargs):
         if 'nperiods' in kwargs:
             nperiods = kwargs['nperiods']
         else:
@@ -89,7 +89,7 @@ class Slider:
         MA = pd.DataFrame(df.rolling(nperiods, min_periods=nperiods).mean()).fillna(0)
         return MA
 
-    def bema(df, **kwargs):
+    def sema(df, **kwargs):
         if 'nperiods' in kwargs:
             nperiods = kwargs['nperiods']
         else:
@@ -150,12 +150,19 @@ class Slider:
                 principalComponents = pca.fit_transform(x)
                 # if i == st:
                 #    print(pca.explained_variance_ratio_)
-                wContribs = pd.DataFrame(pca.components_[eigsPC])
-                pcaComps.append(wContribs.sum().tolist())
+                pcaComps = [[] for j in range(len(eigsPC))]
+                c = 0
+                for eig in eigsPC:
+                    wContribs = pd.DataFrame(pca.components_[eig], columns=['Projection'])
+                    pcaComps[c].append(wContribs['Projection'].tolist())
+                    c+=1
 
             df1 = df0.iloc[st:, :]
-            principalCompsDf = pd.DataFrame(pcaComps, columns=df0.columns, index=df1.index).abs()
-            exPostProjections = df1 * Slider.S(principalCompsDf)
+            principalCompsDf = [[] for j in range(len(pcaComps))]
+            exPostProjections = [[] for j in range(len(pcaComps))]
+            for k in range(len(pcaComps)):
+                principalCompsDf[k] = pd.DataFrame(pcaComps[k], columns=df0.columns, index=df1.index).abs()
+                exPostProjections[k] = df1.mul(Slider.S(principalCompsDf[k]), axis=0)
 
             return [df1, principalCompsDf, exPostProjections]
 
