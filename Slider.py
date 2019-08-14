@@ -133,8 +133,9 @@ class Slider:
             else:
                 RollMode = 'RollWindow'
 
+            pcaComps = [[] for j in range(len(eigsPC))]
             # st = 50; pcaN = 5; eigsPC = [0];
-            for i in range(st, len(df0)):
+            for i in range(st, len(df0)+1):
                 try:
 
                     print("Step:", i, " of ", len(df0))
@@ -151,20 +152,18 @@ class Slider:
                     principalComponents = pca.fit_transform(x)
                     # if i == st:
                     #    print(pca.explained_variance_ratio_)
-                    pcaComps = [[] for j in range(len(eigsPC))]
-                    c = 0
                     for eig in eigsPC:
-                        wContribs = pd.DataFrame(pca.components_[eig], columns=['Projection'])
-                        pcaComps[c].append(wContribs['Projection'].tolist())
-                        c+=1
+                        #print(c, ', ', eig, ', ', len(pca.components_[eig]))
+                        pcaComps[eig].append(list(pca.components_[eig]))
 
                 except Exception as e:
                     print(e)
-                    pcaComps = [[] for j in range(len(eigsPC))]
                     for c in len(eigsPC):
                         pcaComps[c].append(list(np.zeros(len(df0.columns), 1)))
 
+            print(len(pcaComps[eig]))
             df1 = df0.iloc[st:, :]
+            print(len(df1))
             principalCompsDf = [[] for j in range(len(pcaComps))]
             exPostProjections = [[] for j in range(len(pcaComps))]
             for k in range(len(pcaComps)):
