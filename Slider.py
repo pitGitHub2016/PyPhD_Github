@@ -153,7 +153,7 @@ class Slider:
                     # if i == st:
                     #    print(pca.explained_variance_ratio_)
                     for eig in eigsPC:
-                        #print(c, ', ', eig, ', ', len(pca.components_[eig]))
+                        #print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
                         pcaComps[eig].append(list(pca.components_[eig]))
 
                 except Exception as e:
@@ -162,15 +162,19 @@ class Slider:
                         pcaComps[c].append(list(np.zeros(len(df0.columns), 1)))
 
             print(len(pcaComps[eig]))
-            df1 = df0.iloc[st:, :]
-            print(len(df1))
             principalCompsDf = [[] for j in range(len(pcaComps))]
             exPostProjections = [[] for j in range(len(pcaComps))]
             for k in range(len(pcaComps)):
-                principalCompsDf[k] = pd.DataFrame(pcaComps[k], columns=df0.columns, index=df1.index).abs()
-                exPostProjections[k] = df1.mul(Slider.S(principalCompsDf[k]), axis=0)
+                #principalCompsDf[k] = pd.DataFrame(pcaComps[k], columns=df0.columns, index=df1.index)
 
-            return [df1, principalCompsDf, exPostProjections]
+                principalCompsDf[k] = pd.concat([pd.DataFrame(np.zeros((st-1, len(df0.columns))), columns=df0.columns),
+                                                 pd.DataFrame(pcaComps[k], columns=df0.columns)], axis=0, ignore_index=True)
+                principalCompsDf[k].index = df0.index
+                principalCompsDf[k] = principalCompsDf[k].replace(0, np.nan).ffill(axis=0)
+
+                exPostProjections[k] = df0 * Slider.S(principalCompsDf[k]) #exPostProjections[k] = df0.mul(Slider.S(principalCompsDf[k]), axis=0)
+
+            return [df0, principalCompsDf, exPostProjections]
 
         def gRNN(dataset_all, params):
             history = History()
