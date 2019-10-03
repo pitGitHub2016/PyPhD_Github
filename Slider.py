@@ -9,6 +9,7 @@ from itertools import combinations
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
+from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from statsmodels.tsa.arima_model import ARIMA
 from statsmodels.tsa.stattools import adfuller
@@ -18,6 +19,10 @@ from keras.layers import Dense
 from keras.layers import LSTM
 from keras.layers import Dropout
 from keras.callbacks import History
+from scipy.spatial.distance import squareform
+from scipy.spatial.distance import pdist
+from scipy import sparse
+from scipy.linalg import svd
 import warnings, os, tensorflow as tf
 from tqdm import tqdm
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -57,11 +62,15 @@ class Slider:
         return df
 
     def S(df, **kwargs):
+
         if 'nperiods' in kwargs:
             nperiods = kwargs['nperiods']
         else:
             nperiods = 1
-        return pd.DataFrame.shift(df, nperiods)
+
+        out = df.shift(periods=nperiods)
+
+        return out
 
     def fd(df, **kwargs):
         if 'mode' in kwargs:
@@ -297,7 +306,7 @@ class Slider:
         MA = pd.DataFrame(df.rolling(nperiods, min_periods=nperiods).mean()).fillna(0)
         return MA
 
-    def sema(df, **kwargs):
+    def ema(df, **kwargs):
         if 'nperiods' in kwargs:
             nperiods = kwargs['nperiods']
         else:
@@ -782,6 +791,45 @@ class Slider:
 
             return principalDf
 
+        def gDmaps(df, **kwargs):
+
+            Dates = df.index
+
+            if 'nD' not in kwargs:
+                nD = 2
+            else:
+                nD = kwargs['nD']
+
+            if 'sigma' not in kwargs:
+                sigma = 0.2
+            else:
+                sigma = kwargs['sigma']
+
+            if 'dataMode' not in kwargs:
+                dataMode = 'normalize'
+            else:
+                dataMode = kwargs['sigma']
+
+            if dataMode == 'standard':
+                df = pd.DataFrame(MinMaxScaler().fit_transform(df.values))
+
+            D = pd.DataFrame(squareform(pdist(df)))
+
+            K = np.exp(-D / (2 * sigma ** 2))
+            a1 = np.sqrt(K.sum()); A = K / (a1.dot(a1)); threshold = 5E-6
+            sparseK = pd.DataFrame(sparse.csr_matrix((A * (A > threshold).astype(int)).as_matrix()).todense())
+            U, s, VT = svd(sparseK)
+
+            U = pd.DataFrame(U); s = pd.DataFrame(s); VT = pd.DataFrame(VT)
+            psi = U; phi = VT
+            for col in U.columns:
+                psi[col] = s * (U[col] / U.iloc[:,0])
+                phi[col] = VT[col] * VT.iloc[:,0]
+
+            eigOut = psi.iloc[:,1:nD+1]
+
+            return eigOut
+
         def gRollingManifold(manifoldIn, df0, st, NumProjections, eigsPC, **kwargs):
             if 'RollMode' in kwargs:
                 RollMode = kwargs['RollMode']
@@ -838,6 +886,15 @@ class Slider:
                             #print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
                             Comps[eig].append(list(pca.components_[eig]))
                             c += 1
+
+                    elif manifoldIn == 'DMAPS':
+                        dMapsEigs = Slider.AI.gDmaps(df, nD=NumProjections)
+                        c = 0
+                        for eig in eigsPC:
+                            #print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
+                            Comps[eig].append(dMapsEigs.iloc[:,eig].values)
+                            c += 1
+
                     elif manifoldIn == 'LLE':
                         lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections, method=LLE_Method, n_jobs=-1)
                         X_lle = lle.fit_transform(x)  # ; print(X_lle.shape)
@@ -860,8 +917,7 @@ class Slider:
                 principalCompsDf[k].index = df0.index
                 principalCompsDf[k] = principalCompsDf[k].fillna(0).replace(0, np.nan).ffill()
 
-                exPostProjections[k] = df0 * Slider.S(
-                    principalCompsDf[k])  #exPostProjections[k] = df0.mul(Slider.S(principalCompsDf[k]), axis=0)
+                exPostProjections[k] = df0 * Slider.S(principalCompsDf[k])  # exPostProjections[k] = df0.mul(Slider.S(principalCompsDf[k]), axis=0)
 
             return [df0, principalCompsDf, exPostProjections]
 
@@ -874,7 +930,7 @@ class Slider:
             batchSIzeIn = params[3];
             medBatchTrain = params[4];
             HistoryPlot = params[5];
-            PredictionsPlot = params[6];
+            PredictionsPlot = params[6]
             LearningMode = params[7]
 
             history = History()
@@ -957,7 +1013,7 @@ class Slider:
 
             elif LearningMode == 'online':
                 X_test = [];
-                y_test = [];
+                y_test = []
                 for i in range(TrainEnd, len(dataset_total)):  # TrainEnd+100):
                     print('Calculating: ' + str(round(i / len(dataset_total) * 100, 2)) + '%')
                     # Formalize the rolling input prices
@@ -991,9 +1047,10 @@ class Slider:
                         print("Breaking on the Training ...")
 
             # df_real_price = pd.DataFrame(dataset_test)
-            df_real_price = dataset_all.iloc[TrainEnd - 1:]
+            df_real_price = dataset_all.iloc[TrainEnd:]
             # df_predicted_price = pd.DataFrame(predicted_price)
-            df_predicted_price = pd.DataFrame(predicted_price, index=dataset_all.iloc[TrainEnd - 1:-1].index, columns=['PredictedPrice'])
+            df_predicted_price = pd.DataFrame(predicted_price, index=dataset_all.iloc[TrainEnd:].index,
+                                              columns=['PredictedPrice_' + c for c in df_real_price.columns])
 
             if HistoryPlot == 1:
                 print(history.history.keys())

@@ -57,7 +57,6 @@ def plotData(assetSel, set, mode):
         sl.cs(sl.RV(df)).plot(ax=ax, title=set + ' Relative Values')
     plt.show()
 
-
 def pyDmapsRun():
     X = df.values
 
@@ -81,7 +80,11 @@ def pyDmapsRun():
     plt.show()
 
 df = DataSelect('BasketGekko', 'rets')
-df = df.iloc[1500:2000, :].T
+df = df.iloc[1500:2000, :]
 # df = sl.cs(df.iloc[1000:2000, :])
 
-out = sl.AI.gDmaps(df)
+#eigOut = sl.AI.gDmaps(df.T, nD=5); print(eigOut.iloc[:,0].values)
+out = sl.AI.gRollingManifold('DMAPS', df, 50, 5, [0, 1, 2, 3, 4], ProjectionMode='Transpose')
+out[2].plot()
+plt.show()
+
