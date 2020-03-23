@@ -10,7 +10,6 @@ warnings.filterwarnings('ignore')
 
 conn = sqlite3.connect('FXeodData.db')
 
-pd.read_csv('BasketTS.csv', delimiter=' ').to_sql('BasketTS', conn, if_exists='replace')
 pd.read_csv('BasketGekko.csv', delimiter=' ').to_sql('BasketGekko', conn, if_exists='replace')
 
 def DataBuilder():
@@ -66,8 +65,7 @@ def RunRollManifoldOnFXPairs(set, manifoldIn):
     if manifoldIn == 'PCA':
         out = sl.AI.gRollingManifold(manifoldIn, df, 50, 5, [0,1,2,3,4])
     elif manifoldIn == 'LLE':
-        out = sl.AI.gRollingManifold(manifoldIn, df, 50, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=15,
-                                     ProjectionMode='Transpose')
+        out = sl.AI.gRollingManifold(manifoldIn, df, 50, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=3, ProjectionMode='Transpose')
 
     out[0].to_sql('df', conn, if_exists='replace')
     principalCompsDfList = out[1]; exPostProjectionsList = out[2]
@@ -124,9 +122,8 @@ def semaOnProjections(manifoldIn, L, mode, shThr, prIn):
         #allProjectionsDF.columns = ['P0', 'P1', 'P2', 'P3', 'P4']; allProjectionsDF = sl.RV(allProjectionsDF)
 
     elif mode == 'signCorrection':
-        allProjectionsDF = pd.read_sql('SELECT * FROM ' + manifoldIn + '_SignCorrected_E_exPostProjections',
-                                       conn).set_index('Dates', drop=True)
-        # allProjectionsDF = pd.read_sql('SELECT * FROM ' + manifoldIn + '_SignCorrected_P0_exPostProjections', conn).set_index('Dates', drop=True)
+        #allProjectionsDF = pd.read_sql('SELECT * FROM ' + manifoldIn + '_SignCorrected_E_exPostProjections',conn).set_index('Dates', drop=True)
+        allProjectionsDF = pd.read_sql('SELECT * FROM ' + manifoldIn + '_SignCorrected_P0_exPostProjections', conn).set_index('Dates', drop=True)
         # allProjectionsDF = pd.read_sql('SELECT * FROM ' + manifoldIn + '_SignCorrected_E_ofWX_exPostProjections', conn).set_index('Dates', drop=True)
         # allProjectionsDF = pd.read_sql('SELECT * FROM ' + manifoldIn + '_SignCorrected_P0_ofWX_exPostProjections', conn).set_index('Dates', drop=True)
 
@@ -143,7 +140,7 @@ def semaOnProjections(manifoldIn, L, mode, shThr, prIn):
             'SELECT * FROM ' + manifoldIn + '_SignCorrected_P0_exPostProjections_' + str(prIn), conn).set_index('Dates',
                                                                                                                 drop=True)
 
-    allProjectionsDF = allProjectionsDF.fillna(0)
+    allProjectionsDF = allProjectionsDF.fillna(0).iloc[0:round(0.5*6110),:]
     allProjectionsDF.to_sql(manifoldIn+'_'+mode+'_allProjectionsDF', conn, if_exists='replace')
 
     ######### Raw Projections Trading #########
@@ -154,7 +151,7 @@ def semaOnProjections(manifoldIn, L, mode, shThr, prIn):
     sl.cs(sl.rs(allProjectionsDF)).plot();
     plt.show()
 
-    pnl = sl.S(sl.sema(allProjectionsDF, nperiods=L)) * allProjectionsDF
+    pnl = sl.S(sl.ema(allProjectionsDF, nperiods=L)) * allProjectionsDF
     #pnl = sl.ExPostOpt(pnl)[0]
     print('semaPnLSharpe')
     print((np.sqrt(252) * sl.sharpe(pnl)).round(4))
@@ -167,7 +164,7 @@ def semaOnProjections(manifoldIn, L, mode, shThr, prIn):
     print('rsExPostOpt exPostProjectionsSharpes')
     print((np.sqrt(252) * sl.sharpe(sl.rs(sl.ExPostOpt(allProjectionsDF)[0]))).round(4))
 
-    pnl = sl.ExPostOpt(sl.S(sl.sema(allProjectionsDF, nperiods=L)) * allProjectionsDF)[0]
+    pnl = sl.ExPostOpt(sl.S(sl.ema(allProjectionsDF, nperiods=L)) * allProjectionsDF)[0]
     print('ExPostOpt semaPnLSharpe')
     print(((np.sqrt(252) * sl.sharpe(pnl)).round(4)))
     pnl = sl.rs(pnl)
@@ -188,7 +185,7 @@ def semaOnProjections(manifoldIn, L, mode, shThr, prIn):
     print('rsDFRollShFilteredPnlSharpe')
     print(((np.sqrt(252) * sl.sharpe(rsDFRollShFilteredPnl)).round(4)))
 
-    semaDFRollShFilteredPnl = sl.ExPostOpt(sl.S(sl.sema(DFRollShFilteredPnl, nperiods=L)) * DFRollShFilteredPnl)[0]
+    semaDFRollShFilteredPnl = sl.ExPostOpt(sl.S(sl.ema(DFRollShFilteredPnl, nperiods=L)) * DFRollShFilteredPnl)[0]
     print('semaDFRollShFilteredPnl')
     print(((np.sqrt(252) * sl.sharpe(semaDFRollShFilteredPnl)).round(4)))
     rsSemaDFRollShFilteredPnl = sl.rs(semaDFRollShFilteredPnl)
@@ -226,9 +223,9 @@ def StationarityOnProjections(manifoldIn, mode):
         out[2].to_sql('critVal_Test_'+manifoldIn, conn, if_exists='replace')
 
     elif mode == 'filter':
-        #adf = pd.read_sql('SELECT * FROM ADF_Test_' + manifoldIn, conn)
+        #adf = pd.read_sql('SELECT * FROM ADF_Test_' + manifoldIn+'_'+str(rollWin), conn)
         adf = pd.read_sql('SELECT * FROM Pval_Test_' + manifoldIn, conn).set_index('Dates', drop=True)
-        #adf = pd.read_sql('SELECT * FROM critVal_Test_' + manifoldIn, conn)
+        #adf = pd.read_sql('SELECT * FROM critVal_Test_' + manifoldIn+'_'+str(rollWin), conn)
         #fig, ax = plt.subplots()
         #adf.plot(ax=ax, title='critVal_Test_' + manifoldIn)
         #plt.show()
@@ -270,29 +267,50 @@ def ProjectionsPlots(manifoldIn):
         plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
         plt.show()
 
-def ARIMAonProjections(manifoldIn):
+def ARIMAonProjections(manifoldIn, modeIn):
     allProjections = []
     for pr in range(5):
         exPostProjections = pd.read_sql('SELECT * FROM ' + manifoldIn + '_exPostProjections_' + str(pr), conn).set_index('Dates', drop=True)
         allProjections.append(sl.rs(exPostProjections))
-    allProjectionsDF = pd.concat(allProjections, axis=1, ignore_index=True)
+    allProjectionsDF = pd.concat(allProjections, axis=1, ignore_index=True).iloc[0:round(0.5*6110),:]
     allProjectionsDF.columns = ['P0', 'P1', 'P2', 'P3', 'P4']
+    print(allProjectionsDF)
 
-    orderList = [(5, 0, 0), (5, 1, 1)]  # OrderList0
+    #allProjectionsDF = sl.cs(allProjectionsDF)
 
-    # Arima_Results = sl.ARIMA_predictions(allProjectionsDF, start=49, mode='roll', opt='BIC', orderList=orderList, multi=0, indextype=1)
-    Arima_Results = sl.ARIMA_predictions(allProjectionsDF, start=49, mode='roll', opt=(10, 0, 1), multi=1, indextype=1)
-    Arima_Results[0].to_sql(manifoldIn + '_ARIMA_Predictions_1001', conn, if_exists='replace')
-    Arima_Results[1].to_sql(manifoldIn + '_ARIMA_stderrDF_1001', conn, if_exists='replace')
-    Arima_Results[2].to_sql(manifoldIn + '_ARIMA_errDF_1001', conn, if_exists='replace')
-    Arima_Results[3].to_sql(manifoldIn + '_ARIMA_confDF_1001', conn, if_exists='replace')
+    if modeIn == 'modelSelection':
+        from statsmodels.tsa.arima_model import ARIMA
 
-    #Backtest = sl.BacktestPnL.ModelPnL(sl.Models(exPostProjections.copy()).ARIMA_signal(start=49, mode='roll', opt=(3,1,0), multi=0, indextype=1), retmode=1)
-    #print(Backtest)
-    #fig, ax = plt.subplots(figsize=(19.2, 10.8))
-    #sl.cs(Backtest).plot(ax=ax, c='green')
-    #exPostProjections.plot(ax=ax, c='blue')
-    #plt.show()
+        modelSelData = []
+        for pr in allProjectionsDF.columns:
+            for p in [1,2,3,5,7]:
+                for d in [0, 1]:
+                    for q in range(0, 2):
+                        order = (p, d, q)
+                        print(order)
+                        try:
+                            model = ARIMA(allProjectionsDF[pr].to_numpy(), order=(p, d, q))
+                            model_fit = model.fit(disp=0)
+                            bicVal = model_fit.bic
+                            modelSelData.append([pr, p, d, q, bicVal])
+                        except:
+                            continue
+
+        pd.DataFrame(modelSelData).to_sql(manifoldIn + '_modelSelData_ARIMA', conn, if_exists='replace')
+
+    else:
+
+        orderList = [(5, 0, 0), (5, 1, 1)]  # OrderList0
+
+        #Arima_Results = sl.ARIMA_predictions(allProjectionsDF, start=49, mode='roll', opt='BIC', orderList=orderList, multi=1, indextype=1)
+        Arima_Results = sl.ARIMA_predictions(allProjectionsDF, start=49, mode='roll', opt=(7, 1, 0), multi=1, indextype=1)
+        #Arima_Results = sl.ARIMA_predictions(allProjectionsDF, start=49, mode='static', opt=(25, 0, 0), multi=0, indextype=1)
+        print(Arima_Results)
+
+        Arima_Results[0].to_sql(manifoldIn + '_ARIMA_Predictions_710', conn, if_exists='replace')
+        Arima_Results[1].to_sql(manifoldIn + '_ARIMA_stderrDF_710', conn, if_exists='replace')
+        Arima_Results[2].to_sql(manifoldIn + '_ARIMA_errDF_710', conn, if_exists='replace')
+        Arima_Results[3].to_sql(manifoldIn + '_ARIMA_confDF_710', conn, if_exists='replace')
 
 def getProjectionsAngles(manifoldIn):
     df = pd.read_sql('SELECT * FROM df', conn).set_index('Dates', drop=True)
@@ -326,9 +344,8 @@ def SignCorrectionProjections(manifoldIn):
     signAngles = pd.read_sql('SELECT * FROM ' + manifoldIn + '_Projections_RollingDotProds_' + prMode + '_to_df',
                              conn).set_index('Dates', drop=True)
 
-    # signFilter = sl.sign(signAngles.iloc[:, 0]); filterName = 'P0'
-    signFilter = sl.sign(sl.E(signAngles));
-    filterName = 'E'
+    signFilter = sl.sign(signAngles.iloc[:, 0]); filterName = 'P0'
+    #signFilter = sl.sign(sl.E(signAngles)); filterName = 'E'
     # sumDF.plot(); plt.show()
 
     l = [];
@@ -373,7 +390,6 @@ def SignCorrectionProjections(manifoldIn):
     signfillDF.columns = ['P0', 'P1', 'P2', 'P3', 'P4']
     signfillDF.to_sql(manifoldIn + '_SignCorrected_' + filterName + '_' + prMode + '_exPostProjections', conn,
                       if_exists='replace')
-
 
 def cbIRs():
     IR = pd.read_excel('CB_IRs.xlsx').ffill().fillna(0)
@@ -436,12 +452,9 @@ def cbIRs():
 #SignCorrectionProjections('PCA')
 #SignCorrectionProjections('LLE')
 
-#semaOnProjections('PCA', 3, mode='classic', shThr=0, prIn=0)
-#semaOnProjections('LLE', 3, mode='ADF', shThr=0, prIn=0)
-#semaOnProjections('PCA', 500, mode='enhanced', shThr=1, prIn=4)
-#semaOnProjections('LLE', 3, mode='classic', shThr=0, prIn=0)
-#semaOnProjections('LLE', 3, mode='enhanced', shThr=0, prIn=1)
-# semaOnProjections('PCA', 3, mode='signCorrection', shThr=0, prIn=0)
+semaOnProjections('LLE', 25, mode='classic', shThr=0, prIn=0)
+#semaOnProjections('PCA', 3, mode='enhanced', shThr=0, prIn=0)
+#semaOnProjections('PCA', 3, mode='signCorrection', shThr=0, prIn=0)
 #semaOnProjections('LLE', 3, mode='signCorrection', shThr=0, prIn=0)
 #semaOnProjections('PCA', 3, mode='enhanced_signCorrected', shThr=0, prIn=0)
 #semaOnProjections('LLE', 3, mode='enhanced_signCorrected', shThr=0, prIn=0)
@@ -451,13 +464,13 @@ def cbIRs():
 
 #CustomPortfolioOfProjections('PCA', [1, -1, 0,0,0])
 
+#StationarityOnProjections('PCA', 'build')
 #StationarityOnProjections('LLE', 'filter')
-#StationarityOnProjections('LLE')
 
-ARIMAonProjections('PCA')
-# ARIMAonProjections('LLE')
+#ARIMAonProjections('PCA', 'run')
+#ARIMAonProjections('LLE', 'run')
 
-# getProjectionsAngles('PCA')
+#getProjectionsAngles('PCA')
 #getProjectionsAngles('LLE')
 
 #cbIRs()
