@@ -1169,12 +1169,9 @@ class Slider:
             TrainWindow = params[1]
             epochsIn = params[2]
             batchSIzeIn = params[3]
-            medBatchTrain = params[4]
-            HistoryPlot = params[5]
-            PredictionsPlot = params[6]
-            LearningMode = params[7]
-            modelNum = params[8]
-            TrainEndPct = params[9]
+            LearningMode = params[4]
+            modelNum = params[5]
+            TrainEndPct = params[6]
 
             history = History()
 
@@ -1189,15 +1186,14 @@ class Slider:
             X = []
             y = []
             for i in range(TrainWindow, len(dataset_all)):
-                X.append(dataVals[i - TrainWindow:i - HistLag, 0])
+                X.append(dataVals[i - TrainWindow:i - HistLag])
                 y.append(dataVals[i])
             X, y = np.array(X), np.array(y)
             idx = dataset_all.iloc[TrainWindow:].index
 
-            dfLearn = pd.concat(
-                [pd.DataFrame(X).astype(str).agg('-'.join, axis=1), pd.DataFrame(y), pd.DataFrame(idx.values)], axis=1)
-            dfLearn.columns = ['lstm_inputs', 'lstm_ouput', 'idx']
-            dfLearn.to_csv('dfLearn.csv')
+            #dfLearn = pd.concat([pd.DataFrame(X).astype(str).agg('-'.join, axis=1), pd.DataFrame(y), pd.DataFrame(idx.values)], axis=1)
+            #dfLearn.columns = ['lstm_inputs', 'lstm_ouput', 'idx']
+            #dfLearn.to_csv('dfLearn.csv')
 
             X = np.reshape(X, (X.shape[0], X.shape[1], len(dataset_all.columns)))
             X_train, y_train = X[:TrainEnd], y[:TrainEnd]
@@ -1208,7 +1204,7 @@ class Slider:
             df_real_price_test = pd.DataFrame(sc.inverse_transform(y_test), index=idx[TrainEnd:],
                                               columns=dataset_all.columns)
 
-            print("len(idx)=", len(idx), ", idx=", idx, ", X.shape=", X.shape, ", TrainWindow=", TrainWindow,
+            print("len(idx)=", len(idx), ", idx.tail[:10]=", idx[:10], ", X.shape=", X.shape, ", TrainWindow=", TrainWindow,
                   ", TrainEnd=", TrainEnd, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape,
                   ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
 
@@ -1243,43 +1239,36 @@ class Slider:
             if LearningMode == 'static':
 
                 predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
-                scoreList = pd.DataFrame(history.history['loss'], columns=['loss'])
-                scoreList.plot()
+                scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
+                scoreDF.plot()
                 plt.show()
 
             elif LearningMode == 'online':
 
-                for i in range(TrainEnd, len(dataset_total)):
-                    print('Calculating: ' + str(round(i / len(dataset_total) * 100, 2)) + '%')
-                    # Formalize the rolling input prices
-                    X_test.append(dataset_total[i - TrainWindow:i - HistLag])
-                    X_test_array = np.array(X_test)
-                    X_test_array = np.reshape(X_test_array,
-                                              (X_test_array.shape[0], X_test_array.shape[1], len(dataset_all.columns)))
+                #X_test, y_test
+                predicted_price_test = []
+                for i in range(len(X_test)):
+                    X_test[i], y_test[i] = np.array(X_test[i]), np.array(y_test[i])
 
-                    # Formalize the rolling output prices
-                    y_test.append(dataset_total[i])
-                    y_test_array = np.array(y_test)
-                    # Get the out-of-sample predicted prices
-                    predicted_price = sc.inverse_transform(regressor.predict(X_test_array))
+                    print('Calculating: ' + str(round(i / len(X_test) * 100, 2)) + '%')
+                    print("X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
+                    print("X_test[i].shape=", X_test[i].shape, ", y_test[i].shape=", y_test[i].shape)
+                    print("X_test[i]=", X_test[i])
+                    print("y_test[i]=", y_test[i])
+                    print("(1, X_test[i].shape[0], len(dataset_all.columns)) = ", (1, X_test[i].shape[0], len(dataset_all.columns)))
+                    indXtest = np.reshape(X_test[i], (1, X_test[i].shape[0], len(dataset_all.columns)))
+                    print("indXest.shape=", indXtest.shape)
+                    print("predicted_price_test=", sc.inverse_transform(regressor.predict(indXtest)))
+                    predicted_price_test.append(sc.inverse_transform(regressor.predict(indXtest))[0])
 
-                    if len(X_test) > medBatchTrain:
-                        X_test_Batch = X_test[-medBatchTrain:]
-                        X_test_array_Batch = np.array(X_test_Batch)
-                        X_test_array_Batch = np.reshape(X_test_array_Batch, (
-                            X_test_array_Batch.shape[0], X_test_array_Batch.shape[1], len(dataset_all.columns)))
-                        y_test_Batch = y_test[-medBatchTrain:]
-                        y_test_array_Batch = np.array(y_test_Batch)
-                    try:
-                        # Retrain the RNN on batch as new info comes into play
-                        regressor.train_on_batch(X_test_array_Batch, y_test_array_Batch)
-                        # Final evaluation of the model
-                        scores = regressor.evaluate(X_test_array_Batch, y_test_array_Batch, verbose=0)
-                        scoreList.append(scores)
-                        print(scores)
-                    except Exception as e:
-                        print(e)
-                        print("Breaking on the Training ...")
+                    indYtest = np.reshape(y_test[i], (1, len(dataset_all.columns)))
+
+                    #sc.fit_transform(dataVals[:i+TrainEnd])
+                    regressor.train_on_batch(indXtest, indYtest)
+                    scores = regressor.evaluate(indXtest, indYtest, verbose=0)
+                    scoreList.append(scores)
+                    print(scores)
+                scoreDF = pd.DataFrame(scoreList)
 
             df_predicted_price_train = pd.DataFrame(predicted_price_train, index=df_real_price_train.index,
                                                     columns=['PredictedPrice_Train_' + c for c in
@@ -1296,7 +1285,7 @@ class Slider:
             df_predicted_price_test.plot(ax=ax1)
             plt.show()
 
-            return [df_real_price_test, df_predicted_price_test, scoreList, regressor, history]
+            return [df_real_price_test, df_predicted_price_test, scoreDF, regressor, history]
 
     class Models:
 
