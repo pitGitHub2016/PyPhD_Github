@@ -186,7 +186,6 @@ def plotData(assetSel):
         sl.cs(sl.E(pnl)).plot(ax=fig.add_subplot(122), title='Linear Regression EigCoeffsDF EWP')
         plt.show()
 
-
 def CustomRun(runScript):
     if runScript == 0:
         kDM0 = pd.read_sql('SELECT * FROM kDMEmbeddedPortfolio0', conn).set_index('index', drop=True)
@@ -209,7 +208,6 @@ def CustomRun(runScript):
     elif runScript == 1:
         pass
 
-
 # DataHandler('investingCom')
 # shortTermInterestRatesSetup()
 
@@ -219,6 +217,7 @@ def CustomRun(runScript):
 # RunRollManifoldOnFXPairs()
 # plotData('raw')
 # plotData('IRD')
-plotData('cObserver')
+#plotData('cObserver')
 
 #CustomRun()
+
