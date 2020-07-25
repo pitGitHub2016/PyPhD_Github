@@ -21,6 +21,7 @@ from hurst import compute_Hc
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import LSTM
+from keras.layers import SimpleRNN
 from keras.layers import Dropout
 from keras.callbacks import History
 from scipy.spatial.distance import squareform
@@ -35,7 +36,6 @@ import pydiffmap
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 warnings.filterwarnings('ignore')
-
 
 class Slider:
 
@@ -335,6 +335,7 @@ class Slider:
 
         sns.set(font_scale=0.5)
         sns.heatmap(df.corr())
+        plt.legend(bbox_to_anchor=(1.01, 1), loc='upper left', borderaxespad=0.)
         plt.show()
 
     def RV(df):
@@ -817,7 +818,7 @@ class Slider:
             Dates = df.index
 
             if 'nD' not in kwargs:
-                nD = 2
+                nD = len(df.columns)
             else:
                 nD = kwargs['nD']
 
@@ -827,7 +828,7 @@ class Slider:
             # Separating out the target
             # y = df.loc[:, ['target']].values
             # Standardizing the features
-            x = StandardScaler().fit_transform(x)
+            x = MinMaxScaler().fit_transform(x)
 
             pca = PCA(n_components=nD)
             principalComponents = pca.fit_transform(x)
@@ -836,8 +837,13 @@ class Slider:
             principalDf['Date'] = Dates
 
             principalDf = principalDf.set_index('Date', drop=True)
+            principalDf.columns = ['y' + str(i) for i in range(len(principalDf.columns))]
 
-            return principalDf
+            dfX = pd.DataFrame(x, index=df.index, columns=df.columns)
+            dfX.plot()
+            plt.show()
+
+            return [dfX, principalDf]
 
         def gDmaps(df, **kwargs):
 
@@ -1022,7 +1028,7 @@ class Slider:
             cObserverList = []
             # st = 50; pcaN = 5; eigsPC = [0];
             for i in range(st, len(df0) + 1):
-                #try:
+                # try:
 
                 print("Step:", i, " of ", len(df0) + 1)
                 if RollMode == 'RollWindow':
@@ -1046,7 +1052,7 @@ class Slider:
                     sigmaList.append(list(pca.explained_variance_ratio_))
                     c = 0
                     for eig in eigsPC:
-                        #print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
+                        # print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
                         Comps[eig].append(list(pca.components_[eig]))
                         c += 1
 
@@ -1064,7 +1070,8 @@ class Slider:
                             linear_model.LinearRegression(normalize=True).fit(df, dMapsOut[0].iloc[:, gl]).coef_)
 
                 elif manifoldIn == 'LLE':
-                    lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections, method=LLE_Method, n_jobs=-1)
+                    lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
+                                                          method=LLE_Method, n_jobs=-1)
                     X_lle = lle.fit_transform(x)  # ; print(X_lle.shape)
                     lambdasList.append(1)
                     sigmaList.append(1)
@@ -1074,22 +1081,23 @@ class Slider:
                         Comps[c].append(list(X_lle[:, eig]))
                         c += 1
 
-                #except Exception as e:
+                # except Exception as e:
                 #    print(e)
                 #    for c in len(eigsPC):
                 #        Comps[c].append(list(np.zeros(len(df0.columns), 1)))
                 #        eigCoeffs[c].append(list(np.zeros(len(df0.columns), 1)))
 
             sigmaDF = pd.concat([pd.DataFrame(np.zeros((st - 1, 1))), pd.DataFrame(sigmaList)], axis=0,
-                                ignore_index=True)
+                                ignore_index=True).fillna(0)
             sigmaDF.index = df0.index
             try:
                 sigmaDF.columns = ['sigma']
             except Exception as e:
                 print(e)
 
-            lambdasDF0 = pd.DataFrame(lambdasList)
-            lambdasDF = pd.concat([pd.DataFrame(np.zeros((st - 1, lambdasDF0.shape[1]))), lambdasDF0], axis=0, ignore_index=True)
+            lambdasDF = pd.concat(
+                [pd.DataFrame(np.zeros((st - 1, pd.DataFrame(lambdasList).shape[1]))), pd.DataFrame(lambdasList)],
+                axis=0, ignore_index=True).fillna(0)
             lambdasDF.index = df0.index
 
             if contractiveObserver == 0:
@@ -1183,7 +1191,8 @@ class Slider:
             if SingleSample:
                 dataVals = sc.fit_transform(dataVals.reshape(-1, 1))
                 FeatSpaceDims = 1
-                outNaming = dataset_all.name
+                outNaming = [dataset_all.name]
+                print(outNaming)
             else:
                 dataVals = sc.fit_transform(dataVals)
                 FeatSpaceDims = len(dataset_all.columns)
@@ -1217,33 +1226,64 @@ class Slider:
                   ", TrainEnd=", TrainEnd, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape,
                   ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
 
-            ####################################### Initialising the RNN #############################################
+            ####################################### Initialising the LSTM #############################################
             regressor = Sequential()
             # Adding the first LSTM layer and some Dropout regularisation
-            for layer in range(len(params["LSTMmedSpecs"])):
-                if params["LSTMmedSpecs"][layer]["units"] == 'xShape1':
+            for layer in range(len(params["medSpecs"])):
+                if params["medSpecs"][layer]["units"] == 'xShape1':
                     unitsIn = X_train.shape[1]
-                    regressor.add(LSTM(units=unitsIn, return_sequences=params["LSTMmedSpecs"][layer]["RsF"], input_shape=(X_train.shape[1], FeatSpaceDims)))
-                    regressor.add(Dropout(params["LSTMmedSpecs"][layer]["Dropout"]))
+                    if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                        regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                           unit_forget_bias=True, bias_initializer='ones',
+                                           input_shape=(X_train.shape[1], FeatSpaceDims)))
+                    elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                        regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                                unit_forget_bias=True, bias_initializer='ones',
+                                                input_shape=(X_train.shape[1], FeatSpaceDims)))
+                    regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
                 else:
-                    unitsIn = params["LSTMmedSpecs"][layer]["units"]
-                    regressor.add(LSTM(units=unitsIn, return_sequences=params["LSTMmedSpecs"][layer]["RsF"]))
-                    regressor.add(Dropout(params["LSTMmedSpecs"][layer]["Dropout"]))
+                    unitsIn = params["medSpecs"][layer]["units"]
+                    if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                        regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                    elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                        regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                    regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
             # Adding the output layer
             regressor.add(Dense(units=y_train.shape[1]))
 
             ######################################## Compiling the RNN ###############################################
             regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
             # Fitting the RNN to the Training set
-            regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"], callbacks=[history])
+            regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
+                          callbacks=[history])
 
             ########################## Get Predictions for Static or Online Learning #################################
             predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
 
             scoreList = []
             if params["LearningMode"] == 'static':
-
                 predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
+                scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
+                scoreDF.plot()
+                plt.show()
+
+            elif params["LearningMode"] == 'static_MultiStep_Ahead':
+
+                predicted_price_test = []  #
+                print(1, ", X_test[0]=", X_test[0],
+                      ", reShaped_X_test[0]=", np.reshape(X_test[0][0], (1, 1, 1)),
+                      ", UnConvertedPrediction=",
+                      regressor.predict(np.reshape(X_test[0], (1, X_test.shape[1], FeatSpaceDims))))
+
+                predicted_price_test.append(
+                    regressor.predict(np.reshape(X_test[0], (1, 1, 1))))
+                print("Predicting ", len(df_real_price_test) - 1, " steps ahead...")
+                for obs in range(params["static_MultiStep_Ahead_Horizon"]):
+                    predicted_price_test.append(
+                        regressor.predict(np.reshape(predicted_price_test[-1], (1, 1, 1)))[0])
+                print(predicted_price_test)
+                predicted_price_test = sc.inverse_transform(predicted_price_test)
+                print("predicted_price_test : ", predicted_price_test)
                 scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
                 scoreDF.plot()
                 plt.show()
@@ -1273,7 +1313,10 @@ class Slider:
 
                     indYtest = np.reshape(y_test[i], (1, FeatSpaceDims))
 
-                    sc.partial_fit(dataVals[i + TrainEnd])
+                    try:
+                        sc.partial_fit(dataVals[i + TrainEnd])
+                    except Exception as e:
+                        print(e)
                     regressor.train_on_batch(indXtest, indYtest)
                     scores = regressor.evaluate(indXtest, indYtest, verbose=0)
                     scoreList.append(scores)
@@ -1283,24 +1326,22 @@ class Slider:
             df_predicted_price_train = pd.DataFrame(predicted_price_train, index=df_real_price_train.index,
                                                     columns=['PredictedPrice_Train_' + str(c) for c in
                                                              df_real_price_train.columns])
-            df_predicted_price_test = pd.DataFrame(predicted_price_test, index=df_real_price_test.index,
+            df_predicted_price_test = pd.DataFrame(predicted_price_test,
                                                    columns=['PredictedPrice_Test_' + str(c) for c in
                                                             df_real_price_test.columns])
 
-            ax = df_real_price_train.plot()
-            df_predicted_price_train.plot(ax=ax)
-            plt.show()
-
-            ax1 = df_real_price_test.plot()
-            df_predicted_price_test.plot(ax=ax1)
-            plt.show()
+            if len(df_predicted_price_test) <= len(df_real_price_test):
+                df_predicted_price_test.index = df_real_price_test.index
 
             if 'writeLearnStructure' in params:
                 xList = []
                 for bX in X:
                     xList.append(pd.DataFrame(bX).T.astype(str).agg('-'.join, axis=1).values)
-                dataDF = pd.concat([dataset_all, pd.DataFrame(dataVals, index=dataset_all.index), pd.DataFrame(xList, index=idx), pd.DataFrame(y, index=idx),
-                                    df_real_price_train, df_real_price_test, df_predicted_price_train, df_predicted_price_test], axis=1)
+                dataDF = pd.concat(
+                    [dataset_all, pd.DataFrame(dataVals, index=dataset_all.index), pd.DataFrame(xList, index=idx),
+                     pd.DataFrame(y, index=idx),
+                     df_real_price_train, df_real_price_test, df_predicted_price_train, df_predicted_price_test],
+                    axis=1)
                 dataDF.to_csv('LearnStructure.csv')
 
             return [df_real_price_test, df_predicted_price_test, scoreDF, regressor, history]
