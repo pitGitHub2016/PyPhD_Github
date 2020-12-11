@@ -14,6 +14,8 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_digits
+from sklearn.decomposition import FastICA
 from statsmodels.tsa.arima_model import ARIMA
 from statsmodels.tsa.stattools import adfuller
 from sklearn import linear_model
@@ -493,6 +495,26 @@ class Slider:
         confDF = pd.DataFrame(confList, index=Asset[start:].index, columns=[AssetName+'_conf1', AssetName+'_conf2'])
 
         return [PredictionsDF, stderrDF, errDF, confDF]
+
+    def ARIMA_Walk(df, start, orderIn):
+        X = df.values
+        size = int(len(X) * start)
+        train, test = X[0:size], X[size:len(X)]
+        history = [x for x in train]
+        predictions = list()
+        for t in tqdm(range(len(test))):
+            model = ARIMA(history, order=orderIn)
+            model_fit = model.fit(disp=0)
+            output = model_fit.forecast()
+            yhat = output[0]
+            predictions.append(yhat)
+            obs = test[t]
+            history.append(obs)
+
+        testDF = pd.DataFrame(obs, index=df.index[size:len(X)])
+        PredictionsDF = pd.DataFrame(predictions, index=df.index[size:len(X)])
+
+        return [testDF, PredictionsDF]
 
     def ARIMA_static(datalist):
         Asset = datalist[0]; start = datalist[1]; opt = datalist[3]; orderList = datalist[4]
@@ -1056,7 +1078,19 @@ class Slider:
                         Comps[eig].append(list(pca.components_[eig]))
                         c += 1
 
-                elif manifoldIn == 'DMAPS':
+                elif manifoldIn == 'ICA':
+                    X, _ = load_digits(return_X_y=True)
+                    ica = FastICA(n_components=NumProjections,  random_state=0)
+                    X_ica = ica.fit_transform(X)
+                    lambdasList.append(1)
+                    sigmaList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        print(list(ica.components_[eig]))
+                        Comps[eig].append(list(ica.components_[eig]))
+                        c += 1
+
+                elif manifoldIn == 'DMAP':
                     dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections, coFlag=contractiveObserver,
                                                 sigma=sigma)  # [eigOut, sigmaDMAPS, s[:nD], glA]
                     eigDf.append(dMapsOut[0].iloc[-1, :])
@@ -1118,7 +1152,30 @@ class Slider:
 
             else:
 
-                return [df0, pd.DataFrame(eigDf), pd.DataFrame(cObserverList), sigmaDF, lambdasDF, Comps, eigCoeffs]
+                principalCompsDf = [[] for j in range(len(Comps))]
+                principaleigCoeffsDf = [[] for j in range(len(Comps))]
+                exPostProjectionsComp = [[] for j in range(len(Comps))]
+                exPostProjectionseigCoeffs = [[] for j in range(len(Comps))]
+                for k in range(len(Comps)):
+                    # principalCompsDf[k] = pd.DataFrame(pcaComps[k], columns=df0.columns, index=df1.index)
+
+                    principalCompsDf[k] = pd.concat(
+                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                         pd.DataFrame(Comps[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principalCompsDf[k].index = df0.index
+                    principalCompsDf[k] = principalCompsDf[k].fillna(0).replace(0, np.nan).ffill()
+
+                    principaleigCoeffsDf[k] = pd.concat(
+                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                         pd.DataFrame(eigCoeffs[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principaleigCoeffsDf[k].index = df0.index
+                    principaleigCoeffsDf[k] = principaleigCoeffsDf[k].fillna(0).replace(0, np.nan).ffill()
+
+                    exPostProjectionsComp[k] = df0 * Slider.S(principalCompsDf[k])
+                    exPostProjectionseigCoeffs[k] = df0 * Slider.S(principaleigCoeffsDf[k])
+
+                return [df0, principalCompsDf, principaleigCoeffsDf, exPostProjectionsComp, exPostProjectionseigCoeffs,
+                        sigmaDF, lambdasDF]
 
         def gANN(X_train, X_test, y_train, params):
             epochsIn = params[0]
