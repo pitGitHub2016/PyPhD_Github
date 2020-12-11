@@ -501,7 +501,7 @@ class Slider:
         size = int(len(X) * start)
         train, test = X[0:size], X[size:len(X)]
         history = [x for x in train]
-        predictions = list()
+        predictions = [0] * len(history)
         for t in tqdm(range(len(test))):
             model = ARIMA(history, order=orderIn)
             model_fit = model.fit(disp=0)
@@ -511,8 +511,8 @@ class Slider:
             obs = test[t]
             history.append(obs)
 
-        testDF = pd.DataFrame(obs, index=df.index[size:len(X)])
-        PredictionsDF = pd.DataFrame(predictions, index=df.index[size:len(X)])
+        testDF = pd.DataFrame(history, index=df.index)
+        PredictionsDF = pd.DataFrame(predictions, index=df.index)
 
         return [testDF, PredictionsDF]
 
