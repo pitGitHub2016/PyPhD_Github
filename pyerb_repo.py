@@ -704,7 +704,7 @@ class AI:
                 principalCompsDf[k].index = df0.index
                 principalCompsDf[k] = principalCompsDf[k].fillna(0).replace(0, np.nan).ffill()
 
-                exPostProjections[k] = ProjectHereDF * pyerb.S(principalCompsDf[k])
+                exPostProjections[k] = df0 * pyerb.S(principalCompsDf[k])
 
             return [df0, principalCompsDf, exPostProjections, sigmaDF, lambdasDF]
 
