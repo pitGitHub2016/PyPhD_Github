@@ -64,7 +64,16 @@ class Slider:
             nperiods = kwargs['nperiods']
         else:
             nperiods = 1
-        return Slider.d(np.log10(df), nperiods=nperiods).fillna(0)
+        if 'fillna' in kwargs:
+            fillna = kwargs['fillna']
+        else:
+            fillna = "yes"
+
+        out = Slider.d(np.log10(df), nperiods=nperiods)
+
+        if fillna == "yes":
+            out = out.fillna(0)
+        return out
 
     def r(df, **kwargs):
         if 'calcMethod' in kwargs:
@@ -75,14 +84,22 @@ class Slider:
             nperiods = kwargs['nperiods']
         else:
             nperiods = 1
+        if 'fillna' in kwargs:
+            fillna = kwargs['fillna']
+        else:
+            fillna = "yes"
 
         if calcMethod == 'Continuous':
-            return pyerb.d(np.log10(df), nperiods=nperiods).fillna(0)
+            out = Slider.d(np.log10(df), nperiods=nperiods)
         elif calcMethod == 'Discrete':
-            return df.pct_change(nperiods).fillna(0)
+            out = df.pct_change(nperiods)
         if calcMethod == 'Linear':
-            diffDF = pyerb.d(df, nperiods=nperiods)
-            return diffDF.divide(df.iloc[0]).fillna(0)
+            diffDF = Slider.d(df, nperiods=nperiods)
+            out = diffDF.divide(df.iloc[0])
+
+        if fillna == "yes":
+            out = out.fillna(0)
+        return out
 
     def sign(df):
         df[df > 0] = 1
