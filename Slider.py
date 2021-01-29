@@ -69,7 +69,7 @@ class Slider:
         else:
             fillna = "yes"
 
-        out = Slider.d(np.log10(df), nperiods=nperiods)
+        out = Slider.d(np.log(df), nperiods=nperiods)
 
         if fillna == "yes":
             out = out.fillna(0)
