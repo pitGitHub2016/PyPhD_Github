@@ -997,15 +997,13 @@ class Slider:
 
         def gDmaps(df, **kwargs):
 
-            Dates = df.index
-
             if 'nD' not in kwargs:
                 nD = 2
             else:
                 nD = kwargs['nD']
 
             if 'sigma' not in kwargs:
-                sigma = 'std'
+                sigma = 'bgh'
             else:
                 sigma = kwargs['sigma']
 
@@ -1038,10 +1036,8 @@ class Slider:
             else:
                 sigmaDMAPS = sigma
 
-            # K = np.exp(-pd.DataFrame(Ddists) / (2 * sigmaDMAPS ** 2))
             K = np.exp(-pd.DataFrame(Ddists) / (sigmaDMAPS))
-            #a1 = np.sqrt(K.sum())
-            a1 = K.sum()
+            a1 = np.sqrt(K.sum())
             A = K / (a1.dot(a1))
             threshold = 5E-60
             sparseK = pd.DataFrame(sparse.csr_matrix((A * (A > threshold).astype(int)).as_matrix()).todense())
@@ -1065,6 +1061,7 @@ class Slider:
 
             #print(df)
             #print(eigOut)
+            #time.sleep(300)
 
             'Building Contractive Observer Data'
             if coFlag == 1:
@@ -1104,13 +1101,10 @@ class Slider:
 
                 cObserver = (eq0 + eq1).fillna(0).iloc[-1]
 
-            else:
-                lMat = pd.DataFrame([])
-                dfPsiT1 = pd.DataFrame([])
-                glA = eigOut
-                cObserver = df.iloc[-1]
+                return [eigOut, sigmaDMAPS, s[:nD], glA, cObserver]
 
-            return [eigOut, sigmaDMAPS, s[:nD], glA, cObserver]
+            else:
+                return [eigOut, s[:nD], sigmaDMAPS]
 
         def pyDmapsRun(df, **kwargs):
             if 'nD' not in kwargs:
@@ -1154,8 +1148,8 @@ class Slider:
 
             Loadings = [[] for j in range(len(eigsPC))]
             lambdasList = []
+            sigmaList = []
             for i in range(st, len(df0) + 1):
-                # try:
 
                 print("Step:", i, " of ", len(df0) + 1)
                 if RollMode == 'RollWindow':
@@ -1182,33 +1176,6 @@ class Slider:
                         Loadings[c].append(list(pca.components_[eig]))
                         c += 1
 
-                elif manifoldIn == 'ICA':
-                    X, _ = load_digits(return_X_y=True)
-                    ica = FastICA(n_components=NumProjections,  random_state=0)
-                    X_ica = ica.fit_transform(X)
-                    lambdasList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        print(list(ica.components_[eig]))
-                        Loadings[c].append(list(ica.components_[eig]))
-                        c += 1
-
-                elif manifoldIn == 'DMAP_gDmapsRun':
-                    dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections)
-                    lambdasList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Loadings[c].append(dMapsOut[eig])
-                        c += 1
-
-                elif manifoldIn == 'DMAP_pyDmapsRun':
-                    dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
-                    lambdasList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Loadings[c].append(dMapsOut[eig])
-                        c += 1
-
                 elif manifoldIn == 'LLE':
                     lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
                                                           method=LLE_Method, n_jobs=-1)
@@ -1219,11 +1186,23 @@ class Slider:
                         Loadings[c].append(list(X_lle[:, eig]))
                         c += 1
 
-                # except Exception as e:
-                #    print(e)
-                #    for c in len(eigsPC):
-                #        Comps[c].append(list(np.zeros(len(df0.columns), 1)))
-                #        eigCoeffs[c].append(list(np.zeros(len(df0.columns), 1)))
+                elif manifoldIn == 'DMAP_gDmapsRun':
+                    dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections)
+                    dmapsEigsOut = dMapsOut[0]
+                    lambdasList.append(list(dMapsOut[1]))
+                    sigmaList.append(dMapsOut[2])
+                    c = 0
+                    for eig in eigsPC:
+                        Loadings[c].append(dmapsEigsOut.iloc[:,eig])
+                        c += 1
+
+                elif manifoldIn == 'DMAP_pyDmapsRun':
+                    dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
+                    lambdasList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        Loadings[c].append(dMapsOut[eig])
+                        c += 1
 
             lambdasListDF = pd.DataFrame(lambdasList)
             lambdasDF = pd.concat(
@@ -1232,15 +1211,22 @@ class Slider:
             lambdasDF.index = df0.index
 
             principalCompsDf = [[] for j in range(len(Loadings))]
-            exPostProjectionsComp = [[] for j in range(len(Loadings))]
             for k in range(len(Loadings)):
                 principalCompsDf[k] = pd.concat(
                     [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
                      pd.DataFrame(Loadings[k], columns=df0.columns)], axis=0, ignore_index=True)
                 principalCompsDf[k].index = df0.index
-                principalCompsDf[k] = principalCompsDf[k].fillna(0).replace(0, np.nan).ffill()
+                principalCompsDf[k] = principalCompsDf[k].ffill()
 
-            return [df0, principalCompsDf, exPostProjectionsComp, lambdasDF]
+            if manifoldIn in ['PCA', 'LLE']:
+                return [df0, principalCompsDf, lambdasDF]
+            elif manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
+                sigmaListDF = pd.DataFrame(sigmaList)
+                sigmaDF = pd.concat(
+                    [pd.DataFrame(np.zeros((st - 1, sigmaListDF.shape[1])), columns=sigmaListDF.columns),  sigmaListDF],
+                    axis=0, ignore_index=True).fillna(0)
+                sigmaDF.index = df0.index
+                return [df0, principalCompsDf, lambdasDF, sigmaDF]
 
         def gANN(X_train, X_test, y_train, params):
             epochsIn = params[0]
