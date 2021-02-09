@@ -53,8 +53,17 @@ class Slider:
     def E(df):
         return df.mean(axis=1)
 
-    def cs(df):
-        return df.cumsum()
+    def cs(df, **kwargs):
+        if 'mode' in kwargs:
+            mode = kwargs['mode']
+        else:
+            mode = 'expAdjustment'
+
+        if mode == 'expAdjustment':
+            out = np.exp(df.cumsum())
+        elif mode == 'classic':
+            out = df.cumsum()
+        return out
 
     def rs(df):
         return df.sum(axis=1)
@@ -90,7 +99,7 @@ class Slider:
             fillna = "yes"
 
         if calcMethod == 'Continuous':
-            out = Slider.d(np.log10(df), nperiods=nperiods)
+            out = Slider.d(np.log(df), nperiods=nperiods)
         elif calcMethod == 'Discrete':
             out = df.pct_change(nperiods)
         if calcMethod == 'Linear':
@@ -119,15 +128,8 @@ class Slider:
         return out
 
     def fd(df, **kwargs):
-        if 'mode' in kwargs:
-            mode = kwargs['mode']
-        else:
-            mode = 0
-        if mode == 1:
-            df = df.fillna(df.mean())
-        elif mode == 0:
-            df = df.fillna(0)
-        df = df.replace([np.inf, -np.inf], 0)
+        out = df.replace([np.inf, -np.inf], 0)
+        return out
 
     def svd_flip(u, v, u_based_decision=True):
         """Sign correction to ensure deterministic output from SVD.
@@ -165,7 +167,28 @@ class Slider:
             v *= signs[:, np.newaxis]
         return u, v
 
+    def EW(df, **kwargs):
+        if 'mode' in kwargs:
+            mode = kwargs['mode']
+        else:
+            mode = 'expAdjustment'
+
+        if mode == 'expAdjustment':
+            out = np.log(Slider.E(np.exp(df)))
+        elif mode == 'classic':
+            out = Slider.E(df)
+        return out
+
     ########################
+
+    def Paperize(df):
+        outDF = df.reset_index()
+        outDF['PaperText'] = ""
+        for x in outDF.columns:
+            if x != "PaperText":
+                outDF['PaperText'] += outDF[x].astype(str) + " & "
+        outDF['PaperText'] += "\\\\"
+        return outDF
 
     def cross_product(u, v):
         dim = len(u)
@@ -434,7 +457,11 @@ class Slider:
                 PrZScore = (PrRatio - emaPrRatio) / volPrRatio
                 lDF.append(PrZScore)
             df0 = pd.concat(lDF, axis=1, keys=cc)
-        elif mode == 'HedgeRatio':
+        elif mode == 'HedgeRatioPair':
+            df0 = pd.concat([df[c[0]] - (Slider.S(df[c[0]].expanding(n).corr(df[c[1]]) * (
+                        Slider.expander(df[c[0]], np.std, n) / Slider.expander(df[c[1]], np.std, n)), nperiods=2)
+                                         * df[c[1]]) for c in cc], axis=1, keys=cc)
+        elif mode == 'HedgeRatioBasket':
             df0 = pd.concat([df[c[0]] - (Slider.S(df[c[0]].expanding(n).corr(df[c[1]]) * (
                         Slider.expander(df[c[0]], np.std, n) / Slider.expander(df[c[1]], np.std, n)), nperiods=2)
                                          * df[c[1]]) for c in cc], axis=1, keys=cc)
@@ -1096,8 +1123,6 @@ class Slider:
             dmapObj = pydiffmap.diffusion_map.DiffusionMap.from_sklearn(n_evecs=nD, epsilon='bgh')
 
             dmapOut = dmapObj.fit_transform(X).T
-            #print(dmapOut.shape)
-            #time.sleep(20)
 
             return dmapOut
 
@@ -1168,7 +1193,15 @@ class Slider:
                         Loadings[c].append(list(ica.components_[eig]))
                         c += 1
 
-                elif manifoldIn == 'DMAP':
+                elif manifoldIn == 'DMAP_gDmapsRun':
+                    dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections)
+                    lambdasList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        Loadings[c].append(dMapsOut[eig])
+                        c += 1
+
+                elif manifoldIn == 'DMAP_pyDmapsRun':
                     dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
                     lambdasList.append(1)
                     c = 0
@@ -1206,8 +1239,6 @@ class Slider:
                      pd.DataFrame(Loadings[k], columns=df0.columns)], axis=0, ignore_index=True)
                 principalCompsDf[k].index = df0.index
                 principalCompsDf[k] = principalCompsDf[k].fillna(0).replace(0, np.nan).ffill()
-
-                exPostProjectionsComp[k] = df0 * Slider.S(principalCompsDf[k])
 
             return [df0, principalCompsDf, exPostProjectionsComp, lambdasDF]
 
@@ -1312,10 +1343,10 @@ class Slider:
             df_real_price_test = pd.DataFrame(sc.inverse_transform(y_test), index=idx[TrainEnd:],
                                               columns=outNaming)
 
-            print("len(idx)=", len(idx), ", idx.tail[:10]=", idx[:10], ", X.shape=", X.shape, ", TrainWindow=",
-                  params["TrainWindow"],
-                  ", TrainEnd=", TrainEnd, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape,
-                  ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
+            #print("len(idx)=", len(idx), ", idx.tail[:10]=", idx[:10], ", X.shape=", X.shape, ", TrainWindow=",
+            #      params["TrainWindow"],
+            #      ", TrainEnd=", TrainEnd, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape,
+            #      ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
 
             ####################################### Initialising the LSTM #############################################
             regressor = Sequential()
@@ -1345,7 +1376,7 @@ class Slider:
             ######################################## Compiling the RNN ###############################################
             regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
             # Fitting the RNN to the Training set
-            regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
+            regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"], verbose=0,
                           callbacks=[history])
 
             ########################## Get Predictions for Static or Online Learning #################################
@@ -1361,20 +1392,20 @@ class Slider:
             elif params["LearningMode"] == 'static_MultiStep_Ahead':
 
                 predicted_price_test = []  #
-                print(1, ", X_test[0]=", X_test[0],
-                      ", reShaped_X_test[0]=", np.reshape(X_test[0][0], (1, 1, 1)),
-                      ", UnConvertedPrediction=",
-                      regressor.predict(np.reshape(X_test[0], (1, X_test.shape[1], FeatSpaceDims))))
+                #print(1, ", X_test[0]=", X_test[0],
+                #      ", reShaped_X_test[0]=", np.reshape(X_test[0][0], (1, 1, 1)),
+                #      ", UnConvertedPrediction=",
+                #      regressor.predict(np.reshape(X_test[0], (1, X_test.shape[1], FeatSpaceDims))))
 
                 predicted_price_test.append(
                     regressor.predict(np.reshape(X_test[0], (1, 1, 1))))
-                print("Predicting ", len(df_real_price_test) - 1, " steps ahead...")
+                #print("Predicting ", len(df_real_price_test) - 1, " steps ahead...")
                 for obs in range(params["static_MultiStep_Ahead_Horizon"]):
                     predicted_price_test.append(
                         regressor.predict(np.reshape(predicted_price_test[-1], (1, 1, 1)))[0])
-                print(predicted_price_test)
+                #print(predicted_price_test)
                 predicted_price_test = sc.inverse_transform(predicted_price_test)
-                print("predicted_price_test : ", predicted_price_test)
+                #print("predicted_price_test : ", predicted_price_test)
                 scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
                 scoreDF.plot()
                 plt.show()
@@ -1386,19 +1417,19 @@ class Slider:
                 for i in range(len(X_test)):
                     # X_test[i], y_test[i] = np.array(X_test[i]), np.array(y_test[i])
 
-                    print('Calculating: ' + str(round(i / len(X_test) * 100, 2)) + '%')
-                    print("X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
-                    print("X_test[i].shape=", X_test[i].shape, ", y_test[i].shape=", y_test[i].shape)
-                    print("X_test[i]=", X_test[i])
-                    print("y_test[i]=", y_test[i])
+                    #print('Calculating: ' + str(round(i / len(X_test) * 100, 2)) + '%')
+                    #print("X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
+                    #print("X_test[i].shape=", X_test[i].shape, ", y_test[i].shape=", y_test[i].shape)
+                    #print("X_test[i]=", X_test[i])
+                    #print("y_test[i]=", y_test[i])
 
-                    print("(1, X_test[i].shape[0], len(dataset_all.columns)) = ",
-                          (1, X_test[i].shape[0], FeatSpaceDims))
+                    #print("(1, X_test[i].shape[0], len(dataset_all.columns)) = ",
+                    #      (1, X_test[i].shape[0], FeatSpaceDims))
                     indXtest = np.reshape(X_test[i], (1, X_test[i].shape[0], FeatSpaceDims))
                     # print("(X_test[i].shape[0], 1, len(dataset_all.columns)) = ", (X_test[i].shape[0], 1, len(dataset_all.columns)))
                     # indXtest = np.reshape(X_test[i], (X_test[i].shape[0], 1, len(dataset_all.columns)))
 
-                    print("indXest.shape=", indXtest.shape)
+                    #print("indXest.shape=", indXtest.shape)
                     print("predicted_price_test=", sc.inverse_transform(regressor.predict(indXtest))[0])
                     predicted_price_test.append(sc.inverse_transform(regressor.predict(indXtest))[0])
 
@@ -1411,7 +1442,7 @@ class Slider:
                     regressor.train_on_batch(indXtest, indYtest)
                     scores = regressor.evaluate(indXtest, indYtest, verbose=0)
                     scoreList.append(scores)
-                    print(scores)
+                    #print(scores)
                 scoreDF = pd.DataFrame(scoreList)
 
             df_predicted_price_train = pd.DataFrame(predicted_price_train, index=df_real_price_train.index,
