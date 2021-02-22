@@ -2,6 +2,7 @@ import pandas as pd, numpy as np, matplotlib.pyplot as plt, multiprocessing
 import math, numpy.linalg as la, sqlite3
 from pydiffmap import kernel
 import time
+import matplotlib as mpl
 from math import acos
 from math import sqrt
 from math import pi
@@ -11,6 +12,7 @@ from itertools import combinations
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.linear_model import LinearRegression
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
@@ -18,7 +20,7 @@ from sklearn.datasets import load_digits
 from sklearn.decomposition import FastICA
 from statsmodels.tsa.arima_model import ARIMA
 from statsmodels.tsa.stattools import adfuller
-from sklearn import linear_model
+from scipy.stats import skew, kurtosis
 from hurst import compute_Hc
 from keras.models import Sequential
 from keras.layers import Dense
@@ -48,25 +50,8 @@ class Slider:
             nperiods = kwargs['nperiods']
         else:
             nperiods = 1
-        return df.diff(nperiods)
-
-    def E(df):
-        return df.mean(axis=1)
-
-    def cs(df, **kwargs):
-        if 'mode' in kwargs:
-            mode = kwargs['mode']
-        else:
-            mode = 'expAdjustment'
-
-        if mode == 'expAdjustment':
-            out = np.exp(df.cumsum())
-        elif mode == 'classic':
-            out = df.cumsum()
+        out = df.diff(nperiods)
         return out
-
-    def rs(df):
-        return df.sum(axis=1)
 
     def dlog(df, **kwargs):
         if 'nperiods' in kwargs:
@@ -110,11 +95,36 @@ class Slider:
             out = out.fillna(0)
         return out
 
+    def E(df):
+        out = df.mean(axis=1)
+        return out
+
+    def rs(df):
+        out = df.sum(axis=1)
+        return out
+
+    def ew(df):
+        out = np.log(Slider.E(np.exp(df)))
+        return out
+
+    def cs(df):
+        out = df.cumsum()
+        return out
+
+    def ecs(df):
+        out = np.exp(df.cumsum())
+        return out
+
+    def pb(df):
+        out = np.log(Slider.rs(np.exp(df)))
+        return out
+
     def sign(df):
-        df[df > 0] = 1
-        df[df < 0] = -1
-        df[df == 0] = 0
-        return df
+        #df[df > 0] = 1
+        #df[df < 0] = -1
+        #df[df == 0] = 0
+        out = np.sign(df)
+        return out
 
     def S(df, **kwargs):
 
@@ -127,7 +137,7 @@ class Slider:
 
         return out
 
-    def fd(df, **kwargs):
+    def fd(df):
         out = df.replace([np.inf, -np.inf], 0)
         return out
 
@@ -167,16 +177,15 @@ class Slider:
             v *= signs[:, np.newaxis]
         return u, v
 
-    def EW(df, **kwargs):
+    def rowStoch(df, **kwargs):
         if 'mode' in kwargs:
             mode = kwargs['mode']
         else:
-            mode = 'expAdjustment'
-
-        if mode == 'expAdjustment':
-            out = np.log(Slider.E(np.exp(df)))
-        elif mode == 'classic':
-            out = Slider.E(df)
+            mode = 'classic'
+        if mode == 'classic':
+            out = df.div(df.sum(axis=1), axis=0)
+        elif mode == 'abs':
+            out = df.div(df.abs().sum(axis=1), axis=0)
         return out
 
     ########################
@@ -253,9 +262,52 @@ class Slider:
             hurstMat.append(H)
         return hurstMat
 
+    def rollStatistics(df, method, **kwargs):
+        if 'nIn' in kwargs:
+            nIn = kwargs['nIn']
+        else:
+            nIn = 25
+        if 'alpha' in kwargs:
+            alpha = kwargs['alpha']
+        else:
+            alpha = 0.01
+
+        if method == 'Vol':
+            rollStatisticDF = Slider.roller(df, np.std, nIn)
+        elif method == 'Skewness':
+            rollStatisticDF = Slider.roller(df, skew, nIn)
+        elif method == 'Kurtosis':
+            rollStatisticDF = Slider.roller(df, kurtosis, nIn)
+        elif method == 'VAR':
+            rollStatisticDF = norm.ppf(1 - alpha) * Slider.rollVol(df, nIn=nIn) - Slider.ema(df, nperiods=nIn)
+        elif method == 'CVAR':
+            rollStatisticDF = alpha ** -1 * norm.pdf(norm.ppf(alpha)) * Slider.rollVol(df, nIn=nIn) - Slider.ema(df,
+                                                                                                               nperiods=nIn)
+        elif method == 'Sharpe':
+            rollStatisticDF = Slider.roller(df, Slider.sharpe, nIn)
+
+        return rollStatisticDF
+
     def roller(df, func, n):
         ROLL = df.rolling(window=n, center=False).apply(lambda x: func(x), raw=True)
         return ROLL
+
+    def gapify(df, **kwargs):
+        if 'steps' in kwargs:
+            steps = kwargs['steps']
+        else:
+            steps = 5
+
+        gapifiedDF = pd.DataFrame(np.nan, index=df.index, columns=df.columns)
+        gapifiedDF.iloc[::steps, :] = df.iloc[::steps, :]
+
+        gapifiedDF = gapifiedDF.ffill()
+
+        return gapifiedDF
+
+    def expander(df, func, n):
+        EXPAND = df.expanding(min_periods=n, center=False).apply(lambda x: func(x))
+        return EXPAND
 
     def rollerVol(df, rvn):
         outDF = Slider.roller(df, np.std, rvn)
@@ -273,7 +325,8 @@ class Slider:
             T = kwargs['T']
         else:
             T = 14
-        return np.sqrt(L / T) * Slider.roller(df, Slider.sharpe, window)
+        out = np.sqrt(L / T) * Slider.roller(df, Slider.sharpe, window)
+        return out
 
     def expander(df, func, n):
         EXPAND = df.expanding(min_periods=n, center=False).apply(lambda x: func(x))
@@ -529,6 +582,45 @@ class Slider:
                 adfData.append()
             except Exception as e:
                 print(e)
+
+    def plotCumulativeReturns(dfList, yLabelIn, **kwargs):
+
+        if len(dfList) == 1:
+            df = dfList[0]-1
+            df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+            fig, ax = plt.subplots()
+            mpl.pyplot.locator_params(axis='x', nbins=35)
+            (df * 100).plot(ax=ax)
+            for label in ax.get_xticklabels():
+                label.set_fontsize(25)
+                label.set_ha("right")
+                label.set_rotation(45)
+            ax.set_xlim(xmin=0.0, xmax=len(df) + 1)
+            mpl.pyplot.ylabel(yLabelIn[0], fontsize=30)
+            plt.legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'size': 24})
+            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0, wspace=0)
+            plt.margins(0, 0)
+            plt.show()
+        elif len((dfList)) == 2:
+            fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
+            mpl.pyplot.locator_params(axis='x', nbins=35)
+            c=0
+            for df in dfList:
+                df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+                df -= 1
+                (df * 100).plot(ax=ax[c])
+                for label in ax[c].get_xticklabels():
+                    label.set_fontsize(25)
+                    label.set_ha("right")
+                    label.set_rotation(40)
+                ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
+                ax[c].set_ylabel(yLabelIn[c], fontsize=18)
+                ax[c].legend(loc=2,fancybox=True, frameon=True, shadow=True,prop={'weight': 'bold', 'size': 24})
+                c += 1
+            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0, wspace=0)
+            plt.show()
+        else:
+            print("More than 4 dataframes provided! Cant use this function for subplotting them - CUSTOMIZE ...")
 
     'ARIMA Operators'
     'Optimize order based on AIC or BIC fit'
@@ -1116,9 +1208,18 @@ class Slider:
 
             dmapObj = pydiffmap.diffusion_map.DiffusionMap.from_sklearn(n_evecs=nD, epsilon='bgh')
 
-            dmapOut = dmapObj.fit_transform(X).T
+            dmapObj.construct_Lmat(X)
+            sigmaDMAPS = dmapObj.epsilon_fitted
+            TransitionMatrix = pd.DataFrame(dmapObj.kernel_matrix.toarray())
+            U, s, VT = svd(TransitionMatrix)
 
-            return dmapOut
+            try:
+                eigOut = pd.DataFrame(dmapObj.fit_transform(X), columns=[str(x) for x in range(nD)], index=df.index).fillna(0)
+            except:
+                eigOut = pd.DataFrame(np.zeros((len(df.index),nD)), columns=[str(x) for x in range(nD)],
+                                      index=df.index).fillna(0)
+
+            return [eigOut, s[:nD], sigmaDMAPS]
 
         def gRollingManifold(manifoldIn, df0, st, NumProjections, eigsPC, **kwargs):
             if 'RollMode' in kwargs:
@@ -1198,10 +1299,12 @@ class Slider:
 
                 elif manifoldIn == 'DMAP_pyDmapsRun':
                     dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
-                    lambdasList.append(1)
+                    dmapsEigsOut = dMapsOut[0]
+                    lambdasList.append(list(dMapsOut[1]))
+                    sigmaList.append(dMapsOut[2])
                     c = 0
                     for eig in eigsPC:
-                        Loadings[c].append(dMapsOut[eig])
+                        Loadings[c].append(dmapsEigsOut.iloc[:, eig])
                         c += 1
 
             lambdasListDF = pd.DataFrame(lambdasList)
@@ -1226,6 +1329,7 @@ class Slider:
                     [pd.DataFrame(np.zeros((st - 1, sigmaListDF.shape[1])), columns=sigmaListDF.columns),  sigmaListDF],
                     axis=0, ignore_index=True).fillna(0)
                 sigmaDF.index = df0.index
+
                 return [df0, principalCompsDf, lambdasDF, sigmaDF]
 
         def gANN(X_train, X_test, y_train, params):
