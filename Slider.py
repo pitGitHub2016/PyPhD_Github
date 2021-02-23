@@ -596,28 +596,31 @@ class Slider:
                 label.set_ha("right")
                 label.set_rotation(45)
             ax.set_xlim(xmin=0.0, xmax=len(df) + 1)
-            mpl.pyplot.ylabel(yLabelIn[0], fontsize=30)
+            mpl.pyplot.ylabel(yLabelIn[0], fontsize=32)
             plt.legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'size': 24})
             plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0, wspace=0)
             plt.margins(0, 0)
+            plt.grid()
             plt.show()
         elif len((dfList)) == 2:
             fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
             mpl.pyplot.locator_params(axis='x', nbins=35)
+            titleList = ['(a)', '(b)']
             c=0
             for df in dfList:
                 df.index = [x.replace("00:00:00", "").strip() for x in df.index]
                 df -= 1
-                (df * 100).plot(ax=ax[c])
+                (df * 100).plot(ax=ax[c], title= titleList[c])
                 for label in ax[c].get_xticklabels():
                     label.set_fontsize(25)
                     label.set_ha("right")
                     label.set_rotation(40)
                 ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
-                ax[c].set_ylabel(yLabelIn[c], fontsize=18)
-                ax[c].legend(loc=2,fancybox=True, frameon=True, shadow=True,prop={'weight': 'bold', 'size': 24})
+                ax[c].set_ylabel(yLabelIn[c], fontsize=20)
+                ax[c].legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'weight': 'bold', 'size': 24})
+                ax[c].grid()
                 c += 1
-            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0, wspace=0)
+            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0.1, wspace=0)
             plt.show()
         else:
             print("More than 4 dataframes provided! Cant use this function for subplotting them - CUSTOMIZE ...")
@@ -1558,65 +1561,9 @@ class Slider:
 
             return [df_real_price_test, df_predicted_price_test, scoreDF, regressor, history]
 
-    class Models:
+    class Strategies:
 
-        def __init__(self, df, **kwargs):
-            'The initial data input in the Models Class '
-            self.df = df
-
-            'The meta-data on which the model calculates the betting signal matrix : d, dlog, raw data'
-            if 'retmode' in kwargs:
-                self.retmode = kwargs['retmode']
-            else:
-                self.retmode = 2
-
-            if self.retmode == 0:
-                self.ToPnL = Slider.d(self.df)
-            elif self.retmode == 1:
-                self.ToPnL = Slider.dlog(self.df)
-            else:
-                self.ToPnL = self.df
-
-            self.sig = float('nan')
-
-        def ARIMA_signal(self, **kwargs):
-            if 'start' in kwargs:
-                start = kwargs['start']
-            else:
-                start = 0
-            if 'mode' in kwargs:
-                mode = kwargs['mode']
-            else:
-                mode = 'exp'
-            if 'opt' in kwargs:
-                opt = kwargs['opt']
-            else:
-                opt = (1,0,0)
-            if 'multi' in kwargs:
-                multi = kwargs['multi']
-            else:
-                multi = 0
-            if 'indextype' in kwargs:
-                indextype = kwargs['indextype']
-            else:
-                indextype = 0
-            print(multi)
-            self.sig = Slider.sign(Slider.ARIMA_predictions(self.ToPnL, start=start, mode=mode, opt=opt, multi=multi, indextype=indextype)[0] - Slider.S(self.ToPnL))
-            self.ToPnL = self.ToPnL
-            return self
-
-    class BacktestPnL:
-
-        def ModelPnL(model, **kwargs):
-
-            if 'retmode' in kwargs:
-                retmode = kwargs['retmode']
-            else:
-                retmode = 0
-
-            if retmode == 1:
-                #model.ToPnL = Slider.d(model.ToPnL)
-                return model.sig * model.ToPnL.diff()
-            else:
-                return model.sig * model.ToPnL
-
+        def EMA_signal(df, **kwargs):
+            sig = Slider.sign(Slider.ema(df))
+            pnl = df.mul(Slider.S(sig), axis=0)
+            return pnl
