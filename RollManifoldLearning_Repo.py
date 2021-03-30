@@ -22,7 +22,6 @@ conn = sqlite3.connect('FXeodData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
 twList = [25, 100, 150, 250, 'ExpWindow25']
-lagList = [2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]
 
 def DataHandler(mode):
 
@@ -329,7 +328,7 @@ def RiskParity(mode):
         rpRsDF.columns = [str(x)+"_Days" for x in twList]
 
 def RunManifold(argList):
-    df = argList[0]#.iloc[-300:,:]
+    df = argList[0].iloc[-300:,:]
     manifoldIn = argList[1]
     tw = argList[2]
 
@@ -350,9 +349,9 @@ def RunManifold(argList):
 
     else:
         if manifoldIn == 'PCA':
-            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard', RollMode='ExpWindow')
+            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 5, [0,1,2,3,4], Scaler='Standard', RollMode='ExpWindow')
         elif manifoldIn == 'LLE':
-            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 19, range(len(df.columns)-1), LLE_n_neighbors=5, ProjectionMode='Transpose', RollMode='ExpWindow')
+            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, ProjectionMode='Transpose', RollMode='ExpWindow')
 
         out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), conn, if_exists='replace')
         principalCompsDfList = out[1]
@@ -375,75 +374,76 @@ def RunManifoldLearningOnFXPairs():
     p.close()
     p.join()
 
-def ProjectionsPlots(manifoldIn, mode):
+def ProjectionsPlots(manifoldIn):
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
+    rsProjectionList = []
+    csrsProjectionList = []
+    for tw in twList:
+        print(manifoldIn + " tw = ", tw)
+        list = []
+        for c in [0,1,2,3,4]:
+            try:
+                medDf = df * sl.S(pd.read_sql('SELECT * FROM ' + manifoldIn + '_principalCompsDf_tw_'+str(tw) + "_" + str(c), conn).set_index('Dates', drop=True))
+                pr = sl.rs(medDf.fillna(0))
+                list.append(pr)
+            except:
+                pass
+        exPostProjections = pd.concat(list, axis=1, ignore_index=True)
+        exPostProjections.columns = ['$\Sigma_{'+manifoldIn+','+str(tw)+',1,t}$','$\Sigma_{'+manifoldIn+','+str(tw)+',2,t}$',
+                                     '$\Sigma_{'+manifoldIn+','+str(tw)+',3,t}$','$\Sigma_{'+manifoldIn+','+str(tw)+',4,t}$',
+                                     '$\Sigma_{'+manifoldIn+','+str(tw)+',5,t}$']
 
-    if mode == 'build':
+        exPostProjections.to_sql(manifoldIn + '_RsExPostProjections_tw_'+str(tw), conn, if_exists='replace')
 
-        projections_subgroup_List = []
-        for tw in twList:
-            print(manifoldIn + " tw = ", tw)
-            list = []
-            for c in range(len(df.columns)):
-                try:
-                    medDf = df * sl.S(pd.read_sql('SELECT * FROM ' + manifoldIn + '_principalCompsDf_tw_'+str(tw) + "_" + str(c), conn).set_index('Dates', drop=True))
-                    pr = sl.rs(medDf.fillna(0))
-                    list.append(pr)
-                except:
-                    pass
-            exPostProjections = pd.concat(list, axis=1, ignore_index=True)
-            if manifoldIn == 'PCA':
-                exPostProjections.columns = [manifoldIn+'_'+str(tw)+'_'+str(x) for x in range(len(df.columns))]
-            elif manifoldIn == 'LLE':
-                exPostProjections.columns = [manifoldIn+'_'+str(tw)+'_'+str(x) for x in range(len(df.columns)-1)]
+        exPostProjections.index = [x.replace("00:00:00", "").strip() for x in exPostProjections.index]
 
-            exPostProjections.to_sql(manifoldIn + '_RsExPostProjections_tw_'+str(tw), conn, if_exists='replace')
+        rsProjection = sl.rs(exPostProjections)
+        rsProjectionList.append(rsProjection)
 
-            exPostProjections.index = [x.replace("00:00:00", "").strip() for x in exPostProjections.index]
+        csrsProjection = sl.ecs(rsProjection)
+        csrsProjection.name = '$\Sigma Y_{s'+manifoldIn+','+str(tw)+',t}$'
+        csrsProjectionList.append(csrsProjection)
 
-            ### Global Projections ###
+    ExPostProjections250 = pd.read_sql('SELECT * FROM ' + manifoldIn + '_RsExPostProjections_tw_250', conn).set_index('Dates', drop=True)
+    csExPostProjections250 = sl.ecs(ExPostProjections250)
+    csExPostProjections250.columns = ["1st Coordinate","2nd Coordinate","3rd Coordinate","4th Coordinate","5th Coordinate"]
+    csExPostProjections250.index = [x.replace("00:00:00", "").strip() for x in csExPostProjections250.index]
+    ExPostProjectionsExpWindow25 = pd.read_sql('SELECT * FROM ' + manifoldIn + '_RsExPostProjections_tw_ExpWindow25', conn).set_index('Dates', drop=True)
+    csExPostProjectionsExpWindow25 = sl.ecs(ExPostProjectionsExpWindow25)
+    csExPostProjectionsExpWindow25.columns = ["1st Coordinate","2nd Coordinate","3rd Coordinate","4th Coordinate","5th Coordinate"]
+    csExPostProjectionsExpWindow25.index = [x.replace("00:00:00", "").strip() for x in csExPostProjectionsExpWindow25.index]
 
-            for h in range(1,6):
-                for subgroup in ['Head', 'Tail']:
-                    print("h = ", h, ", subgroup = ", subgroup)
-                    if subgroup == 'Head':
-                        projections_subgroup = sl.rs(exPostProjections.iloc[:, :h])
-                    else:
-                        projections_subgroup = sl.rs(exPostProjections.iloc[:, -h:])
-                    projections_subgroup = pd.DataFrame(projections_subgroup)
-                    projections_subgroup.columns = [manifoldIn+"_"+str(tw)+"_"+str(h)+"_"+str(subgroup)]
-                    projections_subgroup_List.append(projections_subgroup)
+    rsProjectionDF = pd.concat(rsProjectionList, axis=1)
 
-        globalProjectionsDF = pd.concat(projections_subgroup_List, axis=1)
-        globalProjectionsDF.to_sql('globalProjectionsDF_' + manifoldIn, conn,if_exists='replace')
+    csrsProjectionDF = pd.concat(csrsProjectionList, axis=1)
+    csrsProjectionDF.columns = ["Rolling Window (25)","Rolling Window (100)","Rolling Window (150)","Rolling Window (250)","Expanding Window"]
+    csrsProjectionDF.index = [x.replace("00:00:00", "").strip() for x in csrsProjectionDF.index]
 
-    elif mode == 'plot':
-        sh_randomWalkPnlRSprojections_subgroups = pd.read_sql('SELECT * FROM sh_randomWalkPnlRSprojections_subgroups_' + manifoldIn, conn).set_index('index', drop=True)
-        sh_randomWalkPnlRSprojections_subgroups.columns = ['manifold', 'tw', 'subgroup', 'HT', 'sh']
+    sl.plotCumulativeReturns([csExPostProjections250, csrsProjectionDF], ["$\Sigma y_{"+manifoldIn+", j, t}$, $j=1,\dots,5$", "$\Sigma Y_{"+manifoldIn+",t}$"])
+    sl.plotCumulativeReturns([csExPostProjectionsExpWindow25], ["$\Sigma y_{"+manifoldIn+", j, t}$, $j=1,\dots,5$"])
 
-        sh_headMegaDF = sh_randomWalkPnlRSprojections_subgroups[sh_randomWalkPnlRSprojections_subgroups['HT']=="Head"]
-        sh_tailMegaDF = sh_randomWalkPnlRSprojections_subgroups[sh_randomWalkPnlRSprojections_subgroups['HT']=="Tail"]
+    ### Random Walk Pnl ###
+    sh_randomWalkList = []
+    for tw in twList:
+        print(tw)
+        projections = pd.read_sql('SELECT * FROM ' + manifoldIn + '_RsExPostProjections_tw_'+str(tw), conn).set_index('Dates', drop=True)
+        randomWalkPnl = sl.S(sl.sign(projections)) * projections
+        randomWalkPnl.to_sql(manifoldIn + '_randomWalkPnlRSprojections_tw_'+str(tw), conn, if_exists='replace')
+        sh_randomWalkPnl = np.sqrt(252) * sl.sharpe(randomWalkPnl).abs()
+        sh_randomWalkList.append(sh_randomWalkPnl)
+    pd.concat(sh_randomWalkList).to_sql('sh_randomWalkPnlRSprojections_' + manifoldIn, conn, if_exists='replace')
 
-        sh_head_list = []
-        sh_tail_list = []
-        for tw in sh_headMegaDF['tw'].unique():
-            medHeadDF = sh_headMegaDF[sh_headMegaDF['tw'] == tw][['subgroup', 'sh']].set_index('subgroup', drop=True)
-            medHeadDF.columns = [tw]
-            sh_head_list.append(medHeadDF)
-            ###
-            medTailDF = sh_tailMegaDF[sh_tailMegaDF['tw'] == tw][['subgroup', 'sh']].set_index('subgroup', drop=True)
-            medTailDF.columns = [tw]
-            sh_tail_list.append(medTailDF)
-        sh_head_DF = pd.concat(sh_head_list, axis=1)
-        sh_tail_DF = pd.concat(sh_tail_list, axis=1)
-
-        sl.PaperSinglePlot(sh_head_DF, positions=[0.95, 0.2, 0.85, 0.08, 0, 0])
-        sl.PaperSinglePlot(sh_tail_DF, positions=[0.95, 0.2, 0.85, 0.08, 0, 0])
+    randomWalkPnlRSprojections = sl.S(sl.sign(rsProjectionDF)) * rsProjectionDF
+    randomWalkPnlRSprojections.to_sql(manifoldIn + '_randomWalkPnlRSprojections', conn, if_exists='replace')
+    sh_randomWalkPnlRSprojections = np.sqrt(252) * sl.sharpe(randomWalkPnlRSprojections).abs()
+    sh_randomWalkPnlRSprojections.index = twList
+    sh_randomWalkPnlRSprojections.to_sql('sh_randomWalkPnlRSprojections_rs_'+manifoldIn, conn, if_exists='replace')
+    print(sh_randomWalkPnlRSprojections)
 
 def getProjections(mode):
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
     if mode == 'build':
-        rng = range(len(df.columns))
+        rng = [0, 1, 2, 3, 4]
         allProjectionsList = []
         for tw in twList:
             print("getProjections - tw = ", tw)
@@ -458,13 +458,10 @@ def getProjections(mode):
                 allProjectionsPCA.append(PCArs)
 
                 # LLE
-                try:
-                    LLErs = pd.DataFrame(
-                        sl.rs(df * sl.S(pd.read_sql('SELECT * FROM LLE_principalCompsDf_tw_' + str(tw) + "_" + str(pr), conn).set_index('Dates', drop=True))))
-                    LLErs.columns = ['LLE_' +str(tw) + "_" + str(pr)]
-                    allProjectionsLLE.append(LLErs)
-                except:
-                    pass
+                LLErs = pd.DataFrame(
+                    sl.rs(df * sl.S(pd.read_sql('SELECT * FROM LLE_principalCompsDf_tw_' + str(tw) + "_" + str(pr), conn).set_index('Dates', drop=True))))
+                LLErs.columns = ['LLE_' +str(tw) + "_" + str(pr)]
+                allProjectionsLLE.append(LLErs)
 
             PCAdf = pd.concat(allProjectionsPCA, axis=1)
             PCAdf['PCA_'+str(tw)] = sl.rs(PCAdf)
@@ -491,70 +488,131 @@ def PaperizeProjections(pnlSharpes):
         else:
             pnlSharpes['paperText'] = row["gamma"] + " & " + "y_{s" + infoSplit[0] + "}"
 
-def semaOnProjections(space, mode):
-    if space == "":
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
-        allProjectionsDF = allProjectionsDF.iloc[round(0.3 * len(allProjectionsDF)):]
-    elif space == 'global':
-        globalProjectionsList = []
-        for manifoldIn in ["PCA", "LLE"]:
-            sub_globalProjectionsDF = pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index(
-                'Dates', drop=True)
-            globalProjectionsList.append(sub_globalProjectionsDF.iloc[round(0.3 * len(sub_globalProjectionsDF)):])
-        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
+def semaOnProjections(mode, manifoldIn):
 
-    if mode == 'Direct':
+    if mode == 'build':
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
+
+        allProjectionsDFSharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(allProjectionsDF).round(4), columns=['Sharpe'])
+
+        df = allProjectionsDFSharpes.copy().reset_index()
+        df['manifold'] = None
+        df['prType'] = None
+        for idx, row in df.iterrows():
+            infoSplit = row['index'].split('_')
+            if len(infoSplit) == 3:
+                df.loc[idx, ['index']] = "$y_{" + str(int(infoSplit[2]) + 1) + ",s" + str(infoSplit[0]) + ",t}^{" + str(
+                    infoSplit[1]) + "}$"
+                df.loc[idx, ['prType']] = "coordinate"
+            elif len(infoSplit) == 2:
+                df.loc[idx, ['index']] = "$Y_{s" + str(infoSplit[0]) + "," + str(infoSplit[1]) + ",t}$"
+                df.loc[idx, ['prType']] = "global"
+            df.loc[idx, ['manifold']] = str(infoSplit[0])
+        df.to_sql('allProjectionsDFSharpes', conn, if_exists='replace')
+
+        """for manifoldToPlot in ["PCA", "LLE"]:
+            for toPlot in ["coordinate", "global"]:
+                dfToplot = df[df['prType']==toPlot][['index', 'Sharpe', 'manifold']]
+                top_df = dfToplot[dfToplot['index'].str.contains(manifoldToPlot)].set_index("index", drop=True)
+                top_df['Sharpe'] = top_df['Sharpe'].round(4).abs()
+                top_df = sl.Paperize(top_df.sort_values(by="Sharpe", ascending=False).iloc[:5])
+                print("top_df")
+                print(top_df["PaperText"])
+
+                dfToplot = dfToplot[dfToplot['manifold']==manifoldToPlot]
+                dfToplot = dfToplot.set_index(['index', 'manifold'])
+
+                dfToplot.sort_index(inplace=True)
+                dfToplotData = dfToplot.unstack(level=0)
+                dfToplotData.columns = [x[1] for x in dfToplotData.columns]
+
+                fig, ax = plt.subplots()
+                dfToplotData.plot(ax=ax, kind='bar')
+                box = ax.get_position()
+                ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+                ax.tick_params(axis='x', labelrotation=0)
+                mpl.pyplot.ylabel("Sharpe Ratio")
+                plt.legend(bbox_to_anchor=(1.01, 1), loc=2, ncol=2, frameon=False, prop={'size': 16}, borderaxespad=0.)
+                plt.show()"""
 
         print("Sema on Projections")
+        lagList = [3, 5, 25, 50, 250]
         shSema = []
         for Lag in lagList:
             print(Lag)
-
-            allProjectionsDF_pnlSharpes = np.sqrt(252) * sl.sharpe(allProjectionsDF).round(4)
-
-            rw_pnl = sl.S(sl.sign(allProjectionsDF)) * allProjectionsDF
-            rw_pnlSharpes = np.sqrt(252) * sl.sharpe(rw_pnl).round(4)
-
             pnl = sl.S(sl.sign(sl.ema(allProjectionsDF, nperiods=Lag))) * allProjectionsDF
-            pnl.to_sql('semapnl' + str(Lag), conn, if_exists='replace')
+            pnl.to_sql('semapnl'+str(Lag), conn, if_exists='replace')
 
-            pnlSharpes = (np.sqrt(252) * sl.sharpe(pnl).round(4)).reset_index()
+            pnlSharpes = (np.sqrt(252) * sl.sharpe(pnl).round(4).abs()).reset_index()
             pnlSharpes['Lag'] = Lag
-
-            tConfDf = sl.tConfDF(allProjectionsDF).set_index("index", drop=True)
-            tConfDf_rw = sl.tConfDF(rw_pnl.fillna(0)).set_index("index", drop=True)
-            tConfDf_sema = sl.tConfDF(pnl.fillna(0)).set_index("index", drop=True)
-
-            pnlSharpes = pnlSharpes.set_index("index", drop=True)
-            pnlSharpes = pd.concat([allProjectionsDF_pnlSharpes, allProjectionsDF.mean() * 100, tConfDf.astype(str),
-                                    allProjectionsDF.std() * 100,
-                                    rw_pnlSharpes, rw_pnl.mean() * 100, tConfDf_rw.astype(str), rw_pnl.std() * 100,
-                                    pnlSharpes, pnl.mean() * 100, tConfDf_sema.astype(str), pnl.std() * 100], axis=1)
-            pnlSharpes.columns = ["allProjectionsDF_pnlSharpes", "allProjectionsDF_mean", "tConfDf",
-                                  "allProjectionsDF_std",
-                                  "rw_pnlSharpes", "rw_pnl_mean", "tConfDf_rw", "rw_pnl_std",
-                                  "pnlSharpes", "Lag", "pnl_mean", "tConfDf_sema", "pnl_std"]
             shSema.append(pnlSharpes)
 
-        shSemaDF = pd.concat(shSema).round(4)
-        shSemaDF.to_sql('semapnlSharpes_' + space, conn, if_exists='replace')
+        shSemaDF = pd.concat(shSema).set_index('index', drop=True)
+        shSemaDF.to_sql('semapnlAbsSharpes', conn, if_exists='replace')
 
-    elif mode == 'BasketsCombos':
-        from itertools import combinations
-        shList = []
-        for combos in [2, 3]:
-            print(combos)
-            cc = list(combinations(allProjectionsDF.columns, combos))
-            for c in tqdm(cc):
-                BasketDF = allProjectionsDF[c[0]] + allProjectionsDF[c[1]]
-                shBasket = np.sqrt(252) * sl.sharpe(BasketDF).round(4)
-                for Lag in lagList:
-                    semaBasketDF = sl.S(sl.sign(sl.ema(BasketDF, nperiods=Lag))) * BasketDF
-                    shSemaBasket = np.sqrt(252) * sl.sharpe(semaBasketDF).round(4)
-                    shList.append([c[0] + "_" + c[1], shBasket, Lag, shSemaBasket])
+    elif mode == 'plot':
+        dfList = []
+        for Lag in [3, 5, 25, 50, 250]:
+            medDF = pd.read_sql('SELECT * FROM semapnlSharpes' + str(Lag), conn).set_index('index', drop=True)
+            dfList.append(medDF)
 
-        sh_Baskets = pd.DataFrame(shList, columns=['Basket', 'ShBasket', 'Lag', 'ShSemaBasket'])
-        sh_Baskets.to_sql('sh_Baskets_' + str(combos), conn, if_exists='replace')
+        df = pd.concat(dfList, axis=0).reset_index()
+
+        df['prType'] = None
+        for idx, row in df.iterrows():
+            infoSplit = row['index'].split('_')
+            if len(infoSplit) == 3:
+                df.loc[idx, ['index']] = "$y_{"+str(int(infoSplit[2])+1)+",s"+str(infoSplit[0])+",t}^{"+str(infoSplit[1])+"}$"
+                df.loc[idx, ['prType']] = "coordinate"
+            elif len(infoSplit) == 2:
+                df.loc[idx, ['index']] = "$Y_{s"+str(infoSplit[0])+","+str(infoSplit[1])+",t}$"
+                df.loc[idx, ['prType']] = "global"
+
+        dfCoordinates = df[df["prType"] == "coordinate"][["index", "Sharpe", "$\gamma$"]]
+        top_dfCoordinates = dfCoordinates.copy()
+        top_dfCoordinates['Sharpe'] = top_dfCoordinates['Sharpe'].abs().round(4)
+        top_dfCoordinates = top_dfCoordinates[top_dfCoordinates['index'].str.contains(manifoldIn)].set_index("index", drop=True)
+        top_dfCoordinates = sl.Paperize(top_dfCoordinates.sort_values(by="Sharpe", ascending=False).iloc[:5])
+        print("top_dfCoordinates")
+        print(top_dfCoordinates["PaperText"])
+        dfGlobal = df[df["prType"] == "global"][["index", "Sharpe", "$\gamma$"]]
+        top_Global = dfGlobal.copy()
+        top_Global['Sharpe'] = top_Global['Sharpe'].abs().round(4)
+        top_Global = top_Global[top_Global['index'].str.contains(manifoldIn)].set_index("index", drop=True)
+        top_Global = sl.Paperize(top_Global.sort_values(by="Sharpe", ascending=False).iloc[:5])
+        print("top_Global")
+        print(top_Global["PaperText"])
+
+        ##################################################
+        dfCoordinates.set_index(['index', '$\gamma$'], inplace=True)
+        dfCoordinates.sort_index(inplace=True)
+        dfUnstackCoordinates = dfCoordinates.unstack(level=0)
+        manifoldlist = [x for x in dfUnstackCoordinates.columns if manifoldIn in x[1]]
+        dfToplotCoordinates = dfUnstackCoordinates.loc[:, manifoldlist]
+        dfToplotCoordinates.columns = [x[1] for x in dfToplotCoordinates.columns]
+
+        fig, ax = plt.subplots()
+        dfToplotCoordinates.plot(ax=ax, kind='bar')
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+        mpl.pyplot.ylabel("Sharpe Ratio")
+        plt.legend(bbox_to_anchor=(1.01, 1), loc=2, ncol=2, frameon=False, prop={'size': 16}, borderaxespad=0.)
+        plt.show()
+        ##################################################
+        dfGlobal.set_index(['index', '$\gamma$'], inplace=True)
+        dfGlobal.sort_index(inplace=True)
+        dfUnstackGlobal = dfGlobal.unstack(level=0)
+        manifoldlist = [x for x in dfUnstackGlobal.columns if manifoldIn in x[1]]
+        dfToplotGlobal = dfUnstackGlobal.loc[:, manifoldlist]
+        dfToplotGlobal.columns = [x[1] for x in dfToplotGlobal.columns]
+
+        fig, ax = plt.subplots()
+        dfToplotGlobal.plot(ax=ax, kind='bar')
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+        mpl.pyplot.ylabel("Sharpe Ratio")
+        plt.legend(bbox_to_anchor=(1.01, 1), loc=2, frameon=False, prop={'size': 18}, borderaxespad=0.)
+        plt.show()
 
 def StationarityOnProjections(manifoldIn, mode):
     allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
@@ -622,30 +680,27 @@ def StationarityOnProjections(manifoldIn, mode):
             plt.subplots_adjust(top=0.95, bottom=0.15, right=0.85, left=0.12, hspace=0.4, wspace=0)
             plt.show()
 
-def GPRlocal(argList):
+def GaussianProcesslocal(argList):
     selection = argList[0]
     df = argList[1]
     trainLength = argList[2]
-    kernelIn = argList[3]
-    rw = argList[4]
-    print(selection, ",", trainLength, ",", kernelIn, ", ", rw)
-    try:
-        GPR_Results = sl.GPR_Walk(df, trainLength, kernelIn, rw)
+    rw = argList[3]
+    print(selection, ",", trainLength, ",", rw)
 
-        GPR_Results[0].to_sql(selection + '_GPR_testDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
-        GPR_Results[1].to_sql(selection + '_GPR_PredictionsDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
+    GaussianProcess_Results = sl.GPC_Walk(df, trainLength, rw)
 
-        pickle.dump(GPR_Results[2], open(selection + '_GPR_gprparamList_' + kernelIn + '_' + str(rw) +".p", "wb"))
+    GaussianProcess_Results[0].to_sql(selection + '_GaussianProcess_'+str(rw)+'_testDF', conn, if_exists='replace')
+    GaussianProcess_Results[1].to_sql(selection + '_GaussianProcess_'+str(rw)+'_PredictionsDF', conn, if_exists='replace')
+    GaussianProcess_Results[2].to_sql(selection + '_GaussianProcess_'+str(rw)+'_ProbabilitiesDF', conn, if_exists='replace')
 
-        sig = sl.sign(GPR_Results[1])
+    pickle.dump(GaussianProcess_Results[3], open('paramsRepo/' + selection + '_GaussianProcess_'+str(rw)+'_paramList.p', "wb"))
 
-        pnl = sig * GPR_Results[0]
-        pnl.to_sql(selection + '_GPR_pnl_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
+    sig = sl.sign(GaussianProcess_Results[1])
 
-    except Exception as e:
-        print(e)
+    pnl = sig * GaussianProcess_Results[0]
+    pnl.to_sql(selection + '_GaussianProcess_'+str(rw)+'_pnl', conn, if_exists='replace')
 
-def GPRonPortfolios(Portfolios, scanMode, mode):
+def GaussianProcessonPortfolios(Portfolios, scanMode, mode):
     if Portfolios == 'Projections':
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
     elif Portfolios == 'ClassicPortfolios':
@@ -665,61 +720,48 @@ def GPRonPortfolios(Portfolios, scanMode, mode):
 
         if mode == "run":
             processList = []
-            rw = 250
-            for kernelIn in ["RBF_DotProduct","RBF_Matern","RBF_RationalQuadratic", "RBF_WhiteKernel"]:
+            for rw in [250]:
                 for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], 0.3, kernelIn, rw])
+                    processList.append([selection, allProjectionsDF[selection], 0.3, rw])
 
             p = mp.Pool(mp.cpu_count())
-            result = p.map(GPRlocal, tqdm(processList))
+            result = p.map(GaussianProcesslocal, tqdm(processList))
             p.close()
             p.join()
+        elif mode == 'probabilize':
+            rw = 250
+            probPnLlist = []
+            for selection in ['LLE_150_4']:
+                pnl = pd.read_sql('SELECT * FROM ' + selection + '_GaussianProcess_' + str(rw) + '_pnl', conn).set_index(
+                    'Dates', drop=True).iloc[round(0.3 * len(allProjectionsDF)):]
+                probas = pd.read_sql('SELECT * FROM ' + selection + '_GaussianProcess_' + str(rw) + '_ProbabilitiesDF', conn).set_index(
+                    'Dates', drop=True).iloc[round(0.3 * len(allProjectionsDF)):]
+
+                probas.plot()
+                plt.show()
+                time.sleep(3400)
+                #pnl = pnl[probas]
+
+                probPnLlist.append(pnl)
+            probPnLDF = pd.concat(probPnLlist, axis=1)
+            print(probPnLDF)
 
         elif mode == "report":
             notProcessed = []
-            rw = 250
-            shList = []
-            for kernelIn in ["RBF_DotProduct","RBF_Matern","RBF_RationalQuadratic", "RBF_WhiteKernel"]:
+            for rw in [250]:
+                shList = []
                 for selection in allProjectionsDF.columns:
                     try:
-                        pnl = pd.read_sql('SELECT * FROM ' + selection + '_GPR_pnl_'+kernelIn+ '_' + str(rw),
-                                          conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
+                        pnl = pd.read_sql('SELECT * FROM ' + selection + '_GaussianProcess_'+str(rw)+'_pnl', conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
                         medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).values[0]
-                        print(kernelIn, "_", selection, "_", medSh)
-                        shList.append([selection, medSh, kernelIn])
+                        shList.append([selection, medSh])
                     except Exception as e:
                         print(e)
-                        notProcessed.append(selection + '_GPR_pnl_'+kernelIn+ '_' + str(rw))
-            shDF = pd.DataFrame(shList, columns=['selection', 'sharpe', 'kernel']).set_index("selection", drop=True).abs()
-            shDF.to_sql(Portfolios+'_sh_GPR_pnl_' + str(rw), conn, if_exists='replace')
-            notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
-            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_GPR_' + str(rw), conn, if_exists='replace')
-
-    elif scanMode == 'ScanNotProcessed':
-        rw = 250
-        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_GPR_' + str(rw), conn).set_index('index', drop=True)
-        for idx, row in notProcessedDF.iterrows():
-            splitInfo = row['NotProcessedProjection'].split("_GPR_pnl_")
-            selection = splitInfo[0]
-            kernelIn = str(splitInfo[1]).split("_")[0] + "_" + str(splitInfo[1]).split("_")[1]
-
-            try:
-                print(selection)
-                GPR_Results = sl.GPR_Walk(allProjectionsDF[selection], 0.3, kernelIn, rw)
-
-                GPR_Results[0].to_sql(selection + '_GPR_testDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
-                GPR_Results[1].to_sql(selection + '_GPR_PredictionsDF_' + kernelIn + '_' + str(rw), conn,
-                                      if_exists='replace')
-
-                pickle.dump(GPR_Results[2],
-                            open(selection + '_GPR_gprparamList_' + kernelIn + '_' + str(rw) + ".p", "wb"))
-
-                sig = sl.sign(GPR_Results[1])
-
-                pnl = sig * GPR_Results[0]
-                pnl.to_sql(selection + '_GPR_pnl_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
-            except Exception as e:
-                print("selection = ", selection, ", error : ", e)
+                        notProcessed.append(selection + '_GaussianProcess_'+str(rw)+'_pnl')
+                shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True).abs()
+                shDF.to_sql(Portfolios+'_sh_GaussianProcess_'+str(rw)+'_pnl', conn, if_exists='replace')
+                notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
+                notProcessedDF.to_sql(Portfolios+'_notProcessedDF_GaussianProcess_'+str(rw), conn, if_exists='replace')
 
 def ARIMAlocal(argList):
     selection = argList[0]
@@ -766,11 +808,11 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
 
         if mode == "run":
             processList = []
-            rw = 250
-            for OrderP in orderList:
-                orderIn = (OrderP, 0, 0)
-                for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], 0.3, orderIn, rw])
+            for rw in [250]:
+                for OrderP in orderList:
+                    orderIn = (OrderP, 0, 0)
+                    for selection in allProjectionsDF.columns:
+                        processList.append([selection, allProjectionsDF[selection], 0.3, orderIn, rw])
 
             p = mp.Pool(mp.cpu_count())
             result = p.map(ARIMAlocal, tqdm(processList))
@@ -785,8 +827,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
                 orderIn = (OrderP, 0, 0)
                 for selection in allProjectionsDF.columns:
                     try:
-                        pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw),
-                                          conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
+                        pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw), conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
                         medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).values[0]
                         shList.append([selection, medSh, orderIn[0]])
                     except Exception as e:
@@ -798,7 +839,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
             notProcessedDF.to_sql(Portfolios+'_notProcessedDF'+ '_' + str(rw), conn, if_exists='replace')
 
     elif scanMode == 'ScanNotProcessed':
-        for rw in [250]:
+        for rw in [5, 25, 250]:
             notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'notProcessedDF'+ '_' + str(rw), conn).set_index('index', drop=True)
             for idx, row in notProcessedDF.iterrows():
                 splitInfo = row['NotProcessedProjection'].split("_ARIMA_pnl_")
@@ -1334,18 +1375,19 @@ def Test():
 #RiskParity('run')
 #RiskParity('plots')
 
-#RunManifoldLearningOnFXPairs()
+RunManifoldLearningOnFXPairs()
 #CrossValidateEmbeddings("LLE", "ExpWindow25", "run")
 #CrossValidateEmbeddings("LLE", "ExpWindow25", "")
 
-#ProjectionsPlots('PCA', 'build')
-#ProjectionsPlots('LLE', 'build')
-#ProjectionsPlots('PCA', 'plot')
-#ProjectionsPlots('LLE', 'plot')
-#ProjectionsPlots('PCA', 'mergeManifolds')
+ProjectionsPlots('PCA')
+ProjectionsPlots('LLE')
 
 #getProjections("build")
-#semaOnProjections()
+#getProjections("plot")
+
+#semaOnProjections("build", "")
+#semaOnProjections("plot", "PCA")
+#semaOnProjections("plot", "LLE")
 
 #StationarityOnProjections('PCA', 'build')
 #StationarityOnProjections('LLE', 'build')
@@ -1357,7 +1399,7 @@ def Test():
 #ARIMAonPortfolios("Projections", 'Main', "run")
 #ARIMAonPortfolios("Projections", 'Main', "report")
 #ARIMAonPortfolios("Finalists", 'Main', "run")
-ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
+#ARIMAonPortfolios('ScanNotProcessed', "")
 #plotARIMASharpes("ClassicPortfolios", "")
 #plotARIMASharpes("Projections", "PCA")
 #plotARIMASharpes("Projections", "LLE")

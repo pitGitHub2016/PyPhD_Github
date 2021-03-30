@@ -1,12 +1,13 @@
 import pandas as pd, numpy as np, matplotlib.pyplot as plt, multiprocessing
 import math, numpy.linalg as la, sqlite3
 from pydiffmap import kernel
-import time
+import time, pickle
 import matplotlib as mpl
 from math import acos
 from math import sqrt
 from math import pi
 from numpy.linalg import norm
+from scipy import stats
 from numpy import dot, array
 from itertools import combinations
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
@@ -18,9 +19,15 @@ from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.datasets import load_digits
 from sklearn.decomposition import FastICA
+from sklearn import linear_model
 from statsmodels.tsa.arima_model import ARIMA
+from sklearn.gaussian_process.kernels import RBF, DotProduct, WhiteKernel, RationalQuadratic, ExpSineSquared, Matern, ConstantKernel
+from sklearn.gaussian_process import GaussianProcessRegressor, GaussianProcessClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import RepeatedStratifiedKFold
 from statsmodels.tsa.stattools import adfuller
 from scipy.stats import skew, kurtosis
+from scipy import stats as st
 from hurst import compute_Hc
 from keras.models import Sequential
 from keras.layers import Dense
@@ -255,37 +262,153 @@ class Slider:
             # arccosInput = -1.0 if arccosInput < -1.0 else arccosInput
             return math.acos(arccosInput)
 
-    def Hurst(df):
+    def Hurst(df, **kwargs):
+
+        def divGtN0(n, n0):
+            # Find all divisors of the natural number N greater or equal to N0
+            xx = np.arange(n0, math.floor(n / 2) + 1)
+            return xx[(n / xx) == np.floor(n / xx)]
+
+        def rscalc(z, n):
+            m = int(z.shape[0] / n)
+            y = np.reshape(z, (m, n)).T
+            mu = np.mean(y, axis=0)
+            sigma = np.std(y, ddof=1, axis=0)
+            y = np.cumsum(y - mu, axis=0)
+            yrng = np.max(y, axis=0) - np.min(y, axis=0)
+            return np.mean(yrng / sigma)
+
+        def hurstExponent(x, d=50):
+            # Find such a natural number OptN that possesses the largest number of
+            # divisors among all natural numbers in the interval [0.99*N,N]
+            dmin, N, N0 = d, x.shape[0], math.floor(0.99 * x.shape[0])
+            dv = np.zeros((N - N0 + 1,))
+            for i in range(N0, N + 1):
+                dv[i - N0] = divGtN0(i, dmin).shape[0]
+            optN = N0 + np.max(np.arange(0, N - N0 + 1)[max(dv) == dv])
+            # Use the first OptN values of x for further analysis
+            x = x[:optN]
+            d = divGtN0(optN, dmin)
+
+            N = d.shape[0]
+            RSe, ERS = np.zeros((N,)), np.zeros((N,))
+
+            # Calculate empirical R/S
+            for i in range(N):
+                RSe[i] = rscalc(x, d[i])
+
+            # Compute Anis-Lloyd [1] and Peters [3] corrected theoretical E(R/S)
+            # (see [4] for details)
+            for i in range(N):
+                n = d[i]
+                K = np.arange(1, n)
+                ratio = (n - 0.5) / n * np.sum(np.sqrt((np.ones((n - 1)) * n - K) / K))
+                if n > 340:
+                    ERS[i] = ratio / math.sqrt(0.5 * math.pi * n)
+                else:
+                    ERS[i] = (math.gamma(0.5 * (n - 1)) * ratio) / (math.gamma(0.5 * n) * math.sqrt(math.pi))
+
+            # Calculate the Anis-Lloyd/Peters corrected Hurst exponent
+            # Compute the Hurst exponent as the slope on a loglog scale
+            ERSal = np.sqrt(0.5 * math.pi * d)
+            Pal = np.polyfit(np.log10(d), np.log10(RSe - ERS + ERSal), 1)
+            Hal = Pal[0]
+
+            # Calculate the empirical and theoretical Hurst exponents
+            Pe = np.polyfit(np.log10(d), np.log10(RSe), 1)
+            He = Pe[0]
+            P = np.polyfit(np.log10(d), np.log10(ERS), 1)
+            Ht = P[0]
+
+            # Compute empirical confidence intervals (see [4])
+            L = math.log2(optN)
+            # R/S-AL (min(divisor)>50) two-sided empirical confidence intervals
+            # pval95 = np.array([0.5-exp(-7.33*log(log(L))+4.21) exp(-7.20*log(log(L))+4.04)+0.5])
+            lnlnL = math.log(math.log(L))
+            c1 = [0.5 - math.exp(-7.35 * lnlnL + 4.06), math.exp(-7.07 * lnlnL + 3.75) + 0.5, 0.90]
+            c2 = [0.5 - math.exp(-7.33 * lnlnL + 4.21), math.exp(-7.20 * lnlnL + 4.04) + 0.5, 0.95]
+            c3 = [0.5 - math.exp(-7.19 * lnlnL + 4.34), math.exp(-7.51 * lnlnL + 4.58) + 0.5, 0.99]
+            C = np.array([c1, c2, c3])
+
+            detail = (d, optN, RSe, ERS, ERSal)
+            return (Hal, He, Ht, C, detail)
+
+        if 'conf' in kwargs:
+            conf = kwargs['conf']
+        else:
+            conf = 'no'
+
         hurstMat = []
-        for col in df.columns:
-            H, c, data = compute_Hc(df.loc[:, col], kind='change', simplified=True)
-            hurstMat.append(H)
-        return hurstMat
+        for col in range(len(df.columns)):
+            print(df.iloc[:,col].name)
+            if conf == 'no':
+                try:
+                    H, c, data = compute_Hc(df.iloc[:,col], kind='change', simplified=True)
+                except Exception as e:
+                    print(e, df.iloc[:, col].name)
+                    H, c, data = compute_Hc(df.iloc[1000:, col], kind='change', simplified=True)
+                hurstMat.append(H)
+            else:
+                Hal, He, Ht, C, detail = hurstExponent(df.iloc[:,col].values)
+                confIntervals = C[0]
+                hurstMat.append([Hal, He, Ht, confIntervals[0], confIntervals[1]])
+
+        hurstDF = pd.DataFrame(hurstMat, index=df.columns)
+
+        return hurstDF
 
     def rollStatistics(df, method, **kwargs):
+        if "mode" in kwargs:
+            mode = kwargs['mode']
+        else:
+            mode = 'Roll'
         if 'nIn' in kwargs:
             nIn = kwargs['nIn']
         else:
-            nIn = 25
+            nIn = 250
         if 'alpha' in kwargs:
             alpha = kwargs['alpha']
         else:
             alpha = 0.01
 
         if method == 'Vol':
-            rollStatisticDF = Slider.roller(df, np.std, nIn)
+            if mode == 'Roll':
+                rollStatisticDF = Slider.roller(df, np.std, nIn)
+            else:
+                rollStatisticDF = Slider.expander(df, np.std, nIn)
         elif method == 'Skewness':
-            rollStatisticDF = Slider.roller(df, skew, nIn)
+            if mode == 'Roll':
+                rollStatisticDF = Slider.roller(df, skew, nIn)
+            else:
+                rollStatisticDF = Slider.expander(df, skew, nIn)
         elif method == 'Kurtosis':
-            rollStatisticDF = Slider.roller(df, kurtosis, nIn)
+            if mode == 'Roll':
+                rollStatisticDF = Slider.roller(df, kurtosis, nIn)
+            else:
+                rollStatisticDF = Slider.expander(df, kurtosis, nIn)
         elif method == 'VAR':
-            rollStatisticDF = norm.ppf(1 - alpha) * Slider.rollVol(df, nIn=nIn) - Slider.ema(df, nperiods=nIn)
+            if mode == 'Roll':
+                rollStatisticDF = norm.ppf(1 - alpha) * Slider.rollVol(df, nIn=nIn) - Slider.ema(df, nperiods=nIn)
+            else:
+                rollStatisticDF = norm.ppf(1 - alpha) * Slider.expanderVol(df, nIn=nIn) - Slider.ema(df, nperiods=nIn)
         elif method == 'CVAR':
-            rollStatisticDF = alpha ** -1 * norm.pdf(norm.ppf(alpha)) * Slider.rollVol(df, nIn=nIn) - Slider.ema(df,
+            if mode == 'Roll':
+                rollStatisticDF = alpha ** -1 * norm.pdf(norm.ppf(alpha)) * Slider.rollVol(df, nIn=nIn) - Slider.ema(df,
                                                                                                                nperiods=nIn)
+            else:
+                rollStatisticDF = alpha ** -1 * norm.pdf(norm.ppf(alpha)) * Slider.expanderVol(df, nIn=nIn) - Slider.ema(df,
+                                                                                                                     nperiods=nIn)
         elif method == 'Sharpe':
-            rollStatisticDF = Slider.roller(df, Slider.sharpe, nIn)
+            if mode == 'Roll':
+                rollStatisticDF = Slider.roller(df, Slider.sharpe, nIn)
+            else:
+                rollStatisticDF = Slider.expander(df, Slider.sharpe, nIn)
 
+        elif method == 'Hurst':
+            if mode == 'Roll':
+                rollStatisticDF = Slider.roller(df, Slider.Hurst, nIn)
+            else:
+                rollStatisticDF = Slider.expander(df, Slider.Hurst, nIn)
         return rollStatisticDF
 
     def roller(df, func, n):
@@ -347,8 +470,79 @@ class Slider:
             T = 14
         return np.sqrt(L / T) * Slider.expander(df, Slider.sharpe, n=window)
 
+    def MaximumDD(df):
+        maxDDlist = []
+        for c in df.columns:
+            mdd = (df[c] + 1).cumprod().diff().min()
+            maxDDlist.append(mdd)
+        maxDDdf = pd.Series(maxDDlist, index=df.columns)
+
+        return maxDDdf
+
+    def annual_returns(returns):
+        num_years = len(returns) / 252
+
+        cum_ret_final = (returns + 1).prod().squeeze()
+        return cum_ret_final ** (1 / num_years) - 1
+
+    def sub_calmar(returns):
+        #max_dd = max_drawdown(cumulative_returns(returns))
+        max_dd = (returns + 1).cumprod().diff().min()
+
+        if max_dd < 0:
+            return Slider.annual_returns(returns) / abs(max_dd)
+
+        return np.nan
+
+    def Calmar(df):
+        calmarlist = []
+        for c in df.columns:
+            calmar = Slider.sub_calmar(df[c])
+            calmarlist.append(calmar)
+        calmardf = pd.Series(calmarlist, index=df.columns)
+
+        return calmardf
+
     def sharpe(df):
         return df.mean() / df.std()
+
+    def tConfDF(df):
+        tConfList = []
+        for c in df.columns:
+            tConfs = [np.round(x,4) for x in st.t.interval(0.95, len(df[c].values) - 1, loc=np.mean(df[c].values), scale=st.sem(df[c].values))]
+            tConfList.append([c, tConfs])
+
+        tConfDF = pd.DataFrame(tConfList, columns=['index','tConf'])
+        return tConfDF
+
+    def downside_risk(returns, risk_free=0):
+        adj_returns = returns - risk_free
+
+        sqr_downside = np.square(np.clip(adj_returns, np.NINF, 0))
+        return np.sqrt(np.nanmean(sqr_downside) * 252)
+
+    def sub_sortino(returns, risk_free=0):
+        adj_returns = returns - risk_free
+
+        drisk = Slider.downside_risk(adj_returns)
+        if drisk == 0:
+            return np.nan
+
+        return (np.nanmean(adj_returns) * np.sqrt(252)) / drisk
+
+    def sortino(df, **kwargs):
+        if 'risk_free' in kwargs:
+            risk_free = kwargs['risk_free']
+        else:
+            risk_free = 0
+
+        sortinoList = []
+        for c in df.columns:
+            sortinoList.append(Slider.sub_sortino(df[c], risk_free))
+
+        sortinoDF = pd.Series(sortinoList, index=df.columns)
+
+        return sortinoDF
 
     def topSharpe(pnl, **kwargs):
         if 'n' in kwargs:
@@ -459,20 +653,25 @@ class Slider:
             n = kwargs['n']
         else:
             n = 250
-        RollVolList = []
         BetaList = []
         for c in df.columns:
             if X not in c:
-                RollVar_c = (1/(Slider.S(Slider.rollerVol(df[c], 250)**2)))
+                RollVar_c = (1/(Slider.rollerVol(df[c], 250)**2))
                 #RollVar_c[RollVar_c > 100] = 1
-                RollVolList.append(RollVar_c)
                 Beta_c = (df[X].rolling(n).cov(df[c])).mul(RollVar_c, axis=0).replace([np.inf, -np.inf], 0)
                 Beta_c.name = c
                 BetaList.append(Beta_c)
-        RollVolDF = pd.concat(RollVolList, axis=1)
         BetaDF = pd.concat(BetaList, axis=1)
 
-        return [BetaDF, RollVolDF]
+        return BetaDF
+
+    def BetaKernel(df):
+
+        BetaMatDF = pd.DataFrame(np.cov(df.T), index=df.columns, columns=df.columns)
+        for idx, row in BetaMatDF.iterrows():
+            BetaMatDF.loc[idx] /= row[idx]
+
+        return BetaMatDF
 
     def RV(df, **kwargs):
         if "RVspace" in kwargs:
@@ -487,23 +686,34 @@ class Slider:
             n = kwargs['n']
         else:
             n = 25
+        if 'combos' in kwargs:
+            combos = kwargs['combos']
+        else:
+            combos = 2
+        if 'shOut' in kwargs:
+            shOut = kwargs['shOut']
+        else:
+            shOut = 'off'
 
         if RVspace == "classic":
-            cc = list(combinations(df.columns, 2))
+            cc = list(combinations(df.columns, combos))
         else:
-            cc = [c for c in list(combinations(df.columns, 2)) if c[0] == RVspace]
+            cc = [c for c in list(combinations(df.columns, combos)) if c[0] == RVspace]
 
         if mode == 'Linear':
-            df0 = pd.concat([df[c[0]].sub(df[c[1]]) for c in cc], axis=1, keys=cc)
+            df0 = pd.concat([df[c[0]].sub(df[c[1]]) for c in tqdm(cc)], axis=1, keys=cc)
         elif mode == 'Baskets':
-            df0 = pd.concat([df[c[0]].add(df[c[1]]) for c in cc], axis=1, keys=cc)
+            if shOut == 'off':
+                df0 = pd.concat([df[c[0]].add(df[c[1]]) for c in tqdm(cc)], axis=1, keys=cc)
+            else:
+                df0 = pd.concat([pd.Series(np.sqrt(252) * Slider.sharpe(Slider.rs(df[[col for col in c]]))) for c in tqdm(cc)], axis=1, keys=cc)
         elif mode == 'PriceRatio':
-            df0 = pd.concat([df[c[0]] / df[c[1]] for c in cc], axis=1, keys=cc)
+            df0 = pd.concat([df[c[0]] / df[c[1]] for c in tqdm(cc)], axis=1, keys=cc)
         elif mode == 'PriceMultiply':
-            df0 = pd.concat([df[c[0]] * df[c[1]] for c in cc], axis=1, keys=cc)
+            df0 = pd.concat([df[c[0]] * df[c[1]] for c in tqdm(cc)], axis=1, keys=cc)
         elif mode == 'PriceRatio_zScore':
             lDF = []
-            for c in cc:
+            for c in tqdm(cc):
                 PrRatio = df[c[0]] / df[c[1]]
                 emaPrRatio = Slider.ema(PrRatio, nperiods=n)
                 volPrRatio = Slider.expander(PrRatio, np.std, n)
@@ -517,13 +727,16 @@ class Slider:
         elif mode == 'HedgeRatioBasket':
             df0 = pd.concat([df[c[0]] - (Slider.S(df[c[0]].expanding(n).corr(df[c[1]]) * (
                         Slider.expander(df[c[0]], np.std, n) / Slider.expander(df[c[1]], np.std, n)), nperiods=2)
-                                         * df[c[1]]) for c in cc], axis=1, keys=cc)
+                                         * df[c[1]]) for c in tqdm(cc)], axis=1, keys=cc)
         elif mode == 'HedgeRatioSimpleCorr':
             df0 = pd.concat(
-                [df[c[0]] - (Slider.S(df[c[0]].expanding(n).corr(df[c[1]]), nperiods=2) * df[c[1]]) for c in cc], axis=1,
+                [df[c[0]] - (Slider.S(df[c[0]].expanding(n).corr(df[c[1]]), nperiods=2) * df[c[1]]) for c in tqdm(cc)], axis=1,
                 keys=cc)
 
         df0.columns = df0.columns.map('_'.join)
+
+        if shOut != 'Off':
+            df0 = df0.T
 
         return df0.fillna(method='ffill').fillna(0)
 
@@ -547,6 +760,7 @@ class Slider:
         MSharpe = Slider.sharpe(pnl)
         switchFlag = np.array(MSharpe) < 0
         pnl.iloc[:, np.where(switchFlag)[0]] = pnl * (-1)
+        switchFlag = pd.Series(switchFlag, index=pnl.columns)
         return [pnl, switchFlag]
 
     def adf(df):
@@ -583,6 +797,52 @@ class Slider:
             except Exception as e:
                 print(e)
 
+    ############ PAPER RELATED #############
+
+    def dateFilter(df):
+        df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+        out = df
+        return out
+
+    def PaperSinglePlot(df, **kwargs):
+
+        if "yLabelIn" in kwargs:
+            yLabelIn = kwargs['yLabelIn']
+        else:
+            yLabelIn = 'Temp label'
+
+        if "legendType" in kwargs:
+            legendType = kwargs['legendType']
+        else:
+            legendType = 'out'
+
+        if "positions" in kwargs:
+            positions = kwargs['positions']
+        else:
+            positions = [0.95, 0.2, 0.85, 0.12, 0, 0]
+
+        try:
+            df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+        except:
+            pass
+        fig, ax = plt.subplots()
+        mpl.pyplot.locator_params(axis='x', nbins=35)
+        df.plot(ax=ax)
+        for label in ax.get_xticklabels():
+            label.set_fontsize(25)
+            label.set_ha("right")
+            label.set_rotation(45)
+        ax.set_xlim(xmin=0.0, xmax=len(df) + 1)
+        mpl.pyplot.ylabel(yLabelIn, fontsize=32)
+        if legendType == 'in':
+            plt.legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'size': 24})
+        elif legendType == 'out':
+            plt.legend(bbox_to_anchor=(1.01, 1), loc='upper left', borderaxespad=0.)
+        plt.subplots_adjust(top=positions[0], bottom=positions[1], right=positions[2], left=positions[3], hspace=positions[4], wspace=positions[5])
+        plt.margins(0, 0)
+        plt.grid()
+        plt.show()
+
     def plotCumulativeReturns(dfList, yLabelIn, **kwargs):
 
         if len(dfList) == 1:
@@ -598,7 +858,8 @@ class Slider:
             ax.set_xlim(xmin=0.0, xmax=len(df) + 1)
             mpl.pyplot.ylabel(yLabelIn[0], fontsize=32)
             plt.legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'size': 24})
-            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0, wspace=0)
+            #plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0, wspace=0)
+            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.85, left=0.12, hspace=0, wspace=0)
             plt.margins(0, 0)
             plt.grid()
             plt.show()
@@ -610,17 +871,20 @@ class Slider:
             for df in dfList:
                 df.index = [x.replace("00:00:00", "").strip() for x in df.index]
                 df -= 1
-                (df * 100).plot(ax=ax[c], title= titleList[c])
+                (df * 100).plot(ax=ax[c])
                 for label in ax[c].get_xticklabels():
                     label.set_fontsize(25)
                     label.set_ha("right")
                     label.set_rotation(40)
                 ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
-                ax[c].set_ylabel(yLabelIn[c], fontsize=20)
+                #ax[c].set_title(titleList[c], y=1.0, pad=-20)
+                ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
+                ax[c].set_ylabel(yLabelIn[c], fontsize=24)
                 ax[c].legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'weight': 'bold', 'size': 24})
                 ax[c].grid()
                 c += 1
-            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0.1, wspace=0)
+            #plt.subplots_adjust(top=0.95, bottom=0.2, right=0.99, left=0.08, hspace=0.1, wspace=0)
+            plt.subplots_adjust(top=0.95, bottom=0.15, right=0.85, left=0.12, hspace=0.1, wspace=0)
             plt.show()
         else:
             print("More than 4 dataframes provided! Cant use this function for subplotting them - CUSTOMIZE ...")
@@ -671,6 +935,63 @@ class Slider:
         print(best_cfg)
         return best_cfg
 
+    'Gaussian Process Regressors'
+    def GPR_Walk(df, start, KernelList, rw):
+
+        time_X = np.array(range(len(df))).reshape(len(df), 1)
+        X = df.values.reshape(len(df), 1)
+        size = int(len(X) * start)
+        X_train, X_test = time_X[0:size], time_X[size:len(X)]
+        y_train, y_test = X[0:size], X[size:len(X)]
+
+        gpcparamList = []
+        history = [x for x in X_train]
+        predictions = [0] * len(history)
+        c = 0
+        for t in tqdm(range(len(X_test))):
+
+            if c > 0:
+                subhistory_X = X_train[-rw:-1]
+                subhistory_y = y_train[-rw:-1]
+            else:
+                subhistory_X = X_train#[-5:-1]
+                subhistory_y = y_train#[-5:-1]
+
+            kernelList = KernelList.split("_")
+            mainKernel = 1 * RBF()
+            for k in kernelList:
+                if k == "DotProduct":
+                    mainKernel += 1 * DotProduct()
+                elif k == "Matern":
+                    mainKernel += 1 * Matern()
+                elif k == "RationalQuadratic":
+                    mainKernel += 1 * RationalQuadratic()
+                elif k == "WhiteKernel":
+                    mainKernel += 1 * WhiteKernel()
+
+            model = GaussianProcessRegressor(kernel=mainKernel) #alpha=0.0, kernel=...,  n_restarts_optimizer=10, normalize_y=True
+
+            model_fit = model.fit(subhistory_X, subhistory_y)
+
+            newX = X_test[t].reshape(1, -1)
+            y_pred, y_std = model_fit.predict(newX, return_std=True)
+
+            predictions.append(y_pred[0][0])
+            X_train = np.append(X_train, newX, axis=0)
+            y_train = np.append(y_train, [y_test[t]], axis=0)
+
+            history.append(y_test[t])
+
+            ###
+            gpcparamList.append(y_std[-1])
+
+            c += 1
+
+        testDF = pd.DataFrame(history, index=df.index)
+        PredictionsDF = pd.DataFrame(predictions, index=df.index)
+
+        return [testDF, PredictionsDF, gpcparamList]
+
     'Arima Dataframe process'
     'Input: list of Dataframe, start: start/window, mode: rolling/expanding, opt: AIC, BIC, (p,d,q)'
     def ARIMA_process(datalist):
@@ -719,25 +1040,41 @@ class Slider:
 
         return [PredictionsDF, stderrDF, errDF, confDF]
 
-    def ARIMA_Walk(df, start, orderIn):
+    def ARIMA_Walk(df, start, orderIn, rw):
         X = df.values
         size = int(len(X) * start)
         train, test = X[0:size], X[size:len(X)]
         history = [x for x in train]
+        arparamList = []
         predictions = [0] * len(history)
+        c = 0
         for t in tqdm(range(len(test))):
-            model = ARIMA(history, order=orderIn)
+
+            if c > 0:
+                subhistory = history[-rw:]
+            else:
+                subhistory = history
+
+            model = ARIMA(subhistory, order=orderIn)
             model_fit = model.fit(disp=0)
             output = model_fit.forecast()
-            yhat = output[0]
+            yhat = output[0][0]
             predictions.append(yhat)
             obs = test[t]
             history.append(obs)
+            ###
+            modelParamsDF = pd.DataFrame(model_fit.conf_int(), columns=['Lower', 'Upper'])
+            modelParamsDF['pvalues'] = model_fit.pvalues
+            modelParamsDF['params'] = model_fit.params
+            modelParamsDF['Dates'] = df.index[t+size]
+            arparamList.append(modelParamsDF)
+
+            c += 1
 
         testDF = pd.DataFrame(history, index=df.index)
         PredictionsDF = pd.DataFrame(predictions, index=df.index)
 
-        return [testDF, PredictionsDF]
+        return [testDF, PredictionsDF, arparamList]
 
     def ARIMA_static(datalist):
         Asset = datalist[0]; start = datalist[1]; opt = datalist[3]; orderList = datalist[4]
@@ -1112,11 +1449,6 @@ class Slider:
             else:
                 gammaCO = kwargs['gammaCO']
 
-            if 'coFlag' not in kwargs:
-                coFlag = 0
-            else:
-                coFlag = kwargs['coFlag']
-
             if dataMode == 'standard':
                 df = pd.DataFrame(MinMaxScaler().fit_transform(df.values))
 
@@ -1138,7 +1470,6 @@ class Slider:
             sparseK = pd.DataFrame(sparse.csr_matrix((A * (A > threshold).astype(int)).as_matrix()).todense())
             U, s, VT = svd(sparseK)
             U, VT = Slider.svd_flip(U, VT)
-
             U = pd.DataFrame(U)
             # s = pd.DataFrame(s)
             VT = pd.DataFrame(VT)
@@ -1159,29 +1490,31 @@ class Slider:
             #time.sleep(300)
 
             'Building Contractive Observer Data'
-            if coFlag == 1:
-                aMat = []
-                for z in df.index:
-                    aSubMat = []
-                    for eig in eigOut:
-                        ajl = df.loc[z] * eigOut[eig]
-                        aSubMat.append(ajl.sum())
-                    aMat.append(aSubMat)
+            aMat = []
+            for z in df.index:
+                aSubMat = []
+                for eig in eigOut:
+                    ajl = df.loc[z] * eigOut[eig]
+                    aSubMat.append(ajl.sum())
+                aMat.append(aSubMat)
 
-                aMatDF = pd.DataFrame(aMat)
-                a_inv = pd.DataFrame(np.linalg.pinv(aMatDF.values))
-                lMat = pd.DataFrame(np.diag(s[:nD]))
-                glA = gammaCO * pd.DataFrame(np.dot(a_inv, lMat))
-                glA.index = df.columns
-                for c in glA.columns:
-                    glA[c] /= glA[c].abs().sum()
-                #print("df = ", df)
-                #print("aMatDF = ", aMatDF)
-                #print("a_inv = ", a_inv)
-                #print("lMat = ", lMat)
-                #print("glA = ", glA)
-                #time.sleep(30)
+            aMatDF = pd.DataFrame(aMat)
+            #print("aMatDF = ", aMatDF)
+            a_inv = pd.DataFrame(np.linalg.pinv(aMatDF.values))
+            #print("a_inv = ", a_inv)
+            lMat = pd.DataFrame(np.diag(s[:nD]))
+            glA = gammaCO * pd.DataFrame(np.dot(a_inv.T, lMat))
+            glA.index = df.index
+            #for c in glA.columns:
+            #    glA[c] /= glA[c].abs().sum()
+            #print("df = ", df)
 
+            #print("lMat = ", lMat)
+            #print("glA = ", glA)
+            #time.sleep(3000)
+            """
+            runCO = 0
+            if runCO == 1:
                 eq0List = []
                 coutCo = 0
                 for idx, row in eigOut.iterrows():
@@ -1191,15 +1524,14 @@ class Slider:
                         eq0List.append(eq0List[-1] + (1 - gammaCO) * np.dot(eigOut.loc[idx, :], lMat))
                     coutCo += 1
                 eq0 = pd.DataFrame(eq0List, index=eigOut.index, columns=eigOut.columns)
-
                 eq1 = pd.DataFrame(np.dot(df, glA), index=eigOut.index, columns=eigOut.columns)
-
                 cObserver = (eq0 + eq1).fillna(0).iloc[-1]
-
-                return [eigOut, sigmaDMAPS, s[:nD], glA, cObserver]
-
             else:
-                return [eigOut, s[:nD], sigmaDMAPS]
+                cObserver = 1
+            return [eigOut, sigmaDMAPS, s[:nD], glA, cObserver]
+            """
+
+            return [glA, s[:nD], sigmaDMAPS]
 
         def pyDmapsRun(df, **kwargs):
             if 'nD' not in kwargs:
@@ -1297,7 +1629,7 @@ class Slider:
                     sigmaList.append(dMapsOut[2])
                     c = 0
                     for eig in eigsPC:
-                        Loadings[c].append(dmapsEigsOut.iloc[:,eig])
+                        Loadings[c].append(dmapsEigsOut.iloc[:, eig])
                         c += 1
 
                 elif manifoldIn == 'DMAP_pyDmapsRun':
@@ -1334,6 +1666,209 @@ class Slider:
                 sigmaDF.index = df0.index
 
                 return [df0, principalCompsDf, lambdasDF, sigmaDF]
+
+        def gRollingManifoldPyErb(manifoldIn, df0, st, NumProjections, eigsPC, **kwargs):
+            if 'RollMode' in kwargs:
+                RollMode = kwargs['RollMode']
+            else:
+                RollMode = 'RollWindow'
+
+            if 'Scaler' in kwargs:
+                Scaler = kwargs['Scaler']
+            else:
+                Scaler = 'Standard'
+
+            if 'ProjectionMode' in kwargs:
+                ProjectionMode = kwargs['ProjectionMode']
+            else:
+                ProjectionMode = 'NoTranspose'
+
+            if 'contractiveObserver' in kwargs:
+                contractiveObserver = kwargs['contractiveObserver']
+            else:
+                contractiveObserver = 0
+
+            if 'LLE_n_neighbors' in kwargs:
+                n_neighbors = kwargs['LLE_n_neighbors']
+            else:
+                n_neighbors = 2
+
+            if 'LLE_Method' in kwargs:
+                LLE_Method = kwargs['LLE_n_neighbors']
+            else:
+                LLE_Method = 'standard'
+
+            if 'DMAPS_sigma' in kwargs:
+                sigma = kwargs['DMAPS_sigma']
+            else:
+                sigma = 'std'
+
+            "CALCULATE ROLLING STATISTIC"
+            if manifoldIn == 'CustomMetric':
+                if 'CustomMetricStatistic' in kwargs:
+                    CustomMetricStatistic = kwargs['CustomMetricStatistic']
+                    metaDF_Rolling = Slider.rollStatistics(df0.copy(), CustomMetricStatistic)
+                else:
+                    CustomMetricStatistic = None
+                    metaDF_Rolling = df0.copy()
+
+                if 'CustomMetric' in kwargs:
+                    CustomMetric = kwargs['CustomMetric']
+                else:
+                    CustomMetric = "euclidean"
+
+            eigDf = []
+            eigCoeffs = [[] for j in range(len(eigsPC))]
+            Comps = [[] for j in range(len(eigsPC))]
+            sigmaList = []
+            lambdasList = []
+            cObserverList = []
+            # st = 50; pcaN = 5; eigsPC = [0];
+            for i in range(st, len(df0) + 1):
+                # try:
+
+                print("Step:", i, " of ", len(df0) + 1)
+                if RollMode == 'RollWindow':
+                    df = df0.iloc[i - st:i, :]
+                else:
+                    df = df0.iloc[0:i, :]
+
+                if ProjectionMode == 'Transpose':
+                    df = df.T
+
+                features = df.columns.values
+                x = df.loc[:, features].values
+
+                if Scaler == 'Standard':
+                    x = StandardScaler().fit_transform(x)
+
+                if manifoldIn == 'CustomMetric':
+
+                    customMetric = Slider.Metric(metaDF_Rolling, statistic=CustomMetricStatistic, metric=CustomMetric)
+                    lambdasList.append(list(customMetric[0]))
+                    sigmaList.append(list(customMetric[0]))
+                    c = 0
+                    for eig in eigsPC:
+                        # print(eig, ', customMetric[1][eig] =', customMetric[1][eig]) # 0 , 100 , 5
+                        Comps[c].append(list(customMetric[1][eig]))
+                        c += 1
+
+                elif manifoldIn == 'PCA':
+                    pca = PCA(n_components=NumProjections)
+                    X_pca = pca.fit_transform(x)
+                    lambdasList.append(list(pca.singular_values_))
+                    sigmaList.append(list(pca.explained_variance_ratio_))
+                    c = 0
+                    for eig in eigsPC:
+                        # print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
+                        Comps[c].append(list(pca.components_[eig]))
+                        c += 1
+
+                elif manifoldIn == 'BetaRegressV':
+                    BetaKernelDF = Slider.BetaKernel(df)
+
+                    lambdasList.append(1)
+                    sigmaList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        Comps[c].append(BetaKernelDF.iloc[:, eig].tolist())
+                        c += 1
+
+                elif manifoldIn == 'BetaRegressH':
+                    BetaKernelDF = Slider.BetaKernel(df)
+
+                    lambdasList.append(1)
+                    sigmaList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        Comps[c].append(BetaKernelDF.iloc[eig, :].tolist())
+                        c += 1
+
+                elif manifoldIn == 'BetaRegressC':
+                    BetaKernelDF = Slider.BetaKernel(df)
+
+                    lambdasList.append(1)
+                    sigmaList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        Comps[c].append((BetaKernelDF.iloc[eig, :] + BetaKernelDF.iloc[:, eig]).tolist())
+                        c += 1
+
+                elif manifoldIn == 'Beta':
+                    BetaKernelDF = Slider.BetaKernel(df)
+                    U, s, VT = svd(BetaKernelDF.values)
+
+                    lambdasList.append(s)
+                    sigmaList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        Comps[c].append(U[eig])
+                        c += 1
+
+                elif manifoldIn == 'DMAPS':
+                    dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections, coFlag=contractiveObserver,
+                                               sigma=sigma)  # [eigOut, sigmaDMAPS, s[:nD], glA]
+                    eigDf.append(dMapsOut[0].iloc[-1, :])
+                    glAout = dMapsOut[3]
+                    cObserverList.append(dMapsOut[4].iloc[-1, :])
+                    sigmaList.append(dMapsOut[1])
+                    lambdasList.append(dMapsOut[2])
+                    for gl in glAout:
+                        Comps[gl].append(glAout[gl])
+                        eigCoeffs[gl].append(
+                            linear_model.LinearRegression(normalize=True).fit(df, dMapsOut[0].iloc[:, gl]).coef_)
+
+                elif manifoldIn == 'LLE':
+                    lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
+                                                          method=LLE_Method, n_jobs=-1)
+                    X_lle = lle.fit_transform(x)  # ; print(X_lle.shape)
+                    lambdasList.append(1)
+                    sigmaList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        # print(eig, ',', len(X_lle[:, eig])) # 0 , 100 , 5
+                        Comps[c].append(list(X_lle[:, eig]))
+                        c += 1
+
+                # except Exception as e:
+                #    print(e)
+                #    for c in len(eigsPC):
+                #        Comps[c].append(list(np.zeros(len(df0.columns), 1)))
+                #        eigCoeffs[c].append(list(np.zeros(len(df0.columns), 1)))
+
+            sigmaDF = pd.concat([pd.DataFrame(np.zeros((st - 1, 1))), pd.DataFrame(sigmaList)], axis=0,
+                                ignore_index=True).fillna(0)
+            sigmaDF.index = df0.index
+            try:
+                if len(sigmaDF.columns) <= 1:
+                    sigmaDF.columns = ['sigma']
+            except Exception as e:
+                print(e)
+
+            lambdasDF = pd.concat(
+                [pd.DataFrame(np.zeros((st - 1, pd.DataFrame(lambdasList).shape[1]))), pd.DataFrame(lambdasList)],
+                axis=0, ignore_index=True).fillna(0)
+            lambdasDF.index = df0.index
+
+            if contractiveObserver == 0:
+                principalCompsDf = [[] for j in range(len(Comps))]
+                exPostProjections = [[] for j in range(len(Comps))]
+                for k in range(len(Comps)):
+                    # principalCompsDf[k] = pd.DataFrame(pcaComps[k], columns=df0.columns, index=df1.index)
+
+                    principalCompsDf[k] = pd.concat(
+                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                         pd.DataFrame(Comps[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principalCompsDf[k].index = df0.index
+                    principalCompsDf[k] = principalCompsDf[k].fillna(0).replace(0, np.nan).ffill()
+
+                    exPostProjections[k] = df0 * Slider.S(principalCompsDf[k])
+
+                return [df0, principalCompsDf, exPostProjections, sigmaDF, lambdasDF]
+
+            else:
+
+                return [df0, pd.DataFrame(eigDf), pd.DataFrame(cObserverList), sigmaDF, lambdasDF, Comps, eigCoeffs]
 
         def gANN(X_train, X_test, y_train, params):
             epochsIn = params[0]
@@ -1561,9 +2096,123 @@ class Slider:
 
             return [df_real_price_test, df_predicted_price_test, scoreDF, regressor, history]
 
+        def gGPC(dataset_all, params):
+
+            SingleSample = False
+            if isinstance(dataset_all, pd.Series):
+                SingleSample = True
+
+            TrainEnd = int(params["TrainEndPct"] * len(dataset_all))
+            dataVals = dataset_all.values
+
+            #################################### Feature Scaling #####################################################
+            if SingleSample:
+                dataVals = dataVals.reshape(-1, 1)
+                FeatSpaceDims = 1
+                outNaming = [dataset_all.name]
+                print(outNaming)
+            else:
+                FeatSpaceDims = len(dataset_all.columns)
+                outNaming = dataset_all.columns
+
+            #################### Creating a data structure with N timesteps and 1 output #############################
+            X = []
+            y = []
+            for i in range(params["TrainWindow"], len(dataset_all)):
+                X.append(dataVals[i - params["TrainWindow"]:i])
+                y.append(np.sign(dataVals[i]))
+            X, y = np.array(X), np.array(y)
+            idx = dataset_all.iloc[params["TrainWindow"]:].index
+
+            ####################################### Reshaping ########################################################
+            "Samples : One sequence is one sample. A batch is comprised of one or more samples."
+            "Time Steps : One time step is one point of observation in the sample."
+            "Features : One feature is one observation at a time step."
+            X = np.reshape(X, (X.shape[0], X.shape[1]))
+            y = np.reshape(y, y.shape[0])
+            #time.sleep(3000)
+
+            X_train, y_train = X[:TrainEnd], y[:TrainEnd]
+            X_test, y_test = X[TrainEnd:], y[TrainEnd:]
+
+            df_real_price_train = pd.DataFrame(y_train, index=idx[:TrainEnd], columns=outNaming)
+            df_real_price_test = pd.DataFrame(y_test, index=idx[TrainEnd:], columns=outNaming)
+
+            #print("X.shape=", X.shape, ", y.shape=", y.shape, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape, ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
+            #print("A = ", X_train[-5:].shape)
+            #print("B = ", X_test[0].shape)
+            #print("C = ", X_train[-2:])
+            #print("Dx = ", X_test[0])
+            #print("Dy = ", y_test[0])
+            #print("E = ", X_test[0].reshape(1,X_train.shape[1]))
+            #print("F = ", np.append(X_train[-2:],X_test[0].reshape(1,X_train.shape[1]), axis=0))
+            #time.sleep(3000)
+
+            ####################################### CORE of the GPC #############################################
+            kernelList = params['Kernel'].split("_")
+            mainKernel = 1 * RBF()
+            for k in kernelList:
+                if k == "DotProduct":
+                    mainKernel += 1 * DotProduct()
+                elif k == "Matern":
+                    mainKernel += 1 * Matern()
+                elif k == "RationalQuadratic":
+                    mainKernel += 1 * RationalQuadratic()
+                elif k == "WhiteKernel":
+                    mainKernel += 1 * WhiteKernel()
+
+            model = GaussianProcessClassifier(kernel=mainKernel)
+
+            model_fit = model.fit(X_train, y_train)
+            ########################## Get Predictions for Static or Online Learning #################################
+            predicted_price_train = model_fit.predict(X_train)
+
+            if params["LearningMode"] == 'static':
+                predicted_price_test = model_fit.predict(X_test)
+                predicted_proba_test = model_fit.predict_proba(X_test)
+
+            elif params["LearningMode"] == 'online':
+
+                # X_test, y_test
+                predicted_price_test = []
+                predicted_proba_test = []
+                for i in tqdm(range(len(X_test))):
+                    #print(subhistory_X.shape)
+                    #print(subhistory_y.shape)
+                    newX = X_test[i].reshape(1, X_train.shape[1])
+
+                    predicted_price_test.append(model_fit.predict(newX))
+                    predicted_proba_test.append(model_fit.predict_proba(newX)[0])
+
+                    X_train = np.append(X_train, newX, axis=0)
+                    y_train = np.append(y_train, [y_test[i]], axis=0)
+
+                    subhistory_X = X_train[-params['subhistory']:]
+                    subhistory_y = y_train[-params['subhistory']:]
+
+                    model_fit = model.fit(subhistory_X, subhistory_y)
+                    #print(predicted_price_test)
+                    #print(predicted_proba_test)
+                    #time.sleep(300)
+
+            df_predicted_price_train = pd.DataFrame(predicted_price_train, index=df_real_price_train.index, columns=['PredictedPrice_Train_' + str(c) for c in
+                                                             df_real_price_train.columns])
+            df_predicted_price_test = pd.DataFrame(predicted_price_test, columns=['PredictedPrice_Test_' + str(c) for c in df_real_price_test.columns])
+            df_predicted_proba_test = pd.DataFrame(predicted_proba_test)#, columns=[c for c in model_fit.classes_])
+
+            if len(df_predicted_price_test) <= len(df_real_price_test):
+                df_predicted_price_test.index = df_real_price_test.index
+
+            return [df_real_price_test, df_predicted_price_test, df_predicted_proba_test]
+
     class Strategies:
 
         def EMA_signal(df, **kwargs):
-            sig = Slider.sign(Slider.ema(df))
+            if 'nIn' in kwargs:
+                nIn = kwargs['nIn']
+            else:
+                nIn = 3
+
+            sig = Slider.sign(Slider.ema(df, nperiods=nIn))
             pnl = df.mul(Slider.S(sig), axis=0)
             return pnl
