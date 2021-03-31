@@ -685,42 +685,82 @@ def GPRonPortfolios(Portfolios, scanMode, mode):
                     try:
                         pnl = pd.read_sql('SELECT * FROM ' + selection + '_GPR_pnl_'+kernelIn+ '_' + str(rw),
                                           conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
-                        medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).values[0]
-                        print(kernelIn, "_", selection, "_", medSh)
-                        shList.append([selection, medSh, kernelIn])
+                        pnl.columns = [selection]
+                        pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
+
+                        sh = (np.sqrt(252) * sl.sharpe(pnl)).round(4)
+                        MEANs = pnl.mean() * 100
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0)).set_index("index", drop=True)
+                        STDs = pnl.std() * 100
+
+                        statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
+                        stats = pd.concat([statsMat.iloc[0, :], statsMat.iloc[1, :]], axis=0)
+                        stats.index = ["GPR_sh", "GPR_Mean", "GPR_tConf", "GPR_Std", "RW_sh", "RW_Mean",
+                                       "RW_tConf", "RW_Std"]
+                        stats[["GPR_tConf", "RW_tConf"]] = stats[["GPR_tConf", "RW_tConf"]].astype(str)
+                        stats["selection"] = selection
+                        stats["kernel"] = kernelIn
+
+                        shList.append(stats)
                     except Exception as e:
                         print(e)
                         notProcessed.append(selection + '_GPR_pnl_'+kernelIn+ '_' + str(rw))
-            shDF = pd.DataFrame(shList, columns=['selection', 'sharpe', 'kernel']).set_index("selection", drop=True).abs()
-            shDF.to_sql(Portfolios+'_sh_GPR_pnl_' + str(rw), conn, if_exists='replace')
+            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(4)
+            shDF.to_sql(Portfolios + '_sh_GPR_pnl_' + str(rw), conn, if_exists='replace')
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
             notProcessedDF.to_sql(Portfolios+'_notProcessedDF_GPR_' + str(rw), conn, if_exists='replace')
 
     elif scanMode == 'ScanNotProcessed':
+        processList = []
         rw = 250
         notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_GPR_' + str(rw), conn).set_index('index', drop=True)
         for idx, row in notProcessedDF.iterrows():
             splitInfo = row['NotProcessedProjection'].split("_GPR_pnl_")
             selection = splitInfo[0]
-            kernelIn = str(splitInfo[1]).split("_")[0] + "_" + str(splitInfo[1]).split("_")[1]
-
             try:
-                print(selection)
-                GPR_Results = sl.GPR_Walk(allProjectionsDF[selection], 0.3, kernelIn, rw)
+                targetSel = float(selection.split("_")[2])
+            except:
+                targetSel = 1000000000000000
+            kernelIn = str(splitInfo[1]).split("_")[0] + "_" + str(splitInfo[1]).split("_")[1]
+            if (targetSel <= 5):
+                processList.append([selection, allProjectionsDF[selection], 0.3, kernelIn, rw])
 
-                GPR_Results[0].to_sql(selection + '_GPR_testDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
-                GPR_Results[1].to_sql(selection + '_GPR_PredictionsDF_' + kernelIn + '_' + str(rw), conn,
-                                      if_exists='replace')
+        print("#GPR Processes = ", len(processList))
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(GPRlocal, tqdm(processList))
+        p.close()
+        p.join()
 
-                pickle.dump(GPR_Results[2],
-                            open(selection + '_GPR_gprparamList_' + kernelIn + '_' + str(rw) + ".p", "wb"))
+    elif scanMode == 'ReportStatistics':
+        shGPR = []
+        rw = 250
+        for kernelIn in ["RBF_DotProduct", "RBF_Matern", "RBF_RationalQuadratic", "RBF_WhiteKernel"]:
+            for selection in tqdm(allProjectionsDF.columns):
+                try:
+                    pnl = pd.read_sql('SELECT * FROM ' + selection + '_GPR_pnl_' + kernelIn + '_' + str(rw),
+                                      conn).set_index('Dates', drop=True).iloc[round(0.3 * len(allProjectionsDF)):]
+                    pnlSharpes = (np.sqrt(252) * sl.sharpe(pnl).round(4)).reset_index()
+                    pnlSharpes['kernelIn'] = kernelIn
 
-                sig = sl.sign(GPR_Results[1])
+                    tConfDf_gpr = sl.tConfDF(pnl.fillna(0)).set_index("index", drop=True)
 
-                pnl = sig * GPR_Results[0]
-                pnl.to_sql(selection + '_GPR_pnl_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
-            except Exception as e:
-                print("selection = ", selection, ", error : ", e)
+                    pnlSharpes = pnlSharpes.set_index("index", drop=True)
+                    pnlSharpes = pd.concat(
+                        [pnlSharpes, pnl.mean() * 100, tConfDf_gpr.astype(str), pnl.std() * 100], axis=1)
+                    pnlSharpes.columns = ["pnlSharpes", "kernelIn", "pnl_mean", "tConfDf_sema", "pnl_std"]
+                    pnlSharpes['selection'] = selection
+                    pnlSharpes = pnlSharpes.set_index("selection", drop=True)
+                    shGPR.append(pnlSharpes)
+                except:
+                    pass
+
+        shGprDF = pd.concat(shGPR).round(4)
+        shGprDF.to_sql('GPR_pnlSharpes_' + Portfolios, conn, if_exists='replace')
+
+    elif scanMode == 'ReportSpecificStatistics':
+        stats = pd.read_sql('SELECT * FROM GPR_pnlSharpes_'+Portfolios, conn)
+        stats = stats[(stats['selection'].str.split("_").str[2].astype(float)<5)&(stats['kernelIn']=="RBF_DotProduct")].set_index("selection", drop=True)
+        stats.to_sql('GPR_SpecificStatistics_' + Portfolios, conn, if_exists='replace')
 
 def ARIMAlocal(argList):
     selection = argList[0]
@@ -786,47 +826,59 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
                 orderIn = (OrderP, 0, 0)
                 for selection in allProjectionsDF.columns:
                     try:
+
                         pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw),
                                           conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
-                        medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).values[0]
-                        shList.append([selection, medSh, orderIn[0]])
+                        pnl.columns = [selection]
+                        pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
+
+                        sh = (np.sqrt(252) * sl.sharpe(pnl)).round(4)
+                        MEANs = pnl.mean() * 100
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0)).set_index("index", drop=True)
+                        STDs = pnl.std() * 100
+
+                        statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
+                        stats = pd.concat([statsMat.iloc[0,:], statsMat.iloc[1,:]], axis=0)
+                        stats.index = ["ARIMA_sh", "ARIMA_Mean", "ARIMA_tConf", "ARIMA_Std", "RW_sh", "RW_Mean", "RW_tConf", "RW_Std"]
+                        stats[["ARIMA_tConf", "RW_tConf"]] = stats[["ARIMA_tConf", "RW_tConf"]].astype(str)
+                        stats["selection"] = selection
+                        stats["order"] = str(orderIn[0])+str(orderIn[1])+str(orderIn[2])
+
+                        shList.append(stats)
                     except Exception as e:
                         print(e)
                         notProcessed.append(selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw))
-            shDF = pd.DataFrame(shList, columns=['selection', 'sharpe', 'order']).set_index("selection", drop=True).abs()
+            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(4)
             shDF.to_sql(Portfolios+'_sh_ARIMA_pnl_' + str(rw), conn, if_exists='replace')
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
             notProcessedDF.to_sql(Portfolios+'_notProcessedDF'+ '_' + str(rw), conn, if_exists='replace')
 
     elif scanMode == 'ScanNotProcessed':
-        for rw in [250]:
-            notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'notProcessedDF'+ '_' + str(rw), conn).set_index('index', drop=True)
-            for idx, row in notProcessedDF.iterrows():
-                splitInfo = row['NotProcessedProjection'].split("_ARIMA_pnl_")
-                selection = splitInfo[0]
+        processList = []
+        rw = 250
+        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF'+ '_' + str(rw), conn).set_index('index', drop=True)
+
+        for idx, row in notProcessedDF.iterrows():
+            splitInfo = row['NotProcessedProjection'].split("_ARIMA_pnl_")
+            selection = splitInfo[0]
+            if float(selection.split("_")[2]) <= 5:
+                #print(selection.split("_")[2])
+                #time.sleep(3000)
                 orderStr = str(splitInfo[1])
                 orderIn = (int(orderStr[0]), int(orderStr[1]), int(orderStr[2]))
-                try:
-                    print(selection)
-                    Arima_Results = sl.ARIMA_Walk(allProjectionsDF[selection], 0.3, orderIn, rw)
+                processList.append([selection, allProjectionsDF[selection], 0.3, orderIn, rw])
 
-                    Arima_Results[0].to_sql(
-                        selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2])+ '_' + str(rw), conn,
-                        if_exists='replace')
-                    Arima_Results[1].to_sql(
-                        selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2])+ '_' + str(rw), conn,
-                        if_exists='replace')
+        print("#ARIMA Processes = ", len(processList))
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(ARIMAlocal, tqdm(processList))
+        p.close()
+        p.join()
 
-                    sig = sl.sign(Arima_Results[1])
-
-                    pnl = sig * Arima_Results[0]
-                    pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2])+ '_' + str(rw), conn,
-                               if_exists='replace')
-
-                    print("ARIMA (" + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + ") Sharpe = ",
-                          np.sqrt(252) * sl.sharpe(pnl))
-                except Exception as e:
-                    print("selection = ", selection, ", error : ", e)
+    elif scanMode == 'ReportSpecificStatistics':
+        rw = 250
+        stats = pd.read_sql('SELECT * FROM '+Portfolios+'_sh_ARIMA_pnl_'+str(rw), conn)
+        stats = stats[(stats['selection'].str.split("_").str[2].astype(float)<5)].set_index("selection", drop=True).round(4)
+        stats.to_sql('ARIMA_SpecificStatistics_' + Portfolios, conn, if_exists='replace')
 
 def plotARIMASharpes(Portfolios, manifoldIn):
     dfList = []
@@ -1365,7 +1417,9 @@ def Test(mode):
 #ProjectionsPlots('PCA', 'mergeManifolds')
 
 #getProjections("build")
-#semaOnProjections()
+#semaOnProjections("", "Direct")
+#semaOnProjections("global", "Direct")
+#semaOnProjections("", "BasketsCombos")
 
 #StationarityOnProjections('PCA', 'build')
 #StationarityOnProjections('LLE', 'build')
@@ -1376,17 +1430,19 @@ def Test(mode):
 #ARIMAonPortfolios("ClassicPortfolios", 'Main', "report")
 #ARIMAonPortfolios("Projections", 'Main', "run")
 #ARIMAonPortfolios("Projections", 'Main', "report")
+#ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("Finalists", 'Main', "run")
-#ARIMAonPortfolios('ScanNotProcessed', "")
 #plotARIMASharpes("ClassicPortfolios", "")
 #plotARIMASharpes("Projections", "PCA")
 #plotARIMASharpes("Projections", "LLE")
 
 #GPRonPortfolios("ClassicPortfolios", 'Main', "run")
 #GPRonPortfolios("ClassicPortfolios", 'Main', "report")
-GPRonPortfolios("Projections", 'Main', "run")
+#GPRonPortfolios("Projections", 'Main', "run")
 GPRonPortfolios("Projections", 'Main', "report")
 #GPRonPortfolios("Projections", "ScanNotProcessed", "")
+#GPRonPortfolios("Projections", "ReportStatistics", "")
+#GPRonPortfolios("Projections", "ReportSpecificStatistics", "")
 #GPRonPortfolios("Finalists", 'Main', "run")
 
 #Test('GPR')
