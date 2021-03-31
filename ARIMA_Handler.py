@@ -51,7 +51,10 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
         orderList = [1,3,5]
     elif Portfolios == 'globalProjections':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
+        globalProjectionsList = []
+        for manifoldIn in ["PCA", "LLE"]:
+             globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
+        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
         orderList = [1,3,5]
     elif Portfolios == 'ClassicPortfolios':
         allPortfoliosList = []
@@ -91,7 +94,6 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
                 orderIn = (OrderP, 0, 0)
                 for selection in allProjectionsDF.columns:
                     try:
-
                         pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw),
                                           conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
                         pnl.columns = [selection]
@@ -124,12 +126,12 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
         notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF'+ '_' + str(rw), conn).set_index('index', drop=True)
 
         for idx, row in notProcessedDF.iterrows():
+            print(row)
+            time.sleep(300)
             splitInfo = row['NotProcessedProjection'].split("_ARIMA_pnl_")
             selection = splitInfo[0]
+            if 1==1:
             #if float(selection.split("_")[2]) <= 5:
-            if float(selection.split("_")[2]) <= 5:
-                #print(selection.split("_")[2])
-                #time.sleep(3000)
                 orderStr = str(splitInfo[1])
                 orderIn = (int(orderStr[0]), int(orderStr[1]), int(orderStr[2]))
                 processList.append([selection, allProjectionsDF[selection], 0.3, orderIn, rw])
@@ -193,6 +195,9 @@ def Test():
 #ARIMAonPortfolios("ClassicPortfolios", 'Main', "report")
 #ARIMAonPortfolios("Projections", 'Main', "run")
 #ARIMAonPortfolios("Projections", 'Main', "report")
-ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
+#ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
+ARIMAonPortfolios("globalProjections", 'Main', "run")
+#ARIMAonPortfolios("globalProjections", 'Main', "report")
+#ARIMAonPortfolios("globalProjections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("Projections", "ReportSpecificStatistics", "")
 #ARIMAonPortfolios("Finalists", 'Main', "run")

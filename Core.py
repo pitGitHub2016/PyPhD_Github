@@ -328,7 +328,7 @@ def RiskParity(mode):
         rpRsDF.columns = [str(x)+"_Days" for x in twList]
 
 def RunManifold(argList):
-    df = argList[0].iloc[-300:,:]
+    df = argList[0]
     manifoldIn = argList[1]
     tw = argList[2]
 
@@ -374,113 +374,54 @@ def RunManifoldLearningOnFXPairs():
     p.close()
     p.join()
 
-def getProjections(mode):
+def getProjections():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
-    if mode == 'build0':
-        for manifoldIn in ["PCA", "LLE"]:
-            rsProjectionList = []
-            csrsProjectionList = []
-            for tw in twList:
-                print(manifoldIn + " tw = ", tw)
-                list = []
-                for c in [0, 1, 2, 3, 4]:
-                    try:
-                        medDf = df * sl.S(
-                            pd.read_sql('SELECT * FROM ' + manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(c),
-                                        conn).set_index('Dates', drop=True))
-                        pr = sl.rs(medDf.fillna(0))
-                        list.append(pr)
-                    except:
-                        pass
-                exPostProjections = pd.concat(list, axis=1, ignore_index=True)
-                exPostProjections.columns = ['$\Sigma_{' + manifoldIn + ',' + str(tw) + ',1,t}$',
-                                             '$\Sigma_{' + manifoldIn + ',' + str(tw) + ',2,t}$',
-                                             '$\Sigma_{' + manifoldIn + ',' + str(tw) + ',3,t}$',
-                                             '$\Sigma_{' + manifoldIn + ',' + str(tw) + ',4,t}$',
-                                             '$\Sigma_{' + manifoldIn + ',' + str(tw) + ',5,t}$']
 
-                exPostProjections.to_sql(manifoldIn + '_RsExPostProjections_tw_' + str(tw), conn, if_exists='replace')
+    for manifoldIn in ["PCA", "LLE"]:
 
-                exPostProjections.index = [x.replace("00:00:00", "").strip() for x in exPostProjections.index]
-
-                rsProjection = sl.rs(exPostProjections)
-                rsProjectionList.append(rsProjection)
-
-                csrsProjection = sl.ecs(rsProjection)
-                csrsProjection.name = '$\Sigma Y_{s' + manifoldIn + ',' + str(tw) + ',t}$'
-                csrsProjectionList.append(csrsProjection)
-
-            projections_subgroup_List = []
-            for tw in twList:
-                print(manifoldIn + " tw = ", tw)
-                list = []
-                for c in range(len(df.columns)):
-                    try:
-                        medDf = df * sl.S(
-                            pd.read_sql('SELECT * FROM ' + manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(c),
-                                        conn).set_index('Dates', drop=True))
-                        pr = sl.rs(medDf.fillna(0))
-                        list.append(pr)
-                    except:
-                        pass
-                exPostProjections = pd.concat(list, axis=1, ignore_index=True)
-                if manifoldIn == 'PCA':
-                    exPostProjections.columns = [manifoldIn + '_' + str(tw) + '_' + str(x) for x in range(len(df.columns))]
-                elif manifoldIn == 'LLE':
-                    exPostProjections.columns = [manifoldIn + '_' + str(tw) + '_' + str(x) for x in
-                                                 range(len(df.columns) - 1)]
-
-                exPostProjections.to_sql(manifoldIn + '_RsExPostProjections_tw_' + str(tw), conn, if_exists='replace')
-
-                exPostProjections.index = [x.replace("00:00:00", "").strip() for x in exPostProjections.index]
-
-                ### Global Projections ###
-
-                for h in range(1, 6):
-                    for subgroup in ['Head', 'Tail']:
-                        print("h = ", h, ", subgroup = ", subgroup)
-                        if subgroup == 'Head':
-                            projections_subgroup = sl.rs(exPostProjections.iloc[:, :h])
-                        else:
-                            projections_subgroup = sl.rs(exPostProjections.iloc[:, -h:])
-                        projections_subgroup = pd.DataFrame(projections_subgroup)
-                        projections_subgroup.columns = [manifoldIn + "_" + str(tw) + "_" + str(h) + "_" + str(subgroup)]
-                        projections_subgroup_List.append(projections_subgroup)
-
-            globalProjectionsDF = pd.concat(projections_subgroup_List, axis=1)
-            globalProjectionsDF.to_sql('globalProjectionsDF_' + manifoldIn, conn, if_exists='replace')
-
-    elif mode == 'build1':
-        rng = [0, 1, 2, 3, 4]
         allProjectionsList = []
+        projections_subgroup_List = []
         for tw in twList:
-            print("getProjections - tw = ", tw)
+            print(manifoldIn + " tw = ", tw)
+            list = []
+            for c in range(len(df.columns)):
+                try:
+                    medDf = df * sl.S(pd.read_sql(
+                        'SELECT * FROM ' + manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(c),
+                        conn).set_index('Dates', drop=True))
+                    pr = sl.rs(medDf.fillna(0))
+                    list.append(pr)
+                except:
+                    pass
+            exPostProjections = pd.concat(list, axis=1, ignore_index=True)
+            if manifoldIn == 'PCA':
+                exPostProjections.columns = [manifoldIn + '_' + str(tw) + '_' + str(x) for x in
+                                             range(len(df.columns))]
+            elif manifoldIn == 'LLE':
+                exPostProjections.columns = [manifoldIn + '_' + str(tw) + '_' + str(x) for x in
+                                             range(len(df.columns) - 1)]
 
-            allProjectionsPCA = []
-            allProjectionsLLE = []
-            for pr in rng:
-                # PCA
-                PCArs = pd.DataFrame(
-                    sl.rs(df * sl.S(pd.read_sql('SELECT * FROM PCA_principalCompsDf_tw_' +str(tw) + "_" + str(pr), conn).set_index('Dates', drop=True))))
-                PCArs.columns = ['PCA_' +str(tw) + "_" + str(pr)]
-                allProjectionsPCA.append(PCArs)
+            exPostProjections.to_sql(manifoldIn + '_RsExPostProjections_tw_' + str(tw), conn, if_exists='replace')
+            allProjectionsList.append(exPostProjections)
 
-                # LLE
-                LLErs = pd.DataFrame(
-                    sl.rs(df * sl.S(pd.read_sql('SELECT * FROM LLE_principalCompsDf_tw_' + str(tw) + "_" + str(pr), conn).set_index('Dates', drop=True))))
-                LLErs.columns = ['LLE_' +str(tw) + "_" + str(pr)]
-                allProjectionsLLE.append(LLErs)
+            ### Global Projections ###
 
-            PCAdf = pd.concat(allProjectionsPCA, axis=1)
-            #PCAdf['PCA_'+str(tw)] = sl.rs(PCAdf)
-            LLEdf = pd.concat(allProjectionsLLE, axis=1)
-            #LLEdf['LLE_'+str(tw)] = sl.rs(LLEdf)
-
-            medProjectionsDF = pd.concat([LLEdf, PCAdf], axis=1)
-            allProjectionsList.append(medProjectionsDF)
+            for h in range(1, 6):
+                for subgroup in ['Head', 'Tail']:
+                    print("h = ", h, ", subgroup = ", subgroup)
+                    if subgroup == 'Head':
+                        projections_subgroup = sl.rs(exPostProjections.iloc[:, :h])
+                    else:
+                        projections_subgroup = sl.rs(exPostProjections.iloc[:, -h:])
+                    projections_subgroup = pd.DataFrame(projections_subgroup)
+                    projections_subgroup.columns = [manifoldIn + "_" + str(tw) + "_" + str(h) + "_" + str(subgroup)]
+                    projections_subgroup_List.append(projections_subgroup)
 
         allProjectionsDF = pd.concat(allProjectionsList, axis=1)
         allProjectionsDF.to_sql('allProjectionsDF', conn, if_exists='replace')
+
+        globalProjectionsDF = pd.concat(projections_subgroup_List, axis=1)
+        globalProjectionsDF.to_sql('globalProjectionsDF_' + manifoldIn, conn, if_exists='replace')
 
 def PaperizeProjections(pnlSharpes):
     pnlSharpes['paperText'] = ""
@@ -986,9 +927,7 @@ def Test():
 #ProjectionsPlots('PCA')
 #ProjectionsPlots('LLE')
 
-getProjections("build0")
-getProjections("build1")
-#getProjections("plot")
+getProjections()
 
 #StationarityOnProjections('PCA', 'build')
 #StationarityOnProjections('LLE', 'build')

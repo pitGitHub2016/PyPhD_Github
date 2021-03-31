@@ -61,6 +61,11 @@ def GPRonPortfolios(Portfolios, scanMode, mode):
         LOportfolio.columns = ["LO"]
         allPortfoliosList.append(LOportfolio)
         allProjectionsDF = pd.concat(allPortfoliosList, axis=1)
+    elif Portfolios == 'globalProjections':
+        globalProjectionsList = []
+        for manifoldIn in ["PCA", "LLE"]:
+             globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
+        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
     elif Portfolios == 'Finalists':
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_2', 'LLE_ExpWindow25']]
 
@@ -229,8 +234,11 @@ def Test(mode):
 #GPRonPortfolios("ClassicPortfolios", 'Main', "run")
 #GPRonPortfolios("ClassicPortfolios", 'Main', "report")
 #GPRonPortfolios("Projections", 'Main', "run")
-GPRonPortfolios("Projections", 'Main', "report")
+#GPRonPortfolios("Projections", 'Main', "report")
 #GPRonPortfolios("Projections", "ScanNotProcessed", "")
+GPRonPortfolios("globalProjections", 'Main', "run")
+#GPRonPortfolios("globalProjections", 'Main', "report")
+#GPRonPortfolios("globalProjections", "ScanNotProcessed", "")
 #GPRonPortfolios("Projections", "ReportStatistics", "")
 #GPRonPortfolios("Projections", "ReportSpecificStatistics", "")
 #GPRonPortfolios("Finalists", 'Main', "run")

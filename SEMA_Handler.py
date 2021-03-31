@@ -35,7 +35,7 @@ def semaOnProjections(space, mode):
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
             sub_globalProjectionsDF = pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index(
-                'index', drop=True)
+                'Dates', drop=True)
             globalProjectionsList.append(sub_globalProjectionsDF.iloc[round(0.3 * len(sub_globalProjectionsDF)):])
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
 
@@ -147,5 +147,5 @@ def Test(mode):
 
 #####################################################
 #semaOnProjections("", "Direct")
-#semaOnProjections("global", "Direct")
+semaOnProjections("global", "Direct")
 #semaOnProjections("", "BasketsCombos")
