@@ -181,23 +181,39 @@ def shortTermInterestRatesSetup(mode):
 
 def LongOnly():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
-    longOnlySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df).round(4), columns=["Sharpe"])
+    longOnlySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df), columns=["Sharpe"])
+    df_Mean = 100 * 252 * df.mean()
+    tConfdf = sl.tConfDF(pd.DataFrame(df).fillna(0), scalingFactor=252 * 100).set_index("index", drop=True)
+    stddf = 100 * np.sqrt(252) * df.std()
     longOnlySharpes.to_sql('LongOnlySharpes', conn, if_exists='replace')
-    longOnlySharpes["Sharpe"] = "& " + longOnlySharpes["Sharpe"].round(4).astype(str) + " \\\\"
-    print("longOnlySharpes = ", longOnlySharpes)
 
     randomWalkPnl_df = sl.S(sl.sign(df)) * df
-    print("Random Walk df : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_df).round(4))
+    randomWalkPnl_dfSharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(randomWalkPnl_df), columns=["Sharpe"])
+    randomWalkPnl_df_Mean = 100 * 252 * randomWalkPnl_df.mean()
+    tConfrandomWalkPnl_df = sl.tConfDF(pd.DataFrame(randomWalkPnl_df).fillna(0), scalingFactor=252 * 100).set_index("index", drop=True)
+    stdrandomWalkPnl_df = 100 * np.sqrt(252) * randomWalkPnl_df.std()
+    AssetsStatistics = pd.concat([longOnlySharpes, df_Mean, tConfdf.astype(str), stddf, randomWalkPnl_dfSharpes, randomWalkPnl_df_Mean, tConfrandomWalkPnl_df.astype(str), stdrandomWalkPnl_df], axis=1)
+    AssetsStatistics.columns = ["longOnlySharpes", "df_Mean", "tConfdf", "stddf", "randomWalkPnl_dfSharpes", "randomWalkPnl_df_Mean", "tConfrandomWalkPnl_df", "stdrandomWalkPnl_df"]
+    AssetsStatistics.round(2).to_sql('AssetsStatistics', conn, if_exists='replace')
 
     Edf = sl.ew(df)
-    print("Edf Sharpe = ", np.sqrt(252) * sl.sharpe(Edf).round(4))
+    print("Edf Sharpe = ", np.sqrt(252) * sl.sharpe(Edf).round(2))
     randomWalkPnl_Edf = sl.S(sl.sign(Edf)) * Edf
-    print("Random Walk Edf : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_Edf).round(4))
+    print("Random Walk Edf : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_Edf).round(2))
 
-    Edf_classic = sl.E(df)
-    print("Edf_classic Sharpe = ", np.sqrt(252) * sl.sharpe(Edf_classic).round(4))
+    Edf_classic = sl.E(df).fillna(0)
+    Edf_classic.to_sql('Edf_classic', conn, if_exists='replace')
+    meanEdf_classic = 100 * 252 * Edf_classic.mean()
+    tConfEWP = sl.tConfDF(pd.DataFrame(Edf_classic).fillna(0), scalingFactor=252 * 100).set_index("index", drop=True)
+
+    stdEWP = 100 * np.sqrt(252) * Edf_classic.std()
+    print("Edf_classic Sharpe = ", np.sqrt(252) * sl.sharpe(Edf_classic).round(2), ", Mean = ", meanEdf_classic, ", tConf = ", tConfEWP, ", stdEWP = ", stdEWP)
     randomWalkPnl_Edf_classic = sl.S(sl.sign(Edf_classic)) * Edf_classic
-    print("Random Walk Edf_classic : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_Edf_classic).round(4))
+    meanrwEdf_classic = 100 * 252 * randomWalkPnl_Edf_classic.mean()
+    tConfrwEWP = sl.tConfDF(pd.DataFrame(randomWalkPnl_Edf_classic).fillna(0), scalingFactor=252 * 100).set_index("index", drop=True)
+    stdrwEWP = 100 * np.sqrt(252) * randomWalkPnl_Edf_classic.std()
+    print("Edf_classic Sharpe = ", np.sqrt(252) * sl.sharpe(Edf_classic).round(2), ", Mean = ", meanEdf_classic, ", tConf = ", tConfEWP, ", stdEWP = ", stdEWP)
+    print("Random Walk Edf_classic : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_Edf_classic).round(2), ", Mean = ", meanrwEdf_classic, ", tConf = ", tConfrwEWP, ", stdEWP = ", stdrwEWP)
 
     csEDf = sl.ecs(Edf)
     csEDf_classic = sl.ecs(Edf_classic)
@@ -205,14 +221,14 @@ def LongOnly():
     approxRetsDiff = Edf - Edf_classic
     cs_approxRetsDiff = sl.cs(approxRetsDiff)
     years = (pd.to_datetime(cs_approxRetsDiff.index[-1]) - pd.to_datetime(cs_approxRetsDiff.index[0])) / np.timedelta64(1, 'Y')
-    print("Avg LogReturns : ", Edf.mean() * 100, " (%)")
-    print("Avg Approximated Returns : ", Edf_classic.mean() * 100, " (%)")
-    print("Avg Annual LogReturns = ", (csEDf.iloc[-1] / years) * 100, " (%)")
-    print("Avg Annual Approximated Returns = ", (csEDf_classic.iloc[-1] / years) * 100, " (%)")
-    print("Average Log vs Approximated Returns Difference : ", approxRetsDiff.mean() * 100, " (%)")
-    print("years = ", years)
-    print("Total Log vs Approximated Returns Difference = ", cs_approxRetsDiff.iloc[-1] * 100, " (%)")
-    print("Avg Annual Log vs Approximated Returns Difference = ", (cs_approxRetsDiff.iloc[-1] / years) * 100, " (%)")
+    #print("Avg LogReturns : ", Edf.mean() * 100, " (%)")
+    #print("Avg Approximated Returns : ", Edf_classic.mean() * 100, " (%)")
+    #print("Avg Annual LogReturns = ", (csEDf.iloc[-1] / years) * 100, " (%)")
+    #print("Avg Annual Approximated Returns = ", (csEDf_classic.iloc[-1] / years) * 100, " (%)")
+    #print("Average Log vs Approximated Returns Difference : ", approxRetsDiff.mean() * 100, " (%)")
+    #print("years = ", years)
+    #print("Total Log vs Approximated Returns Difference = ", cs_approxRetsDiff.iloc[-1] * 100, " (%)")
+    #print("Avg Annual Log vs Approximated Returns Difference = ", (cs_approxRetsDiff.iloc[-1] / years) * 100, " (%)")
 
     LOcsplot = pd.concat([csEDf, csEDf_classic], axis=1)
     LOcsplot.columns = ["$\\tilde{y}_{t, (LO)}$", "$y_{t, (LO)}$"]
@@ -241,6 +257,11 @@ def LongOnly():
     pnlList = []
     for n in [3,5,25,50,250]:
         subSemaPnL = sl.S(sl.sign(sl.ema(Edf, nperiods=n))) * Edf
+        meanSemaEdf_classic = 100 * 252 * subSemaPnL.mean()
+        tConfSemaEWP = sl.tConfDF(pd.DataFrame(subSemaPnL).fillna(0), scalingFactor=252 * 100).set_index("index", drop=True)
+        stdSemaEWP = 100 * np.sqrt(252) * subSemaPnL.std()
+        print("subSemaPnL Edf_classic : n = ", n, ", Mean = ",
+              meanSemaEdf_classic, ", tConf = ", tConfSemaEWP, ", stdEWP = ", stdSemaEWP)
         subSemaPnL.columns = ["semaE_"+str(n)]
         pnlList.append(subSemaPnL)
     pnlDF = pd.concat(pnlList, axis=1)
@@ -256,7 +277,7 @@ def RiskParity(mode):
         expVol = np.sqrt(252) * sl.S(sl.expanderVol(df, 25)) * 100
         shList = []
         semaShList = []
-        for tw in twList:
+        for tw in [250]:
             print("Risk Parity tw = ", tw)
             if tw == 'ExpWindow25':
                 riskParityVol = expVol
@@ -268,7 +289,7 @@ def RiskParity(mode):
 
             df = (df / riskParityVol).replace([np.inf, -np.inf], 0)
             df.to_sql('riskParityDF_tw_'+str(tw), conn, if_exists='replace')
-            riskParitySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df).round(4), columns=["Sharpe_"+str(tw)])
+            riskParitySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df), columns=["Sharpe_"+str(tw)])
             shList.append(riskParitySharpes)
 
             rsDf = pd.DataFrame(sl.rs(df))
@@ -276,17 +297,28 @@ def RiskParity(mode):
             rsDf.to_sql('RiskParityEWPrsDf_tw_'+str(tw), conn, if_exists='replace')
             shrsdfRP = (np.sqrt(252) * sl.sharpe(rsDf)).round(4)
 
-            randomWalkPnl_rsDf = sl.S(sl.sign(rsDf)) * rsDf
+            randomWalkPnl_rsDf = (sl.S(sl.sign(rsDf)) * rsDf).fillna(0)
             rsDf.to_sql('RiskParityEWPrsDf_randomWalkPnl_tw_'+str(tw), conn, if_exists='replace')
-            print("Random Walk rsDf : tw = ", tw, ", Sharpe : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_rsDf).round(4))
+            shRWrp = np.sqrt(252) * sl.sharpe(randomWalkPnl_rsDf).round(4)
+            meanRWrp = 100 * 252 * randomWalkPnl_rsDf.mean().round(4)
+            tConfRWrp = sl.tConfDF(randomWalkPnl_rsDf, scalingFactor=252 * 100).set_index("index", drop=True)
+            stdRWrp = 100 * np.sqrt(252) * randomWalkPnl_rsDf.std().round(4)
+            print("Random Walk rsDf : tw = ", tw, ", Sharpe : ", shRWrp, ", Mean = ", meanRWrp, ", tConf = ", tConfRWrp, ", stdRWrp = ", stdRWrp)
+
+            # print("Done ....")
+            # time.sleep(3000)
 
             subPnlList = []
             for n in [3, 5, 25, 50, 250]:
-                subSemaPnL = sl.S(sl.sign(sl.ema(rsDf, nperiods=n))) * rsDf
+                subSemaPnL = (sl.S(sl.sign(sl.ema(rsDf, nperiods=n))) * rsDf).fillna(0)
+                meanSemarp = (100 * 252 * subSemaPnL.mean()).round(2)
+                tConfSemarp = sl.tConfDF(subSemaPnL, scalingFactor=252 * 100).set_index("index", drop=True)
+                stdSemarp = (100 * np.sqrt(252) * subSemaPnL.std()).round(2)
+                print("Sema rsDf : n = ", n, ", tw ", tw, ", Sharpe = ", (np.sqrt(252) * sl.sharpe(subSemaPnL)).round(2), ", Mean = ", meanSemarp, ", tConf = ", tConfSemarp, ", stdRWrp = ", stdSemarp)
                 subSemaPnL.columns = ["semaRs_" + str(n)]
                 subPnlList.append(subSemaPnL)
             subPnlDF = pd.concat(subPnlList, axis=1)
-            pnlSharpes = np.sqrt(252) * sl.sharpe(subPnlDF).round(4)
+            pnlSharpes = np.sqrt(252) * sl.sharpe(subPnlDF).round(2)
             pnlSharpes['semaRs_0'] = shrsdfRP.values[0]
             pnlSharpes['tw'] = tw
 
@@ -377,9 +409,9 @@ def RunManifoldLearningOnFXPairs():
 def getProjections():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
 
+    allProjectionsList = []
     for manifoldIn in ["PCA", "LLE"]:
 
-        allProjectionsList = []
         projections_subgroup_List = []
         for tw in twList:
             print(manifoldIn + " tw = ", tw)
@@ -406,7 +438,7 @@ def getProjections():
 
             ### Global Projections ###
 
-            for h in range(1, 6):
+            for h in range(2, 6):
                 for subgroup in ['Head', 'Tail']:
                     print("h = ", h, ", subgroup = ", subgroup)
                     if subgroup == 'Head':
@@ -417,11 +449,11 @@ def getProjections():
                     projections_subgroup.columns = [manifoldIn + "_" + str(tw) + "_" + str(h) + "_" + str(subgroup)]
                     projections_subgroup_List.append(projections_subgroup)
 
-        allProjectionsDF = pd.concat(allProjectionsList, axis=1)
-        allProjectionsDF.to_sql('allProjectionsDF', conn, if_exists='replace')
-
         globalProjectionsDF = pd.concat(projections_subgroup_List, axis=1)
         globalProjectionsDF.to_sql('globalProjectionsDF_' + manifoldIn, conn, if_exists='replace')
+
+    allProjectionsDF = pd.concat(allProjectionsList, axis=1)
+    allProjectionsDF.to_sql('allProjectionsDF', conn, if_exists='replace')
 
 def PaperizeProjections(pnlSharpes):
     pnlSharpes['paperText'] = ""
@@ -514,7 +546,7 @@ def ContributionAnalysis():
     allProjectionsDF = pd.concat([ProjectionsDF, allmainPortfoliosDF], axis=1)
 
     pnlBaskets = sl.RV(allProjectionsDF, mode='Baskets')
-    shBaskets = np.sqrt(252) * sl.sharpe(pnlBaskets).round(4).abs()
+    shBaskets = np.sqrt(252) * sl.sharpe(pnlBaskets).round(4)
     shBaskets.to_sql('shBaskets', conn, if_exists='replace')
 
     shBaskets = shBaskets.reset_index()
@@ -917,7 +949,7 @@ def Test():
 #shortTermInterestRatesSetup("retsIRDs")
 
 #LongOnly()
-#RiskParity('run')
+RiskParity('run')
 #RiskParity('plots')
 
 #RunManifoldLearningOnFXPairs()
@@ -927,7 +959,7 @@ def Test():
 #ProjectionsPlots('PCA')
 #ProjectionsPlots('LLE')
 
-getProjections()
+#getProjections()
 
 #StationarityOnProjections('PCA', 'build')
 #StationarityOnProjections('LLE', 'build')

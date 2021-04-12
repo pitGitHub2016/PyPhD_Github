@@ -27,26 +27,55 @@ mpl.rcParams['font.size'] = 20
 conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
+calcMode = 'run'
+#calcMode = 'read'
+pnlCalculator = 1
+
 def RNNprocess(argList):
     selection = argList[0]
     df = argList[1]
     params = argList[2]
     magicNum = argList[3]
 
-    out = sl.AI.gRNN(df, params)
-    out[0].to_sql('df_real_price_RNN_' + selection + str(magicNum), conn, if_exists='replace')
-    out[1].to_sql('df_predicted_price_RNN_' + selection + str(magicNum), conn, if_exists='replace')
-    out[2].to_sql('scoreList_RNN_' + selection + str(magicNum), conn, if_exists='replace')
+    if calcMode == 'run':
+        out = sl.AI.gRNN(df, params)
+        out[0].to_sql('df_real_price_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[1].to_sql('df_predicted_price_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[2].to_sql('scoreList_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+
+    elif calcMode == 'read':
+        out = [
+            pd.read_sql('SELECT * FROM df_real_price_RNN_', conn).set_index('Dates', drop=True),# + selection + "_" + str(magicNum)
+            pd.read_sql('SELECT * FROM df_predicted_price_RNN_' + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM scoreList_RNN_' + selection + "_" + str(magicNum), conn)]
+
     df_real_price = out[0]
     df_predicted_price = out[1]
-
     df_predicted_price.columns = df_real_price.columns
 
-    # Returns Prediction
-    sig = sl.sign(df_predicted_price)
-    pnl = sig * df_real_price
+    if pnlCalculator == 0:
+        sig = sl.sign(df_predicted_price)
+        pnl = sig * df_real_price
+    elif pnlCalculator == 1:
+        pnl = (df_predicted_price-0.5) * df_real_price
+    elif pnlCalculator == 2:
+        sig = sl.S(sl.sign(df_predicted_price))
+        pnl = sig * df_real_price
+    elif pnlCalculator == 3:
+        sig = sl.sign(df_predicted_price)
+        pnl = sig * sl.S(df_real_price, nperiods=1)
+    elif pnlCalculator == 4:
+        sig = sl.sign(df_predicted_price - df_real_price)
+        pnl = sig * sl.S(sl.d(df_real_price), nperiods=-1)
 
-    pnl.to_sql('pnl_RNN_' + selection + str(magicNum), conn, if_exists='replace')
+    reportSh = np.sqrt(252) * sl.sharpe(pnl)
+    print(reportSh)
+    sl.cs(pnl).plot(title='csPnL')
+    df_real_price.plot(title='Real Price')
+    df_predicted_price.plot(title = 'Predicted Price')
+    plt.show()
+
+    pnl.to_sql('pnl_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
 
 def runRnn(Portfolios, scanMode, mode):
     def Architecture(magicNum):
@@ -57,8 +86,8 @@ def runRnn(Portfolios, scanMode, mode):
 
             paramsSetup = {
                 "HistLag": 0,
-                "TrainWindow": 2,
-                "epochsIn": 50,
+                "TrainWindow": 1,
+                "epochsIn": 100,
                 "batchSIzeIn": 1,
                 "LearningMode": 'online',
                 "medSpecs": [
@@ -74,66 +103,12 @@ def runRnn(Portfolios, scanMode, mode):
             #'xShape1'
             paramsSetup = {
                 "HistLag": 0,
-                "TrainWindow": 2,
-                "epochsIn": 50,
+                "TrainWindow": 1,
+                "epochsIn": 100,
                 "batchSIzeIn": 1,
                 "LearningMode": 'online',
                 "medSpecs": [
                              {"LayerType": "LSTM", "units": 10, "RsF": False, "Dropout": 0}
-                             ],
-                "modelNum": magicNum,
-                "TrainEndPct": 0.3,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
-                "writeLearnStructure": 0
-            }
-        elif magicNum == 2:
-
-            #'xShape1'
-            paramsSetup = {
-                "HistLag": 0,
-                "TrainWindow": 5,
-                "epochsIn": 20,
-                "batchSIzeIn": 5,
-                "LearningMode": 'online',
-                "medSpecs": [
-                             {"LayerType": "SimpleRNN", "units": 10, "RsF": True, "Dropout": 0.1},
-                             {"LayerType": "SimpleRNN", "units": 5, "RsF": False, "Dropout": 0}
-                             ],
-                "modelNum": magicNum,
-                "TrainEndPct": 0.3,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
-                "writeLearnStructure": 0
-            }
-        elif magicNum == 3:
-
-            #'xShape1'
-            paramsSetup = {
-                "HistLag": 0,
-                "TrainWindow": 5,
-                "epochsIn": 20,
-                "batchSIzeIn": 5,
-                "LearningMode": 'online',
-                "medSpecs": [
-                             {"LayerType": "LSTM", "units": 10, "RsF": True, "Dropout": 0.1},
-                             {"LayerType": "LSTM", "units": 5, "RsF": False, "Dropout": 0}
-                             ],
-                "modelNum": magicNum,
-                "TrainEndPct": 0.3,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
-                "writeLearnStructure": 0
-            }
-        elif magicNum == 4:
-
-            #'xShape1'
-            paramsSetup = {
-                "HistLag": 0,
-                "TrainWindow": 25,
-                "epochsIn": 20,
-                "batchSIzeIn": 25,
-                "LearningMode": 'online',
-                "medSpecs": [
-                             {"LayerType": "LSTM", "units": 20, "RsF": True, "Dropout": 0.1},
-                             {"LayerType": "LSTM", "units": 2, "RsF": False, "Dropout": 0}
                              ],
                 "modelNum": magicNum,
                 "TrainEndPct": 0.3,
@@ -154,8 +129,25 @@ def runRnn(Portfolios, scanMode, mode):
         LOportfolio.columns = ["LO"]
         allPortfoliosList.append(LOportfolio)
         allProjectionsDF = pd.concat(allPortfoliosList, axis=1)
+    elif Portfolios == 'globalProjections':
+        globalProjectionsList = []
+        for manifoldIn in ["PCA", "LLE"]:
+            globalProjectionsList.append(
+                pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True))
+        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
+    elif Portfolios == 'FinalistsProjections':
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[
+            ['PCA_ExpWindow25_0', 'PCA_ExpWindow25_19', 'LLE_ExpWindow25_0', "LLE_ExpWindow25_18"]]
+    elif Portfolios == 'FinalistsGlobalProjections':
+        globalProjectionsList = []
+        for manifoldIn in ["PCA", "LLE"]:
+            globalProjectionsList.append(
+                pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True))
+        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)[
+            ["PCA_ExpWindow25_5_Head", "PCA_ExpWindow25_5_Tail", "LLE_ExpWindow25_5_Head", "LLE_ExpWindow25_5_Tail",
+             "PCA_ExpWindow25_3_Head", "PCA_ExpWindow25_3_Tail", "LLE_ExpWindow25_3_Head", "LLE_ExpWindow25_3_Tail"]]
 
-    targetSystems = range(5)
+    targetSystems = [0, 1]
 
     if scanMode == 'Main':
 
@@ -336,13 +328,43 @@ def runGpc(Portfolios, scanMode, mode):
             print((np.sqrt(252) * sl.sharpe(pnl)).round(4))
             print((np.sqrt(252) * sl.sharpe(rsPnL)).round(4))
 
+def Test():
+    magicNum = 1000
+    params = {
+        "HistLag": 0,
+        "TrainWindow": 250, #250
+        "epochsIn": 50, #50
+        "batchSIzeIn": 16, #16
+        "EarlyStopping_patience_Epochs": 5,
+        "LearningMode": 'online', #'static', 'online'
+        "medSpecs": [
+            {"LayerType": "LSTM", "units": 200, "RsF": True, "Dropout": 0.4}, #200
+            {"LayerType": "LSTM", "units": 200, "RsF": False, "Dropout": 0.4}
+        ],
+        "rw": 5,
+        "modelNum": magicNum,
+        "TrainEndPct": 0.3,
+        "CompilerSettings": ['adam', 'mean_squared_error'],
+        "writeLearnStructure": 0
+    }
+    #selection = 'PCA_ExpWindow25_0'
+    selection = 'LLE_250_3_Head'
+    #selection = 'LLE_250_0'
+    #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+    print("Standalone Sharpe = ", np.sqrt(252)*sl.sharpe(df))
+    #df = sl.cs(df)
+    RNNprocess([selection, df, params, magicNum])
+
 #runRnn("ClassicPortfolios", 'Main', "run")
 #runRnn("ClassicPortfolios", 'Main', "report")
 #runRnn("Projections", 'Main', "run")
 #runRnn("Projections", 'Main', "report")
-#runRnn("Projections", 'Main', "run")
+#runRnn("FinalistsProjections", 'Main', "run")
+#runRnn("FinalistsProjections", 'Main', "report")
 #runRnn('ScanNotProcessed', "")
 
 #runGpc("Projections", 'Main', "run")
 #runGpc("Projections", 'Main', "report")
 
+Test()

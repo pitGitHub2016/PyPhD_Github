@@ -24,6 +24,10 @@ GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
 twList = [25, 100, 150, 250, 'ExpWindow25']
 lagList = [2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]
+kernelList = ["RBF"]
+
+calcMode = 'run'
+pnlCalculator = 0
 
 def GPRlocal(argList):
     selection = argList[0]
@@ -33,16 +37,33 @@ def GPRlocal(argList):
     rw = argList[4]
     print(selection, ",", trainLength, ",", kernelIn, ", ", rw)
     try:
-        GPR_Results = sl.GPR_Walk(df, trainLength, kernelIn, rw)
+        if calcMode == 'run':
+            GPR_Results = sl.GPR_Walk(df, trainLength, kernelIn, rw)
 
-        GPR_Results[0].to_sql(selection + '_GPR_testDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
-        GPR_Results[1].to_sql(selection + '_GPR_PredictionsDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
+            GPR_Results[0].to_sql(selection + '_GPR_testDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
+            GPR_Results[1].to_sql(selection + '_GPR_PredictionsDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
 
-        pickle.dump(GPR_Results[2], open(selection + '_GPR_gprparamList_' + kernelIn + '_' + str(rw) +".p", "wb"))
+            pickle.dump(GPR_Results[2], open(selection + '_GPR_gprparamList_' + kernelIn + '_' + str(rw) +".p", "wb"))
 
-        sig = sl.sign(GPR_Results[1])
+        elif calcMode == 'read':
 
-        pnl = sig * GPR_Results[0]
+            GPR_Results = [pd.read_sql('SELECT * FROM ' + selection + '_GPR_testDF_' + kernelIn + '_' + str(rw), conn).set_index('Dates', drop=True),
+                           pd.read_sql('SELECT * FROM ' + selection + '_GPR_PredictionsDF_' + kernelIn + '_' + str(rw), conn).set_index('Dates', drop=True)]
+
+        if pnlCalculator == 0:
+            sig = sl.sign(GPR_Results[1])
+            pnl = sig * GPR_Results[0]
+        elif pnlCalculator == 1:
+            sig = sl.S(sl.sign(GPR_Results[1]))
+            pnl = sig * GPR_Results[0]
+        elif pnlCalculator == 2:
+            sig = sl.sign(GPR_Results[1])
+            pnl = sig * sl.S(GPR_Results[0], nperiods=1)
+
+        reportSh = np.sqrt(252) * sl.sharpe(pnl)
+        print(reportSh)
+        #time.sleep(30000)
+
         pnl.to_sql(selection + '_GPR_pnl_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
 
     except Exception as e:
@@ -66,15 +87,36 @@ def GPRonPortfolios(Portfolios, scanMode, mode):
         for manifoldIn in ["PCA", "LLE"]:
              globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
-    elif Portfolios == 'Finalists':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_2', 'LLE_ExpWindow25']]
+    elif Portfolios == 'Specific':
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[
+            set(["PCA_250_0","PCA_250_1","PCA_250_2","PCA_250_19",
+             "PCA_ExpWindow25_1","PCA_ExpWindow25_2",
+             "PCA_150_19","PCA_100_19","PCA_ExpWindow25_18",
+             "PCA_25_6","PCA_ExpWindow25_13","PCA_250_8", "PCA_150_18",
+             "PCA_25_16","PCA_150_8", "PCA_ExpWindow25_4", "PCA_250_13", "PCA_ExpWindow25_11",
+             "PCA_100_7", "PCA_150_5", "PCA_150_10",
+             "LLE_250_0","LLE_250_1","LLE_250_2",
+             "LLE_ExpWindow25_1", "LLE_ExpWindow25_2",
+             "LLE_ExpWindow25_17", "LLE_25_11", "LLE_250_18","LLE_ExpWindow25_14",
+             "LLE_150_1", "LLE_250_9", "LLE_25_15", "LLE_ExpWindow25_4",
+             "LLE_ExpWindow25_11", "LLE_100_11", "LLE_150_3", "LLE_150_2", "LLE_100_4",
+             "LLE_250_5", "LLE_250_11", "LLE_150_6", "LLE_25_7"])] #"PCA_ExpWindow25_0","PCA_ExpWindow25_19","LLE_ExpWindow25_0","LLE_ExpWindow25_18",
+    elif Portfolios == 'FinalistsProjections':
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_0', 'PCA_ExpWindow25_19', 'LLE_ExpWindow25_0', "LLE_ExpWindow25_18"]]
+    elif Portfolios == 'FinalistsGlobalProjections':
+        globalProjectionsList = []
+        for manifoldIn in ["PCA", "LLE"]:
+            globalProjectionsList.append(
+                pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True))
+        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)[["PCA_ExpWindow25_5_Head", "PCA_ExpWindow25_5_Tail", "LLE_ExpWindow25_5_Head", "LLE_ExpWindow25_5_Tail",
+                                                                     "PCA_ExpWindow25_3_Head","PCA_ExpWindow25_3_Tail", "LLE_ExpWindow25_3_Head", "LLE_ExpWindow25_3_Tail"]]
 
     if scanMode == 'Main':
 
         if mode == "run":
             processList = []
             rw = 250
-            for kernelIn in ["RBF_DotProduct","RBF_Matern","RBF_RationalQuadratic", "RBF_WhiteKernel"]:
+            for kernelIn in kernelList:
                 for selection in allProjectionsDF.columns:
                     processList.append([selection, allProjectionsDF[selection], 0.3, kernelIn, rw])
 
@@ -87,7 +129,7 @@ def GPRonPortfolios(Portfolios, scanMode, mode):
             notProcessed = []
             rw = 250
             shList = []
-            for kernelIn in ["RBF_DotProduct","RBF_Matern","RBF_RationalQuadratic", "RBF_WhiteKernel"]:
+            for kernelIn in kernelList:
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql('SELECT * FROM ' + selection + '_GPR_pnl_'+kernelIn+ '_' + str(rw),
@@ -95,10 +137,12 @@ def GPRonPortfolios(Portfolios, scanMode, mode):
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
 
-                        sh = (np.sqrt(252) * sl.sharpe(pnl)).round(4)
-                        MEANs = pnl.mean() * 100
-                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0)).set_index("index", drop=True)
-                        STDs = pnl.std() * 100
+                        #pnl /= pnl.std() * 100
+
+                        sh = (np.sqrt(252) * sl.sharpe(pnl)).round(2)
+                        MEANs = (252 * pnl.mean() * 100).round(2)
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252 * 100).set_index("index",drop=True).round(2)
+                        STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
 
                         statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
                         stats = pd.concat([statsMat.iloc[0, :], statsMat.iloc[1, :]], axis=0)
@@ -236,9 +280,17 @@ def Test(mode):
 #GPRonPortfolios("Projections", 'Main', "run")
 #GPRonPortfolios("Projections", 'Main', "report")
 #GPRonPortfolios("Projections", "ScanNotProcessed", "")
-GPRonPortfolios("globalProjections", 'Main', "run")
+#GPRonPortfolios("globalProjections", 'Main', "run")
 #GPRonPortfolios("globalProjections", 'Main', "report")
 #GPRonPortfolios("globalProjections", "ScanNotProcessed", "")
 #GPRonPortfolios("Projections", "ReportStatistics", "")
 #GPRonPortfolios("Projections", "ReportSpecificStatistics", "")
-#GPRonPortfolios("Finalists", 'Main', "run")
+#GPRonPortfolios("FinalistsProjections", 'Main', "run")
+#GPRonPortfolios("FinalistsProjections", 'Main', "report")
+#GPRonPortfolios("FinalistsProjections", 'ScanNotProcessed', "")
+#GPRonPortfolios("FinalistsGlobalProjections", 'Main', "run")
+#GPRonPortfolios("FinalistsGlobalProjections", 'Main', "report")
+#GPRonPortfolios("FinalistsGlobalProjections", 'ScanNotProcessed', "")
+GPRonPortfolios("Specific", 'Main', "run")
+#GPRonPortfolios("Specific", 'Main', "report")
+#GPRonPortfolios("Specific", "ScanNotProcessed", "")

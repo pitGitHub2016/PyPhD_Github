@@ -11,8 +11,7 @@ from scipy import stats
 from numpy import dot, array
 from itertools import combinations
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
-from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, minmax_scale, MaxAbsScaler, StandardScaler, RobustScaler, Normalizer, QuantileTransformer, PowerTransformer
 from sklearn.linear_model import LinearRegression
 from sklearn import preprocessing
 from sklearn.decomposition import PCA
@@ -26,7 +25,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor, GaussianProcessCl
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import RepeatedStratifiedKFold
 from statsmodels.tsa.stattools import adfuller
-from scipy.stats import skew, kurtosis
+from scipy.stats import skew, kurtosis, norm
 from scipy import stats as st
 from hurst import compute_Hc
 from keras.models import Sequential
@@ -194,6 +193,46 @@ class Slider:
         elif mode == 'abs':
             out = df.div(df.abs().sum(axis=1), axis=0)
         return out
+
+    def normStd(df):
+        out = df / (100 * np.sqrt(252) * df.std())
+        return out
+
+    def preCursor(df, preCursorDF, **kwargs):
+
+        if 'nIn' in kwargs:
+            nIn = kwargs['nIn']
+        else:
+            nIn = 250
+
+        if 'multiplier' in kwargs:
+            multiplier = kwargs['multiplier']
+        else:
+            multiplier = 2
+
+        preCursorDF = pd.DataFrame(preCursorDF)
+
+        preCursorDF_Upper = preCursorDF.rolling(nIn).mean() + preCursorDF.rolling(nIn).std() * multiplier
+        preCursorDF_Lower = preCursorDF.rolling(nIn).mean() - preCursorDF.rolling(nIn).std() * multiplier
+        binarizeUpper = Slider.sign(preCursorDF - preCursorDF_Upper)
+        binarizeUpper[binarizeUpper > 0] = None
+        binarizeUpper = binarizeUpper.abs()
+        binarizeLower = Slider.sign(preCursorDF - preCursorDF_Lower)
+        binarizeLower[binarizeLower < 0] = None
+        binarizeLower = binarizeLower.abs()
+        binarySignal = binarizeUpper + binarizeLower
+
+        print(np.sign(binarySignal))
+        #binarizeUpper.plot(title='binarizeUpper', legend=None)
+        #binarizeLower.plot(title='binarizeLower', legend=None)
+        #plt.show()
+        #print(preCursorDF)
+        out = df.mul(np.sign(binarySignal), axis=0)
+        out.plot()
+        plt.show()
+        print(out)
+        time.sleep(3000)
+        return [out, preCursorDF]
 
     ########################
 
@@ -403,6 +442,11 @@ class Slider:
                 rollStatisticDF = Slider.roller(df, Slider.sharpe, nIn)
             else:
                 rollStatisticDF = Slider.expander(df, Slider.sharpe, nIn)
+        elif method == 'VAR_Quantile':
+            if mode == 'Roll':
+                rollStatisticDF = Slider.roller(df, Slider.VaR_Quantile, nIn)
+            else:
+                rollStatisticDF = Slider.expander(df, Slider.VaR_Quantile, nIn)
 
         elif method == 'Hurst':
             if mode == 'Roll':
@@ -506,14 +550,36 @@ class Slider:
     def sharpe(df):
         return df.mean() / df.std()
 
-    def tConfDF(df):
+    def VaR_Quantile(df, **kwargs):
+        if 'a' in kwargs:
+            a = kwargs['a']
+        else:
+            a = 0.1
+        out = df.quantile(a)
+        return out
+
+    def tConfDF(df, **kwargs):
+        if "scalingFactor" in kwargs:
+            scalingFactor = kwargs["scalingFactor"]
+        else:
+            scalingFactor = 1
+
         tConfList = []
         for c in df.columns:
-            tConfs = [np.round(x,4) for x in st.t.interval(0.95, len(df[c].values) - 1, loc=np.mean(df[c].values), scale=st.sem(df[c].values))]
+            tConfs = [np.round(x * scalingFactor,2) for x in st.t.interval(0.95, len(df[c].values) - 1, loc=np.mean(df[c].values), scale=st.sem(df[c].values))]
             tConfList.append([c, tConfs])
 
         tConfDF = pd.DataFrame(tConfList, columns=['index','tConf'])
         return tConfDF
+
+    def ttestRV(df):
+        cc = list(combinations(df.columns, 2))
+        outList = []
+        for c in cc:
+            ttestPair = stats.ttest_ind(df[c[0]].values, df[c[1]].values, equal_var = False)
+            outList.append([c[0], c[1], ttestPair.statistic, ttestPair.pvalue])
+        out = pd.DataFrame(outList, columns=["pop1","pop2","t_statistic","t_pvalue"])
+        return out
 
     def downside_risk(returns, risk_free=0):
         adj_returns = returns - risk_free
@@ -740,6 +806,11 @@ class Slider:
 
         return df0.fillna(method='ffill').fillna(0)
 
+    def rp(df):
+        riskParityVol = np.sqrt(252) * Slider.S(Slider.rollerVol(df, 250)) * 100
+        out = (df / riskParityVol).replace([np.inf, -np.inf], 0)
+        return out
+
     def sma(df, **kwargs):
         if 'nperiods' in kwargs:
             nperiods = kwargs['nperiods']
@@ -936,13 +1007,24 @@ class Slider:
         return best_cfg
 
     'Gaussian Process Regressors'
-    def GPR_Walk(df, start, KernelList, rw):
+    def GPR_Walk(df, start, Kernel, rw):
 
         time_X = np.array(range(len(df))).reshape(len(df), 1)
         X = df.values.reshape(len(df), 1)
         size = int(len(X) * start)
         X_train, X_test = time_X[0:size], time_X[size:len(X)]
         y_train, y_test = X[0:size], X[size:len(X)]
+
+        if Kernel == "RBF":
+            mainKernel = 1 * RBF()
+        elif Kernel == "DotProduct":
+            mainKernel = 1 * DotProduct()
+        elif Kernel == "Matern":
+            mainKernel = 1 * Matern()
+        elif Kernel == "RationalQuadratic":
+            mainKernel = 1 * RationalQuadratic()
+        elif Kernel == "WhiteKernel":
+            mainKernel = 1 * WhiteKernel()
 
         gpcparamList = []
         history = [x for x in X_train]
@@ -956,18 +1038,6 @@ class Slider:
             else:
                 subhistory_X = X_train#[-5:-1]
                 subhistory_y = y_train#[-5:-1]
-
-            kernelList = KernelList.split("_")
-            mainKernel = 1 * RBF()
-            for k in kernelList:
-                if k == "DotProduct":
-                    mainKernel += 1 * DotProduct()
-                elif k == "Matern":
-                    mainKernel += 1 * Matern()
-                elif k == "RationalQuadratic":
-                    mainKernel += 1 * RationalQuadratic()
-                elif k == "WhiteKernel":
-                    mainKernel += 1 * WhiteKernel()
 
             model = GaussianProcessRegressor(kernel=mainKernel) #alpha=0.0, kernel=...,  n_restarts_optimizer=10, normalize_y=True
 
@@ -1480,7 +1550,8 @@ class Slider:
                 psi[col] = U[col] / U.iloc[:, 0]
                 phi[col] = VT[col] * VT.iloc[:, 0]
 
-            eigOut = psi.iloc[:, 1:nD + 1].fillna(0)
+            eigOut = psi.fillna(0)
+            #eigOut = psi.iloc[:, 1:nD + 1].fillna(0)
             #eigOut = phi.iloc[:, 1:nD + 1].fillna(0)
             eigOut.columns = [str(x) for x in range(nD)]
             eigOut.index = df.index
@@ -1548,13 +1619,24 @@ class Slider:
             TransitionMatrix = pd.DataFrame(dmapObj.kernel_matrix.toarray())
             U, s, VT = svd(TransitionMatrix)
 
-            try:
-                eigOut = pd.DataFrame(dmapObj.fit_transform(X), columns=[str(x) for x in range(nD)], index=df.index).fillna(0)
-            except:
-                eigOut = pd.DataFrame(np.zeros((len(df.index),nD)), columns=[str(x) for x in range(nD)],
-                                      index=df.index).fillna(0)
+            Udf = pd.DataFrame(U)
 
-            return [eigOut, s[:nD], sigmaDMAPS]
+            try:
+                dMapsProjectionOut = pd.DataFrame(dmapObj.fit_transform(X), columns=[str(x) for x in range(nD)], index=df.index).fillna(0)
+                eigFirst = Udf.iloc[:, :nD]
+                eigFirst.columns = [str(x) for x in range(nD)]
+                eigFirst.index = df.index
+
+                eigLast = Udf.iloc[:, -nD:]
+                eigLast.columns = [str(x) for x in range(nD)]
+                eigLast.index = df.index
+            except Exception as e:
+                print(e)
+                dMapsProjectionOut = pd.DataFrame(np.zeros((len(df.index),nD)), columns=[str(x) for x in range(nD)], index=df.index).fillna(0)
+                eigFirst = pd.DataFrame(np.zeros((len(df.index),nD)), columns=[str(x) for x in range(nD)], index=df.index).fillna(0)
+                eigLast = pd.DataFrame(np.zeros((len(df.index),nD)), columns=[str(x) for x in range(nD)], index=df.index).fillna(0)
+
+            return [dMapsProjectionOut, eigFirst, eigLast, s[:nD], sigmaDMAPS]
 
         def gRollingManifold(manifoldIn, df0, st, NumProjections, eigsPC, **kwargs):
             if 'RollMode' in kwargs:
@@ -1582,7 +1664,9 @@ class Slider:
             else:
                 LLE_Method = 'standard'
 
-            Loadings = [[] for j in range(len(eigsPC))]
+            Loadings_Target = [[] for j in range(len(eigsPC))]
+            Loadings_First = [[] for j in range(len(eigsPC))]
+            Loadings_Last = [[] for j in range(len(eigsPC))]
             lambdasList = []
             sigmaList = []
             for i in range(st, len(df0) + 1):
@@ -1609,7 +1693,7 @@ class Slider:
                     c = 0
                     for eig in eigsPC:
                         # print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
-                        Loadings[c].append(list(pca.components_[eig]))
+                        Loadings_Target[c].append(list(pca.components_[eig]))
                         c += 1
 
                 elif manifoldIn == 'LLE':
@@ -1619,7 +1703,7 @@ class Slider:
                     lambdasList.append(1)
                     c = 0
                     for eig in eigsPC:
-                        Loadings[c].append(list(X_lle[:, eig]))
+                        Loadings_Target[c].append(list(X_lle[:, eig]))
                         c += 1
 
                 elif manifoldIn == 'DMAP_gDmapsRun':
@@ -1629,17 +1713,21 @@ class Slider:
                     sigmaList.append(dMapsOut[2])
                     c = 0
                     for eig in eigsPC:
-                        Loadings[c].append(dmapsEigsOut.iloc[:, eig])
+                        Loadings_Target[c].append(dmapsEigsOut.iloc[:, eig])
                         c += 1
 
                 elif manifoldIn == 'DMAP_pyDmapsRun':
                     dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
-                    dmapsEigsOut = dMapsOut[0]
-                    lambdasList.append(list(dMapsOut[1]))
-                    sigmaList.append(dMapsOut[2])
+                    dMapsProjectionOut = dMapsOut[0]
+                    eigFirst = dMapsOut[1]
+                    eigLast = dMapsOut[2]
+                    lambdasList.append(list(dMapsOut[3]))
+                    sigmaList.append(dMapsOut[4])
                     c = 0
                     for eig in eigsPC:
-                        Loadings[c].append(dmapsEigsOut.iloc[:, eig])
+                        Loadings_Target[c].append(dMapsProjectionOut.iloc[:, eig])
+                        Loadings_First[c].append(eigFirst.iloc[:, eig])
+                        Loadings_Last[c].append(eigLast.iloc[:, eig])
                         c += 1
 
             lambdasListDF = pd.DataFrame(lambdasList)
@@ -1648,16 +1736,43 @@ class Slider:
                 axis=0, ignore_index=True).fillna(0)
             lambdasDF.index = df0.index
 
-            principalCompsDf = [[] for j in range(len(Loadings))]
-            for k in range(len(Loadings)):
-                principalCompsDf[k] = pd.concat(
+            principalCompsDf_Target = [[] for j in range(len(Loadings_Target))]
+            principalCompsDf_First = [[] for j in range(len(Loadings_First))]
+            principalCompsDf_Last = [[] for j in range(len(Loadings_Last))]
+            for k in range(len(Loadings_Target)):
+                principalCompsDf_Target[k] = pd.concat(
                     [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
-                     pd.DataFrame(Loadings[k], columns=df0.columns)], axis=0, ignore_index=True)
-                principalCompsDf[k].index = df0.index
-                principalCompsDf[k] = principalCompsDf[k].ffill()
+                     pd.DataFrame(Loadings_Target[k], columns=df0.columns)], axis=0, ignore_index=True)
+                principalCompsDf_Target[k].index = df0.index
+                principalCompsDf_Target[k] = principalCompsDf_Target[k].ffill()
+                ####
+                try:
+                    principalCompsDf_First[k] = pd.concat(
+                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                         pd.DataFrame(Loadings_First[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principalCompsDf_First[k].index = df0.index
+                    principalCompsDf_First[k] = principalCompsDf_First[k].ffill()
+                    ####
+                    principalCompsDf_Last[k] = pd.concat(
+                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                         pd.DataFrame(Loadings_Last[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principalCompsDf_Last[k].index = df0.index
+                    principalCompsDf_Last[k] = principalCompsDf_Last[k].ffill()
+                except:
+                    principalCompsDf_First[k] = pd.concat(
+                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                         pd.DataFrame(Loadings_Target[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principalCompsDf_First[k].index = df0.index
+                    principalCompsDf_First[k] = principalCompsDf_First[k].ffill()
+                    ####
+                    principalCompsDf_Last[k] = pd.concat(
+                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                         pd.DataFrame(Loadings_Target[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principalCompsDf_Last[k].index = df0.index
+                    principalCompsDf_Last[k] = principalCompsDf_Last[k].ffill()
 
             if manifoldIn in ['PCA', 'LLE']:
-                return [df0, principalCompsDf, lambdasDF]
+                return [df0, [principalCompsDf_Target, principalCompsDf_First, principalCompsDf_Last], lambdasDF]
             elif manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
                 sigmaListDF = pd.DataFrame(sigmaList)
                 sigmaDF = pd.concat(
@@ -1665,7 +1780,7 @@ class Slider:
                     axis=0, ignore_index=True).fillna(0)
                 sigmaDF.index = df0.index
 
-                return [df0, principalCompsDf, lambdasDF, sigmaDF]
+                return [df0, [principalCompsDf_Target, principalCompsDf_First, principalCompsDf_Last], lambdasDF, sigmaDF]
 
         def gRollingManifoldPyErb(manifoldIn, df0, st, NumProjections, eigsPC, **kwargs):
             if 'RollMode' in kwargs:
@@ -1926,8 +2041,9 @@ class Slider:
 
         def gRNN(dataset_all, params):
 
-            ################################### Data Preprocessing ###################################################
             history = History()
+
+            ################################### Data Preprocessing ###################################################
 
             SingleSample = False
             if isinstance(dataset_all, pd.Series):
@@ -1937,17 +2053,18 @@ class Slider:
             dataVals = dataset_all.values
 
             #################################### Feature Scaling #####################################################
-            sc = MinMaxScaler(feature_range=(0, 1))
+            #sc = StandardScaler()
+            #sc = MinMaxScaler() #feature_range=(0, 1)
             if SingleSample:
-                dataVals = sc.fit_transform(dataVals.reshape(-1, 1))
+                #dataVals = sc.fit_transform(dataVals.reshape(-1, 1))
+                dataVals = dataVals.reshape(-1, 1)
                 FeatSpaceDims = 1
                 outNaming = [dataset_all.name]
                 print(outNaming)
             else:
-                dataVals = sc.fit_transform(dataVals)
+                #dataVals = sc.fit_transform(dataVals)
                 FeatSpaceDims = len(dataset_all.columns)
                 outNaming = dataset_all.columns
-
             #################### Creating a data structure with N timesteps and 1 output #############################
             X = []
             y = []
@@ -1955,6 +2072,8 @@ class Slider:
                 X.append(dataVals[i - params["TrainWindow"]:i - params["HistLag"]])
                 y.append(dataVals[i])
             X, y = np.array(X), np.array(y)
+            yBinary = np.sign(y)
+            yBinary[yBinary == -1] = 0
             idx = dataset_all.iloc[params["TrainWindow"]:].index
 
             ####################################### Reshaping ########################################################
@@ -1963,18 +2082,18 @@ class Slider:
             "Features : One feature is one observation at a time step."
             X = np.reshape(X, (X.shape[0], X.shape[1], FeatSpaceDims))
 
-            X_train, y_train = X[:TrainEnd], y[:TrainEnd]
-            X_test, y_test = X[TrainEnd:], y[TrainEnd:]
+            X_train, y_train, yBinary_train = X[:TrainEnd], y[:TrainEnd], yBinary[:TrainEnd]
+            X_test, y_test, yBinary_test = X[TrainEnd:], y[TrainEnd:], yBinary[TrainEnd:]
 
-            df_real_price_train = pd.DataFrame(sc.inverse_transform(y_train), index=idx[:TrainEnd],
-                                               columns=outNaming)
-            df_real_price_test = pd.DataFrame(sc.inverse_transform(y_test), index=idx[TrainEnd:],
-                                              columns=outNaming)
+            #df_real_price_train = pd.DataFrame(sc.inverse_transform(y_train), index=idx[:TrainEnd], columns=outNaming)
+            #df_real_price_test = pd.DataFrame(sc.inverse_transform(y_test), index=idx[TrainEnd:], columns=outNaming)
+            df_real_price_train = pd.DataFrame(y_train, index=idx[:TrainEnd], columns=outNaming)
+            df_real_price_test = pd.DataFrame(y_test, index=idx[TrainEnd:], columns=outNaming)
 
-            #print("len(idx)=", len(idx), ", idx.tail[:10]=", idx[:10], ", X.shape=", X.shape, ", TrainWindow=",
-            #      params["TrainWindow"],
-            #      ", TrainEnd=", TrainEnd, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape,
-            #      ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
+            print("X.shape=", X.shape, ", TrainWindow=", params["TrainWindow"],
+                  ", TrainEnd=", TrainEnd, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape,
+                  ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
+            #print("y_train = ", y_train, ", yBinary_train = ", yBinary_train)
 
             ####################################### Initialising the LSTM #############################################
             regressor = Sequential()
@@ -1999,23 +2118,29 @@ class Slider:
                         regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
                     regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
             # Adding the output layer
-            regressor.add(Dense(units=y_train.shape[1]))
+            regressor.add(Dense(units=yBinary_train.shape[1]))
 
             ######################################## Compiling the RNN ###############################################
+            my_callbacks = [
+                #tf.keras.callbacks.RemoteMonitor(root="http://localhost:9000", path="/publish/epoch/end/", field="data", headers=None, send_as_json=False, ),
+                tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"]),
+                #tf.keras.callbacks.ModelCheckpoint(filepath='model.{epoch:02d}-{val_loss:.2f}.h5'),
+                #tf.keras.callbacks.TensorBoard(log_dir='./logs'),
+            ]
             regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
             # Fitting the RNN to the Training set
-            regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"], verbose=0,
-                          callbacks=[history])
+            regressor.fit(X_train, yBinary_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"], verbose=0,
+                          callbacks=my_callbacks)
 
             ########################## Get Predictions for Static or Online Learning #################################
-            predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
+            #predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
+            predicted_price_train = regressor.predict(X_train)
 
             scoreList = []
             if params["LearningMode"] == 'static':
-                predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
+                #predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
+                predicted_price_test = regressor.predict(X_test)
                 scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
-                scoreDF.plot()
-                plt.show()
 
             elif params["LearningMode"] == 'static_MultiStep_Ahead':
 
@@ -2035,10 +2160,8 @@ class Slider:
                 predicted_price_test = sc.inverse_transform(predicted_price_test)
                 #print("predicted_price_test : ", predicted_price_test)
                 scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
-                scoreDF.plot()
-                plt.show()
 
-            elif params["LearningMode"] == 'online':
+            elif params["LearningMode"] == 'onlineRepo':
 
                 # X_test, y_test
                 predicted_price_test = []
@@ -2071,8 +2194,40 @@ class Slider:
                     scores = regressor.evaluate(indXtest, indYtest, verbose=0)
                     scoreList.append(scores)
                     #print(scores)
-                scoreDF = pd.DataFrame(scoreList)
 
+            elif params["LearningMode"] == "online":
+                rw = params["rw"]
+                predicted_price_test = []
+                c = 0
+                for t in tqdm(range(len(X_test))):
+
+                    if c > 0:
+                        subhistory_X = X_train[-rw:-1]
+                        subhistory_y = yBinary_train[-rw:-1]
+                    else:
+                        subhistory_X = X_train  # [-5:-1]
+                        subhistory_y = yBinary_train  # [-5:-1]
+
+                    newX = np.reshape(X_test[t], (1, X_test[t].shape[0], FeatSpaceDims))
+                    pred_test = regressor.predict(newX)
+                    #predicted_price_test.append(sc.inverse_transform(pred_test)[0])
+                    predicted_price_test.append(pred_test[0])
+
+                    regressor.fit(subhistory_X, subhistory_y, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"], verbose=0,
+                          callbacks=my_callbacks)
+
+                    X_train = np.append(X_train, newX, axis=0)
+                    yBinary_train = np.append(yBinary_train, [yBinary_test[t]], axis=0)
+
+                    scores = regressor.evaluate(newX, yBinary_test[t], verbose=0)
+                    scoreList.append(scores)
+
+                    #print("X_train.shape = ", X_train.shape, ", y_train.shape = ", y_train.shape, ", scores = ", scores)
+
+                    c += 1
+
+                scoreDF = pd.DataFrame(scoreList)
+    
             df_predicted_price_train = pd.DataFrame(predicted_price_train, index=df_real_price_train.index,
                                                     columns=['PredictedPrice_Train_' + str(c) for c in
                                                              df_real_price_train.columns])
