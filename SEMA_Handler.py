@@ -29,20 +29,21 @@ MegaScale = pd.read_sql('SELECT * FROM Edf_classic', conn).set_index('Dates', dr
 
 def semaOnProjections(space, mode):
 
-    if space == "Projections":
+    if space == 'Projections':
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
-        allProjectionsDF = allProjectionsDF.iloc[round(0.3*len(allProjectionsDF)):]
-        ExPostOpt_allProjectionsDF = sl.ExPostOpt(pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True))[0]
     elif space == 'globalProjections':
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
-            sub_globalProjectionsDF = pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index(
-                'Dates', drop=True)
-            globalProjectionsList.append(sub_globalProjectionsDF.iloc[round(0.3 * len(sub_globalProjectionsDF)):])
+             globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
+    elif space == 'ClassicPortfolios':
+        LOportfolio = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
+        LOportfolio.columns = ["LO"]
+        RPportfolio = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
+        LOportfolio.columns = ["RP"]
+        allProjectionsDF = pd.concat([LOportfolio, RPportfolio], axis=1)
     elif space == 'Finalists':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[
-            ['PCA_ExpWindow25_0', 'PCA_ExpWindow25_2']]
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_0', 'PCA_ExpWindow25_2']]
 
     if mode == 'Direct':
 

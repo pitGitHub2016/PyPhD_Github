@@ -28,14 +28,14 @@ def DataHandler(mode):
     if mode == 'investingCom':
         dataAll = []
         fxPairsList = ['USD/EUR', 'USD/GBP', 'USD/AUD', 'USD/NZD', 'USD/JPY', 'USD/CAD','USD/CHF','USD/SEK','USD/NOK', 'USD/DKK',
-                       'USD/ZAR', 'USD/RUB', 'USD/PLN', 'USD/MXN', 'USD/CNH', 'USD/KRW', 'USD/INR', 'USD/IDR', 'USD/HUF', 'USD/COP']
+                       'USD/ZAR', 'USD/RUB', 'USD/PLN', 'USD/MXN', 'USD/CNY', 'USD/KRW', 'USD/INR', 'USD/IDR', 'USD/HUF', 'USD/COP']
         namesDF = pd.DataFrame(fxPairsList, columns=["Names"])
         namesDF['Names'] = namesDF['Names'].str.replace('/', '')
         namesDF.to_sql('BasketGekko', conn, if_exists='replace')
         for fx in fxPairsList:
             print(fx)
             name = fx.replace('/', '')
-            df = investpy.get_currency_cross_historical_data(currency_cross=fx, from_date='01/01/2000',
+            df = investpy.get_currency_cross_historical_data(currency_cross=fx, from_date='01/09/2001',
                                                              to_date='29/10/2020').reset_index().rename(
                 columns={"Date": "Dates", "Close": name}).set_index('Dates')[name]
             dataAll.append(df)
@@ -75,7 +75,7 @@ def shortTermInterestRatesSetup(mode):
         IRD['NOKUSD'] = IRD['NOR'] - IRD['USA']
         IRD['ZARUSD'] = IRD['ZAF'] - IRD['USA']
         IRD['RUBUSD'] = IRD['RUS'] - IRD['USA']
-        IRD['CNHUSD'] = IRD['CHN'] - IRD['USA']
+        IRD['CNYUSD'] = IRD['CHN'] - IRD['USA']
         IRD['INRUSD'] = IRD['IND'] - IRD['USA']
         IRD['COPUSD'] = IRD['COL'] - IRD['USA']
         IRD['CADUSD'] = IRD['CAN'] - IRD['USA']
@@ -97,7 +97,7 @@ def shortTermInterestRatesSetup(mode):
         iRTimeSeries.astype(float).to_sql('iRTimeSeries', conn, if_exists='replace')
 
         IRD = IRD[['EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'JPYUSD', 'CADUSD','CHFUSD','SEKUSD','NOKUSD', 'DKKUSD',
-                       'ZARUSD', 'RUBUSD', 'PLNUSD', 'MXNUSD', 'CNHUSD', 'KRWUSD', 'INRUSD', 'IDRUSD', 'HUFUSD', 'COPUSD']]
+                       'ZARUSD', 'RUBUSD', 'PLNUSD', 'MXNUSD', 'CNYUSD', 'KRWUSD', 'INRUSD', 'IDRUSD', 'HUFUSD', 'COPUSD']]
         IRD = IRD.iloc[5389:,:]
         IRD.astype(float).to_sql('IRD', conn, if_exists='replace')
 
@@ -333,12 +333,10 @@ def RiskParity(mode):
     elif mode == 'plots':
 
         # VOLATILITIES
-        volToPlot0 = pd.read_sql('SELECT * FROM riskParityVol_tw_25', conn).set_index('Dates', drop=True)
+        volToPlot0 = pd.read_sql('SELECT * FROM riskParityVol_tw_250', conn).set_index('Dates', drop=True)
         volToPlot0.index = [x.replace("00:00:00", "").strip() for x in volToPlot0.index]
-        volToPlot1 = pd.read_sql('SELECT * FROM riskParityVol_tw_ExpWindow25', conn).set_index('Dates', drop=True)
-        volToPlot1.index = [x.replace("00:00:00", "").strip() for x in volToPlot1.index]
 
-        for volDF in [volToPlot0, volToPlot1]:
+        for volDF in [volToPlot0]:
             fig0, ax0 = plt.subplots()
             mpl.pyplot.locator_params(axis='x', nbins=40)
             volDF.plot(ax=ax0)
@@ -353,11 +351,6 @@ def RiskParity(mode):
             plt.margins(0, 0)
             plt.grid()
             plt.show()
-
-        # Aggregated Risk Parities
-        rpRsDF = pd.concat([pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_'+str(tw), conn).set_index('Dates', drop=True) for tw in twList], axis=1)
-        rpRsDF.index = [x.replace("00:00:00", "").strip() for x in rpRsDF.index]
-        rpRsDF.columns = [str(x)+"_Days" for x in twList]
 
 def RunManifold(argList):
     df = argList[0]
@@ -381,9 +374,9 @@ def RunManifold(argList):
 
     else:
         if manifoldIn == 'PCA':
-            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 5, [0,1,2,3,4], Scaler='Standard', RollMode='ExpWindow')
+            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard', RollMode='ExpWindow')
         elif manifoldIn == 'LLE':
-            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, ProjectionMode='Transpose', RollMode='ExpWindow')
+            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 19, range(len(df.columns)-1), LLE_n_neighbors=5, ProjectionMode='Transpose', RollMode='ExpWindow')
 
         out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), conn, if_exists='replace')
         principalCompsDfList = out[1]
@@ -454,15 +447,8 @@ def getProjections():
 
     allProjectionsDF = pd.concat(allProjectionsList, axis=1)
     allProjectionsDF.to_sql('allProjectionsDF', conn, if_exists='replace')
-
-def PaperizeProjections(pnlSharpes):
-    pnlSharpes['paperText'] = ""
-    for idx, row in pnlSharpes.iterrows():
-        infoSplit = row['index'].split("_")
-        if len(infoSplit) < 3:
-            pnlSharpes['paperText'] = row["gamma"] + " & " + "Y_{s" + infoSplit[0] + "}"
-        else:
-            pnlSharpes['paperText'] = row["gamma"] + " & " + "y_{s" + infoSplit[0] + "}"
+    allProjectionsDFSharpes = np.sqrt(252) * sl.sharpe(allProjectionsDF)
+    allProjectionsDFSharpes.to_sql('allProjectionsDFSharpes', conn, if_exists='replace')
 
 def StationarityOnProjections(manifoldIn, mode):
     allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
@@ -867,36 +853,23 @@ def RollingStatistics(mode, tvMode, prop):
 def CrossValidateEmbeddings(manifoldIn, tw, mode):
     if mode == 'run':
         df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
-        out = sl.AI.gRollingManifold(manifoldIn, df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, ProjectionMode='Transpose',
-                                     RollMode='ExpWindow')
+        out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard')
 
         out[0].to_sql(manifoldIn + 'df_Test_tw_' + str(tw), conn, if_exists='replace')
         principalCompsDfList = out[1]
-        exPostProjectionsList = out[2]
-        out[3].to_sql(manifoldIn + '_lambdasDf_Test_tw_' + str(tw), conn, if_exists='replace')
+        out[2].to_sql(manifoldIn + '_lambdasDf_Test_tw_' + str(tw), conn, if_exists='replace')
         for k in range(len(principalCompsDfList)):
             principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_Test_tw_' + str(tw) + "_" + str(k), conn,
                                            if_exists='replace')
-            exPostProjectionsList[k].to_sql(manifoldIn + '_exPostProjections_Test_tw_' + str(tw) + "_" + str(k), conn,
-                                            if_exists='replace')
-    else:
-        list = []
-        for c in [0,1,2,3,4]:
-            try:
-                pr = sl.rs(pd.read_sql('SELECT * FROM ' + manifoldIn + '_exPostProjections_Test_tw_'+str(tw) + "_" + str(c), conn).set_index('Dates', drop=True).fillna(0))
-                list.append(pr)
-            except:
-                pass
-        exPostProjections = pd.concat(list, axis=1, ignore_index=True)
-        rsProjection = sl.ecs(sl.rs(exPostProjections))
-        rsProjection.name = '$Y_(s' + manifoldIn + ',' + str(tw) + ')(t)$'
 
-        fig, ax = plt.subplots()
-        rsProjection.plot(ax=ax)
-        box = ax.get_position()
-        ax.set_position([box.x0, box.y0, box.width * 0.9, box.height])
-        mpl.pyplot.ylabel("Cumulative Return")
-        plt.legend(bbox_to_anchor=(1.01, 1), loc=2, frameon=False, prop={'size': 14}, borderaxespad=0.)
+    elif mode == 'Test0':
+        df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
+        princ = pd.read_sql(
+            'SELECT * FROM ' + manifoldIn + '_principalCompsDf_Test_tw_' + str(tw) + "_" + str(19),
+            conn).set_index('Dates', drop=True)
+        proj = df * sl.S(princ)
+        #sl.cs(proj).plot()
+        sl.cs(sl.rs(proj)).plot()
         plt.show()
 
 def Test():
@@ -949,17 +922,14 @@ def Test():
 #shortTermInterestRatesSetup("retsIRDs")
 
 #LongOnly()
-RiskParity('run')
+#RiskParity('run')
 #RiskParity('plots')
 
 #RunManifoldLearningOnFXPairs()
-#CrossValidateEmbeddings("LLE", "ExpWindow25", "run")
-#CrossValidateEmbeddings("LLE", "ExpWindow25", "")
+#CrossValidateEmbeddings("PCA", 250, "run")
+#CrossValidateEmbeddings("PCA", 250, "Test0")
 
-#ProjectionsPlots('PCA')
-#ProjectionsPlots('LLE')
-
-#getProjections()
+getProjections()
 
 #StationarityOnProjections('PCA', 'build')
 #StationarityOnProjections('LLE', 'build')

@@ -44,8 +44,9 @@ def RNNprocess(argList):
         out[2].to_sql('scoreList_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
 
     elif calcMode == 'read':
+        print(selection)
         out = [
-            pd.read_sql('SELECT * FROM df_real_price_RNN_', conn).set_index('Dates', drop=True),# + selection + "_" + str(magicNum)
+            pd.read_sql('SELECT * FROM df_real_price_RNN_'+ selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
             pd.read_sql('SELECT * FROM df_predicted_price_RNN_' + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
             pd.read_sql('SELECT * FROM scoreList_RNN_' + selection + "_" + str(magicNum), conn)]
 
@@ -57,22 +58,15 @@ def RNNprocess(argList):
         sig = sl.sign(df_predicted_price)
         pnl = sig * df_real_price
     elif pnlCalculator == 1:
-        pnl = (df_predicted_price-0.5) * df_real_price
-    elif pnlCalculator == 2:
-        sig = sl.S(sl.sign(df_predicted_price))
-        pnl = sig * df_real_price
-    elif pnlCalculator == 3:
-        sig = sl.sign(df_predicted_price)
-        pnl = sig * sl.S(df_real_price, nperiods=1)
-    elif pnlCalculator == 4:
-        sig = sl.sign(df_predicted_price - df_real_price)
-        pnl = sig * sl.S(sl.d(df_real_price), nperiods=-1)
+        #pnl = (df_predicted_price-0.5) * df_real_price
+        pnl = np.sign(df_predicted_price-0.5) * df_real_price
 
     reportSh = np.sqrt(252) * sl.sharpe(pnl)
     print(reportSh)
-    sl.cs(pnl).plot(title='csPnL')
-    df_real_price.plot(title='Real Price')
-    df_predicted_price.plot(title = 'Predicted Price')
+    fig, ax = plt.subplots(nrows=3, ncols=1)
+    sl.cs(pnl).plot(ax=ax[0], title='csPnL')
+    sl.cs(df_real_price).plot(ax=ax[1], title='Real Price')
+    df_predicted_price.plot(ax=ax[2],title = 'Predicted Price')
     plt.show()
 
     pnl.to_sql('pnl_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
@@ -120,15 +114,11 @@ def runRnn(Portfolios, scanMode, mode):
     if Portfolios == 'Projections':
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
     elif Portfolios == 'ClassicPortfolios':
-        allPortfoliosList = []
-        for tw in twList:
-            subDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_' + str(tw), conn).set_index('Dates', drop=True)
-            subDF.columns = ["RP_" + str(tw)]
-            allPortfoliosList.append(subDF)
         LOportfolio = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
         LOportfolio.columns = ["LO"]
-        allPortfoliosList.append(LOportfolio)
-        allProjectionsDF = pd.concat(allPortfoliosList, axis=1)
+        RPportfolio = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
+        LOportfolio.columns = ["RP"]
+        allProjectionsDF = pd.concat([LOportfolio, RPportfolio], axis=1)
     elif Portfolios == 'globalProjections':
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
@@ -330,29 +320,32 @@ def runGpc(Portfolios, scanMode, mode):
 
 def Test():
     magicNum = 1000
+    #selection = 'PCA_250_3_Head'
+    #selection = 'LLE_250_3_Head'
+    selection = 'LLE_250_0'
+    #selection = 'PCA_250_19'
+    df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+    #df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+    hidden_nodes = int(2 / 3 * (len(df.columns) * 2))#N_h = (N_s / (a*(N_i+N_o))), a=2---10
+    print("Standalone Sharpe = ", np.sqrt(252)*sl.sharpe(df), ", Proposed hidden_nodes = ", hidden_nodes)
     params = {
         "HistLag": 0,
         "TrainWindow": 250, #250
-        "epochsIn": 50, #50
-        "batchSIzeIn": 16, #16
+        "epochsIn": 100, #50
+        "batchSIzeIn": 5, #16
         "EarlyStopping_patience_Epochs": 5,
         "LearningMode": 'online', #'static', 'online'
         "medSpecs": [
-            {"LayerType": "LSTM", "units": 200, "RsF": True, "Dropout": 0.4}, #200
-            {"LayerType": "LSTM", "units": 200, "RsF": False, "Dropout": 0.4}
+            {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.4}, #200
+            {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.4}
         ],
         "rw": 5,
         "modelNum": magicNum,
-        "TrainEndPct": 0.3,
+        "TrainEndPct": 0.1,
         "CompilerSettings": ['adam', 'mean_squared_error'],
         "writeLearnStructure": 0
     }
-    #selection = 'PCA_ExpWindow25_0'
-    selection = 'LLE_250_3_Head'
-    #selection = 'LLE_250_0'
-    #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-    df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
-    print("Standalone Sharpe = ", np.sqrt(252)*sl.sharpe(df))
     #df = sl.cs(df)
     RNNprocess([selection, df, params, magicNum])
 
