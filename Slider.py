@@ -11,6 +11,7 @@ from scipy import stats
 from numpy import dot, array
 from itertools import combinations
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
+from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, minmax_scale, MaxAbsScaler, StandardScaler, RobustScaler, Normalizer, QuantileTransformer, PowerTransformer
 from sklearn.linear_model import LinearRegression
 from sklearn import preprocessing
@@ -198,7 +199,24 @@ class Slider:
         out = df / (100 * np.sqrt(252) * df.std())
         return out
 
+    def rp(df, **kwargs):
+
+        if 'nIn' in kwargs:
+            nIn = kwargs['nIn']
+        else:
+            nIn = 250
+
+        SRollVol = np.sqrt(252) * Slider.S(Slider.rollStatistics(df, method='Vol', nIn=nIn)) * 100
+        out = (df / SRollVol).replace([np.inf, -np.inf], 0).fillna(0)
+
+        return [out, SRollVol]
+
     def preCursor(df, preCursorDF, **kwargs):
+
+        if 'mode' in kwargs:
+            mode = kwargs['mode']
+        else:
+            mode = "roll"
 
         if 'nIn' in kwargs:
             nIn = kwargs['nIn']
@@ -210,29 +228,25 @@ class Slider:
         else:
             multiplier = 2
 
-        preCursorDF = pd.DataFrame(preCursorDF)
+        if mode == 'roll':
+            preCursorDF_Upper = preCursorDF.rolling(nIn).mean() + preCursorDF.rolling(nIn).std() * multiplier
+            preCursorDF_Lower = preCursorDF.rolling(nIn).mean() - preCursorDF.rolling(nIn).std() * multiplier
+        else:
+            preCursorDF_Upper = preCursorDF.expanding(nIn).mean() + preCursorDF.expanding(nIn).std() * multiplier
+            preCursorDF_Lower = preCursorDF.expanding(nIn).mean() - preCursorDF.expanding(nIn).std() * multiplier
+        bbTS = pd.concat([preCursorDF_Lower, preCursorDF, preCursorDF_Upper], axis=1)
 
-        preCursorDF_Upper = preCursorDF.rolling(nIn).mean() + preCursorDF.rolling(nIn).std() * multiplier
-        preCursorDF_Lower = preCursorDF.rolling(nIn).mean() - preCursorDF.rolling(nIn).std() * multiplier
         binarizeUpper = Slider.sign(preCursorDF - preCursorDF_Upper)
         binarizeUpper[binarizeUpper > 0] = None
         binarizeUpper = binarizeUpper.abs()
         binarizeLower = Slider.sign(preCursorDF - preCursorDF_Lower)
         binarizeLower[binarizeLower < 0] = None
         binarizeLower = binarizeLower.abs()
-        binarySignal = binarizeUpper + binarizeLower
+        binarySignal = np.sign(binarizeUpper + binarizeLower)
 
-        print(np.sign(binarySignal))
-        #binarizeUpper.plot(title='binarizeUpper', legend=None)
-        #binarizeLower.plot(title='binarizeLower', legend=None)
-        #plt.show()
-        #print(preCursorDF)
-        out = df.mul(np.sign(binarySignal), axis=0)
-        out.plot()
-        plt.show()
-        print(out)
-        time.sleep(3000)
-        return [out, preCursorDF]
+        out = df.mul(binarySignal, axis=0)
+
+        return [out, binarySignal]
 
     ########################
 
@@ -547,8 +561,24 @@ class Slider:
 
         return calmardf
 
-    def sharpe(df):
-        return df.mean() / df.std()
+    def sharpe(df, **kwargs):
+        if 'mode' in kwargs:
+            mode = kwargs['mode']
+        else:
+            mode = 'standard'
+
+        if mode == 'standard':
+            out = df.mean() / df.std()
+        elif mode == 'processNA':
+            shList = []
+            for c in df.columns:
+                df[c] = df[c].dropna()
+                medSh = df[c].mean() / df[c].std()
+                shList.append(medSh)
+
+            out = pd.Series(shList, index=df.columns)
+
+        return out
 
     def VaR_Quantile(df, **kwargs):
         if 'a' in kwargs:
@@ -806,11 +836,6 @@ class Slider:
 
         return df0.fillna(method='ffill').fillna(0)
 
-    def rp(df):
-        riskParityVol = np.sqrt(252) * Slider.S(Slider.rollerVol(df, 250)) * 100
-        out = (df / riskParityVol).replace([np.inf, -np.inf], 0)
-        return out
-
     def sma(df, **kwargs):
         if 'nperiods' in kwargs:
             nperiods = kwargs['nperiods']
@@ -1025,6 +1050,8 @@ class Slider:
             mainKernel = 1 * RationalQuadratic()
         elif Kernel == "WhiteKernel":
             mainKernel = 1 * WhiteKernel()
+        elif Kernel == "Matern_WhiteKernel":
+            mainKernel = 1 * Matern() + 1 * WhiteKernel()
 
         gpcparamList = []
         history = [x for x in X_train]
@@ -1126,18 +1153,31 @@ class Slider:
                 subhistory = history
 
             model = ARIMA(subhistory, order=orderIn)
-            model_fit = model.fit(disp=0)
-            output = model_fit.forecast()
-            yhat = output[0][0]
+
+            try:
+                model_fit = model.fit(disp=0)
+                output = model_fit.forecast()
+                yhat = output[0][0]
+
+                modelParamsDF = pd.DataFrame(model_fit.conf_int(), columns=['Lower', 'Upper'])
+                modelParamsDF['pvalues'] = model_fit.pvalues
+                modelParamsDF['params'] = model_fit.params
+
+            except:
+                yhat = np.nan
+
+                nullSeries = pd.Series([np.nan] * (sum([x for x in orderIn]) + 1))
+                modelParamsDF = pd.DataFrame()
+                for c in ['Lower', 'Upper', 'pvalues', 'params']:
+                    modelParamsDF[c] = nullSeries
+
             predictions.append(yhat)
             obs = test[t]
             history.append(obs)
-            ###
-            modelParamsDF = pd.DataFrame(model_fit.conf_int(), columns=['Lower', 'Upper'])
-            modelParamsDF['pvalues'] = model_fit.pvalues
-            modelParamsDF['params'] = model_fit.params
-            modelParamsDF['Dates'] = df.index[t+size]
+            modelParamsDF['Dates'] = df.index[t + size]
             arparamList.append(modelParamsDF)
+
+            ###
 
             c += 1
 
@@ -1685,6 +1725,8 @@ class Slider:
 
                 if Scaler == 'Standard':
                     x = StandardScaler().fit_transform(x)
+                elif Scaler == 'SimpleImputer':
+                    x = SimpleImputer(missing_values=np.nan, strategy='constant').fit_transform(x)
 
                 if manifoldIn == 'PCA':
                     pca = PCA(n_components=NumProjections)
@@ -1692,7 +1734,8 @@ class Slider:
                     lambdasList.append(list(pca.singular_values_))
                     c = 0
                     for eig in eigsPC:
-                        # print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
+                        #print("c = ", c, ", eig = ", eig, ' : ', len(pca.components_[eig]), ',', len(pca.components_))
+                        #print(list(pca.components_[eig]))
                         Loadings_Target[c].append(list(pca.components_[eig]))
                         c += 1
 
@@ -1772,7 +1815,7 @@ class Slider:
                     principalCompsDf_Last[k] = principalCompsDf_Last[k].ffill()
 
             if manifoldIn in ['PCA', 'LLE']:
-                return [df0, [principalCompsDf_Target, principalCompsDf_First, principalCompsDf_Last], lambdasDF]
+                return [df0, principalCompsDf_Target, lambdasDF]
             elif manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
                 sigmaListDF = pd.DataFrame(sigmaList)
                 sigmaDF = pd.concat(
@@ -2124,6 +2167,7 @@ class Slider:
             my_callbacks = [
                 #tf.keras.callbacks.RemoteMonitor(root="http://localhost:9000", path="/publish/epoch/end/", field="data", headers=None, send_as_json=False, ),
                 tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"]),
+                history,
                 #tf.keras.callbacks.ModelCheckpoint(filepath='model.{epoch:02d}-{val_loss:.2f}.h5'),
                 #tf.keras.callbacks.TensorBoard(log_dir='./logs'),
             ]
@@ -2157,7 +2201,7 @@ class Slider:
                     predicted_price_test.append(
                         regressor.predict(np.reshape(predicted_price_test[-1], (1, 1, 1)))[0])
                 #print(predicted_price_test)
-                predicted_price_test = sc.inverse_transform(predicted_price_test)
+                #predicted_price_test = sc.inverse_transform(predicted_price_test)
                 #print("predicted_price_test : ", predicted_price_test)
                 scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
 
@@ -2181,8 +2225,9 @@ class Slider:
                     # indXtest = np.reshape(X_test[i], (X_test[i].shape[0], 1, len(dataset_all.columns)))
 
                     #print("indXest.shape=", indXtest.shape)
-                    print("predicted_price_test=", sc.inverse_transform(regressor.predict(indXtest))[0])
-                    predicted_price_test.append(sc.inverse_transform(regressor.predict(indXtest))[0])
+                    #print("predicted_price_test=", sc.inverse_transform(regressor.predict(indXtest))[0])
+                    #predicted_price_test.append(sc.inverse_transform(regressor.predict(indXtest))[0])
+                    predicted_price_test.append(regressor.predict(indXtest)[0])
 
                     indYtest = np.reshape(y_test[i], (1, FeatSpaceDims))
 

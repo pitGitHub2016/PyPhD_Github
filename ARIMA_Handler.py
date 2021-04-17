@@ -71,10 +71,11 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
         LOportfolio.columns = ["RP"]
         allProjectionsDF = pd.concat([LOportfolio, RPportfolio], axis=1)
     elif Portfolios == 'Finalists':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_0', 'PCA_ExpWindow25_2']]
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_0', 'PCA_ExpWindow25_2']].iloc[-200:,:]
 
     #orderList = [(1, 0, 0), (3, 0, 0), (3, 0, 1), (5, 0, 0), (5, 0, 1)]
-    orderList = [(2, 0, 0),(2, 0, 1)]
+    #orderList = [(3, 0, 0)]
+    orderList = [(2, 0, 1)]
     startPct = 0.1
     rw = 250
     if scanMode == 'Main':
@@ -152,91 +153,92 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
         stats = stats[(stats['selection'].str.split("_").str[2].astype(float)<5)].set_index("selection", drop=True).round(4)
         stats.to_sql('ARIMA_SpecificStatistics_' + Portfolios, conn, if_exists='replace')
 
-def Test():
-    selection = 'PCA_ExpWindow25_2'
-    trainLength = 0.3
-    tw = 250
-    df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-    rwDF = pd.read_sql('SELECT * FROM PCA_randomWalkPnlRSprojections_tw_ExpWindow25', conn).set_index('Dates',
-                                                                                                      drop=True).iloc[
-           round(0.3 * len(df)):, 2]
-    medSh = (np.sqrt(252) * sl.sharpe(rwDF)).round(4)
-    print("Random Walk Sharpe : ", medSh)
-    # GaussianProcess_Results = sl.GPC_Walk(df, trainLength, tw)
-    magicNum = 1
-    params = {
-        "TrainWindow": 5,
-        "LearningMode": 'static',
-        "Kernel": "DotProduct",
-        "modelNum": magicNum,
-        "TrainEndPct": 0.3,
-        "writeLearnStructure": 0
-    }
-    out = sl.AI.gGPC(df, params)
+def Test(mode):
+    if mode == 'GPC':
+        selection = 'PCA_ExpWindow25_2'
+        trainLength = 0.3
+        tw = 250
+        df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+        rwDF = pd.read_sql('SELECT * FROM PCA_randomWalkPnlRSprojections_tw_ExpWindow25', conn).set_index('Dates',
+                                                                                                          drop=True).iloc[
+               round(0.3 * len(df)):, 2]
+        medSh = (np.sqrt(252) * sl.sharpe(rwDF)).round(4)
+        print("Random Walk Sharpe : ", medSh)
+        # GaussianProcess_Results = sl.GPC_Walk(df, trainLength, tw)
+        magicNum = 1
+        params = {
+            "TrainWindow": 5,
+            "LearningMode": 'static',
+            "Kernel": "DotProduct",
+            "modelNum": magicNum,
+            "TrainEndPct": 0.3,
+            "writeLearnStructure": 0
+        }
+        out = sl.AI.gGPC(df, params)
 
-    out[0].to_sql('df_real_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                  if_exists='replace')
-    out[1].to_sql('df_predicted_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                  if_exists='replace')
-    out[2].to_sql('df_predicted_proba_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                  if_exists='replace')
-    df_real_price = out[0]
-    df_predicted_price = out[1]
-    df_predicted_price.columns = df_real_price.columns
-    # Returns Prediction
-    sig = sl.sign(df_predicted_price)
-    pnl = sig * df_real_price
-    pnl.to_sql('pnl_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn, if_exists='replace')
-    print("pnl_GPC_TEST_sharpe = ", np.sqrt(252) * sl.sharpe(pnl))
-    sl.cs(pnl).plot()
-    print(out[2].tail(10))
-    out[2].plot()
-    plt.show()
+        out[0].to_sql('df_real_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
+                      if_exists='replace')
+        out[1].to_sql('df_predicted_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
+                      if_exists='replace')
+        out[2].to_sql('df_predicted_proba_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
+                      if_exists='replace')
+        df_real_price = out[0]
+        df_predicted_price = out[1]
+        df_predicted_price.columns = df_real_price.columns
+        # Returns Prediction
+        sig = sl.sign(df_predicted_price)
+        pnl = sig * df_real_price
+        pnl.to_sql('pnl_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn, if_exists='replace')
+        print("pnl_GPC_TEST_sharpe = ", np.sqrt(252) * sl.sharpe(pnl))
+        sl.cs(pnl).plot()
+        print(out[2].tail(10))
+        out[2].plot()
+        plt.show()
 
-def Test2():
+    elif mode == 'test0':
 
-    from quantstats import stats as qs
-    from scipy.stats import norm
-    allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[
-        ['PCA_ExpWindow25_2']]
-    rw_pnl = sl.S(sl.sign(allProjectionsDF)) * allProjectionsDF
-    semaPnL = sl.S(sl.sign(sl.ema(allProjectionsDF, nperiods=3))) * allProjectionsDF
-    pnl = pd.read_sql('SELECT * FROM PCA_ExpWindow25_2_ARIMA_pnl_100_250',  conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
-    pnlAll = pd.concat([rw_pnl, semaPnL, pnl], axis=1).dropna()
-    pnlAll.columns = ['PCA_ExpWindow25_2_RandomWalk', 'PCA_ExpWindow25_2_Sema', 'PCA_ExpWindow25_2_ARIMA_pnl_100_250']
+        from quantstats import stats as qs
+        from scipy.stats import norm
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[
+            ['PCA_ExpWindow25_2']]
+        rw_pnl = sl.S(sl.sign(allProjectionsDF)) * allProjectionsDF
+        semaPnL = sl.S(sl.sign(sl.ema(allProjectionsDF, nperiods=3))) * allProjectionsDF
+        pnl = pd.read_sql('SELECT * FROM PCA_ExpWindow25_2_ARIMA_pnl_100_250',  conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
+        pnlAll = pd.concat([rw_pnl, semaPnL, pnl], axis=1).dropna()
+        pnlAll.columns = ['PCA_ExpWindow25_2_RandomWalk', 'PCA_ExpWindow25_2_Sema', 'PCA_ExpWindow25_2_ARIMA_pnl_100_250']
 
-    ttestRV = sl.ttestRV(pnlAll)
-    print("ttestRV on Returns : ")
-    print(ttestRV)
-    rollSharpes = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.sharpe(pd.Series(x))).fillna(0)
-    ttestRV_Sharpes = sl.ttestRV(rollSharpes)
-    print("ttestRV on Rolling Sharpes : ")
-    print(ttestRV_Sharpes)
+        ttestRV = sl.ttestRV(pnlAll)
+        print("ttestRV on Returns : ")
+        print(ttestRV)
+        rollSharpes = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.sharpe(pd.Series(x))).fillna(0)
+        ttestRV_Sharpes = sl.ttestRV(rollSharpes)
+        print("ttestRV on Rolling Sharpes : ")
+        print(ttestRV_Sharpes)
 
-    rollSharpes.plot()
-    plt.show()
+        rollSharpes.plot()
+        plt.show()
 
-    #out = sl.cs(pnlAll)
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.sortino(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.adjusted_sortino(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.avg_loss(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: pd.Series(x).std())
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.ulcer_performance_index(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.risk_of_ruin(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.value_at_risk(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.conditional_value_at_risk(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.tail_ratio(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.payoff_ratio(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.profit_ratio(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.profit_factor(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.cpc_index(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.common_sense_ratio(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.outlier_win_ratio(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.outlier_win_ratio(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.recovery_factor(pd.Series(x))) # GOOD (*)
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.max_drawdown(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.to_drawdown_series(pd.Series(x)))
-    #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.kelly_criterion(pd.Series(x)))
+        #out = sl.cs(pnlAll)
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.sortino(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.adjusted_sortino(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.avg_loss(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: pd.Series(x).std())
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.ulcer_performance_index(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.risk_of_ruin(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.value_at_risk(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.conditional_value_at_risk(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.tail_ratio(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.payoff_ratio(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.profit_ratio(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.profit_factor(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.cpc_index(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.common_sense_ratio(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.outlier_win_ratio(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.outlier_win_ratio(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.recovery_factor(pd.Series(x))) # GOOD (*)
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.max_drawdown(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.to_drawdown_series(pd.Series(x)))
+        #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.kelly_criterion(pd.Series(x)))
 
 #####################################################
 
@@ -245,10 +247,10 @@ def Test2():
 ARIMAonPortfolios("Projections", 'Main', "run")
 #ARIMAonPortfolios("Projections", 'Main', "report")
 #ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
-ARIMAonPortfolios("globalProjections", 'Main', "run")
+#ARIMAonPortfolios("globalProjections", 'Main', "run")
 #ARIMAonPortfolios("globalProjections", 'Main', "report")
 #ARIMAonPortfolios("globalProjections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("Projections", "ReportSpecificStatistics", "")
 #ARIMAonPortfolios("Finalists", 'Main', "run")
 
-#Test2()
+#Test('GPC')
