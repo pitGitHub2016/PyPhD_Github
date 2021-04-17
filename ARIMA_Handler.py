@@ -74,7 +74,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_0', 'PCA_ExpWindow25_2']]
 
     #orderList = [(1, 0, 0), (3, 0, 0), (3, 0, 1), (5, 0, 0), (5, 0, 1)]
-    orderList = [(1, 0, 0)]
+    orderList = [(2, 0, 0),(2, 0, 1)]
     startPct = 0.1
     rw = 250
     if scanMode == 'Main':
@@ -242,11 +242,11 @@ def Test2():
 
 #ARIMAonPortfolios("ClassicPortfolios", 'Main', "run")
 #ARIMAonPortfolios("ClassicPortfolios", 'Main', "report")
-#ARIMAonPortfolios("Projections", 'Main', "run")
+ARIMAonPortfolios("Projections", 'Main', "run")
 #ARIMAonPortfolios("Projections", 'Main', "report")
 #ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
 ARIMAonPortfolios("globalProjections", 'Main', "run")
-ARIMAonPortfolios("globalProjections", 'Main', "report")
+#ARIMAonPortfolios("globalProjections", 'Main', "report")
 #ARIMAonPortfolios("globalProjections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("Projections", "ReportSpecificStatistics", "")
 #ARIMAonPortfolios("Finalists", 'Main', "run")
