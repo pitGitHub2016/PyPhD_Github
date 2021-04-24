@@ -24,7 +24,10 @@ mpl.rcParams['font.family'] = ['serif']
 mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
 
-conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData.db')
+try:
+    conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData.db')
+except:
+    conn = sqlite3.connect('Temp.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 calcMode = 'run'
@@ -324,30 +327,43 @@ def Test():
     #selection = 'LLE_250_3_Head'
     selection = 'LLE_250_0'
     #selection = 'PCA_250_19'
-    df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
     #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
-    hidden_nodes = int(2 / 3 * (len(df.columns) * 2))#N_h = (N_s / (a*(N_i+N_o))), a=2---10
-    print("Standalone Sharpe = ", np.sqrt(252)*sl.sharpe(df), ", Proposed hidden_nodes = ", hidden_nodes)
-    params = {
-        "HistLag": 0,
-        "TrainWindow": 250, #250
-        "epochsIn": 100, #50
-        "batchSIzeIn": 5, #16
-        "EarlyStopping_patience_Epochs": 5,
-        "LearningMode": 'online', #'static', 'online'
-        "medSpecs": [
-            {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.4}, #200
-            {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.4}
-        ],
-        "rw": 5,
-        "modelNum": magicNum,
-        "TrainEndPct": 0.1,
-        "CompilerSettings": ['adam', 'mean_squared_error'],
-        "writeLearnStructure": 0
-    }
-    #df = sl.cs(df)
-    RNNprocess([selection, df, params, magicNum])
+
+    dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=750, sub_testSetInv=250)
+    print(dfList)
+    time.sleep(30000)
+
+    for df in dfList:
+        try:
+            lenCols = len(df.columns)
+        except:
+            lenCols = 1
+        hidden_nodes = int(2 / 3 * (lenCols * 2))#N_h = (N_s / (a*(N_i+N_o))), a=2---10
+        print("Standalone Sharpe = ", np.sqrt(252)*sl.sharpe(df), ", Proposed hidden_nodes = ", hidden_nodes)
+        #time.sleep(3000)
+        params = {
+            "HistLag": 0,
+            "TrainWindow": 240, #250
+            "epochsIn": 100, #50
+            "batchSIzeIn": 32, #16
+            "EarlyStopping_patience_Epochs": 10,
+            "LearningMode": 'static', #'static', 'online'
+            "medSpecs": [
+                {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+            ],
+            "rw": 10,
+            "modelNum": magicNum,
+            "TrainEndPct": 0.1,
+            "CompilerSettings": ['adam', 'mean_squared_error'],
+            "writeLearnStructure": 0
+        }
+        #df = sl.cs(df)
+        RNNprocess([selection, df, params, magicNum])
 
 #runRnn("ClassicPortfolios", 'Main', "run")
 #runRnn("ClassicPortfolios", 'Main', "report")
