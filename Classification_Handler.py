@@ -1,5 +1,5 @@
 import pandas as pd, numpy as np, matplotlib.pyplot as plt
-import sqlite3, time
+import sqlite3, time, pickle
 from tqdm import tqdm
 from itertools import combinations
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
@@ -332,18 +332,13 @@ def Test():
     #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
-    dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=750, sub_testSetInv=250)
-    print(dfList)
-    time.sleep(30000)
+    sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
+    dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
 
+    df_real_price_List = []
+    df_predicted_price_List = []
     for df in dfList:
-        try:
-            lenCols = len(df.columns)
-        except:
-            lenCols = 1
-        hidden_nodes = int(2 / 3 * (lenCols * 2))#N_h = (N_s / (a*(N_i+N_o))), a=2---10
-        print("Standalone Sharpe = ", np.sqrt(252)*sl.sharpe(df), ", Proposed hidden_nodes = ", hidden_nodes)
-        #time.sleep(3000)
+
         params = {
             "HistLag": 0,
             "TrainWindow": 240, #250
@@ -356,14 +351,23 @@ def Test():
                 {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
                 {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
             ],
-            "rw": 10,
             "modelNum": magicNum,
-            "TrainEndPct": 0.1,
+            "TrainEndPct": round(sub_trainingSetIvlIn/len(df),2),
             "CompilerSettings": ['adam', 'mean_squared_error'],
             "writeLearnStructure": 0
         }
         #df = sl.cs(df)
-        RNNprocess([selection, df, params, magicNum])
+        #RNNprocess([selection, df, params, magicNum])
+        out = sl.AI.gRNN(df, params)
+        df_real_price = out[0]
+        df_predicted_price = out[1]
+        df_predicted_price.columns = df_real_price.columns
+
+        df_real_price_List.append(df_real_price)
+        df_predicted_price_List.append(df_predicted_price)
+
+    allRNNData = [df_real_price_List, df_predicted_price_List]
+    pickle.dump(allRNNData, open("allRNNData.p", "wb" ))
 
 #runRnn("ClassicPortfolios", 'Main', "run")
 #runRnn("ClassicPortfolios", 'Main', "report")
@@ -377,3 +381,5 @@ def Test():
 #runGpc("Projections", 'Main', "report")
 
 Test()
+#allRNNData = pickle.load(open("allRNNData.p", "rb"))
+#print(allRNNData)
