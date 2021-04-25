@@ -2401,14 +2401,16 @@ class Slider:
             #################### Creating a data structure with N timesteps and 1 output #############################
             X = []
             y = []
+            realY = []
             for i in range(params["InputSequenceLength"], len(dataset_all)):
                 X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
                 y.append(np.sign(dataVals[i]))
-            X, y = np.array(X), np.array(y)
+                realY.append(dataVals[i])
+            X, y, realY = np.array(X), np.array(y), np.array(realY)
             y[y==-1] = 2
             idx = dataset_all.iloc[params["InputSequenceLength"]:].index
 
-            print("X.shape=", X.shape, ", y.shape=", y.shape, ", FeatSpaceDims=", FeatSpaceDims,
+            print("X.shape=", X.shape, ", y.shape=", y.shape, ", realY.shape=", realY.shape, ", FeatSpaceDims=", FeatSpaceDims,
                   ", InputSequenceLength=", params["InputSequenceLength"],
                   ", SubHistoryLength=", params["SubHistoryLength"],
                   ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
@@ -2437,13 +2439,16 @@ class Slider:
                 #print("X_train.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
                 #print(len(X_train.shape), len(y_train.shape))
 
+                # Enable Scaling
+                if params['Scaler'] is not None:
+                    X_train = sc.fit_transform(X_train)
+                    X_test = sc.transform(X_test)
+
                 X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), Slider.AI.gReshape(X_test, FeatSpaceDims)
 
                 #print("X_train.shape = ", X_train.shape,", X_test.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
                 #print(len(X_train.shape), len(y_train.shape))
 
-                # Enable Scaling
-                #X_train = sc.fit_transform(X_train.reshape(-1, 1))
                 ####################################### Reshaping ########################################################
                 "Samples : One sequence is one sample. A batch is comprised of one or more samples."
                 "Time Steps : One time step is one point of observation in the sample."
@@ -2493,15 +2498,22 @@ class Slider:
                               verbose=0, callbacks=my_callbacks)
 
                 ############################### TRAIN PREDICT #################################
-                # predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
-                predicted_price_train = regressor.predict(X_train)
+                if params['Scaler'] is None:
+                    predicted_price_train = regressor.predict(X_train)
+                else:
+                    predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
+
                 df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
                                                         columns=['Predicted_Train_'+x for x in outNaming])
                 df_real_price_train = pd.DataFrame(y_train, index=subIdx_train,
                                                    columns=['Real_Train_'+x for x in outNaming])
                 ############################### TEST PREDICT ##################################
                 if params["LearningMode"] == 'static':
-                    predicted_price_test = regressor.predict(X_test)
+                    if params['Scaler'] is None:
+                        predicted_price_test = regressor.predict(X_test)
+                    else:
+                        predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
+
                     df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test,
                                                            columns=['Predicted_Test_'+x for x in outNaming])
                     df_real_price_test = pd.DataFrame(y_test, index=subIdx_test,

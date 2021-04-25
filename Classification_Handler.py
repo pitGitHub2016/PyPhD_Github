@@ -350,7 +350,7 @@ def Test(mode):
                 "InputSequenceLength": 240, #240
                 "SubHistoryLength": 760, #760
                 "SubHistoryTrainingLength": 510, #510
-                "Scaler": None, #Standard
+                "Scaler": "Standard", #Standard
                 "epochsIn": 100, #100
                 "batchSIzeIn": 32, #16
                 "EarlyStopping_patience_Epochs": 10,
@@ -373,9 +373,14 @@ def Test(mode):
             out[2].to_sql('df_predicted_price_test_DF_Test', conn, if_exists='replace')
             out[3].to_sql('df_real_price_test_DF_Test', conn, if_exists='replace')
 
-        print(len(out[2]), len(out[3]))
-        out[2].plot()
-        out[3].plot()
+    elif mode == 'read':
+        df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
+        df_predicted_price_test_DF_Test = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test', conn).set_index('Dates', drop=True)
+        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test', conn).set_index('Dates', drop=True)
+
+        print(len(df_predicted_price_test_DF_Test), len(df_real_price_test_DF_Test))
+        df_predicted_price_test_DF_Test.plot()
+        df_real_price_test_DF_Test.plot()
         plt.show()
 
 #runRnn("ClassicPortfolios", 'Main', "run")
@@ -390,3 +395,4 @@ def Test(mode):
 #runGpc("Projections", 'Main', "report")
 
 Test("run")
+#Test("read")
