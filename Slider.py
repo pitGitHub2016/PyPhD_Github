@@ -2405,6 +2405,7 @@ class Slider:
                 X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
                 y.append(np.sign(dataVals[i]))
             X, y = np.array(X), np.array(y)
+            y[y==-1] = 2
             idx = dataset_all.iloc[params["InputSequenceLength"]:].index
 
             print("X.shape=", X.shape, ", y.shape=", y.shape, ", FeatSpaceDims=", FeatSpaceDims,
@@ -2413,8 +2414,15 @@ class Slider:
                   ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
 
             stepper = params["SubHistoryLength"]-params["SubHistoryTrainingLength"]
+
+            df_predicted_price_train_List = []
+            df_real_price_train_List = []
+            df_predicted_price_test_List = []
+            df_real_price_test_List = []
+
             breakFlag = False
-            for i in range(0, X.shape[0], stepper):
+            megaCount = 0
+            for i in tqdm(range(0, X.shape[0], stepper)):
                 subProcessingHistory_X, subProcessingHistory_y = X[i:i+params["SubHistoryLength"]], y[i:i+params["SubHistoryLength"]]
                 subIdx = idx[i:i+params["SubHistoryLength"]]
                 if len(subProcessingHistory_X) < params["SubHistoryLength"]:
@@ -2426,13 +2434,13 @@ class Slider:
                 X_test, y_test = subProcessingHistory_X[params["SubHistoryTrainingLength"]:], subProcessingHistory_y[params["SubHistoryTrainingLength"]:]
                 subIdx_test = subIdx[params["SubHistoryTrainingLength"]:]
 
-                print("X_train.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
-                print(len(X_train.shape), len(y_train.shape))
+                #print("X_train.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
+                #print(len(X_train.shape), len(y_train.shape))
 
                 X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), Slider.AI.gReshape(X_test, FeatSpaceDims)
 
-                print("X_train.shape = ", X_train.shape,", X_test.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
-                print(len(X_train.shape), len(y_train.shape))
+                #print("X_train.shape = ", X_train.shape,", X_test.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
+                #print(len(X_train.shape), len(y_train.shape))
 
                 # Enable Scaling
                 #X_train = sc.fit_transform(X_train.reshape(-1, 1))
@@ -2447,71 +2455,75 @@ class Slider:
                       ", y_test.shape = ", y_test.shape)
 
                 ################################### Build the RNN (LSTM) #####################################
+                print("megaCount = ", megaCount)
 
-                regressor = Sequential()
-                # Adding the first LSTM layer and some Dropout regularisation
-                for layer in range(len(params["medSpecs"])):
-                    if params["medSpecs"][layer]["units"] == 'xShape1':
-                        unitsIn = X_train.shape[1]
-                        if params["medSpecs"][layer]["LayerType"] == "LSTM":
-                            regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
-                                               unit_forget_bias=True, bias_initializer='ones',
-                                               input_shape=(X_train.shape[1], FeatSpaceDims)))
-                        elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
-                            regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
-                                                    unit_forget_bias=True, bias_initializer='ones',
-                                                    input_shape=(X_train.shape[1], FeatSpaceDims)))
-                        regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                if megaCount == 0:
+                    regressor = Sequential()
+                    # Adding the first LSTM layer and some Dropout regularisation
+                    for layer in range(len(params["medSpecs"])):
+                        if params["medSpecs"][layer]["units"] == 'xShape1':
+                            unitsIn = X_train.shape[1]
+                            if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                                regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                                   unit_forget_bias=True, bias_initializer='ones',
+                                                   input_shape=(X_train.shape[1], FeatSpaceDims)))
+                            elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                                regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                                        unit_forget_bias=True, bias_initializer='ones',
+                                                        input_shape=(X_train.shape[1], FeatSpaceDims)))
+                            regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                        else:
+                            unitsIn = params["medSpecs"][layer]["units"]
+                            if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                                regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                            elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                                regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                            regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                    # Adding the output layer
+                    if len(y_train.shape) == 1:
+                        regressor.add(Dense(units=1))
                     else:
-                        unitsIn = params["medSpecs"][layer]["units"]
-                        if params["medSpecs"][layer]["LayerType"] == "LSTM":
-                            regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
-                        elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
-                            regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
-                        regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
-                # Adding the output layer
-                if len(y_train.shape) == 1:
-                    regressor.add(Dense(units=1))
-                else:
-                    regressor.add(Dense(units=y_train.shape[1]))
-                ####
-                my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
-                regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
+                        regressor.add(Dense(units=y_train.shape[1]))
+                    ####
+                    my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
+                    regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
+
                 # Fitting the RNN to the Training set
                 regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
                               verbose=0, callbacks=my_callbacks)
 
                 ############################### TRAIN PREDICT #################################
+                # predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
                 predicted_price_train = regressor.predict(X_train)
                 df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
-                                                        columns=['Predicted_Train'+x for x in outNaming])
+                                                        columns=['Predicted_Train_'+x for x in outNaming])
+                df_real_price_train = pd.DataFrame(y_train, index=subIdx_train,
+                                                   columns=['Real_Train_'+x for x in outNaming])
                 ############################### TEST PREDICT ##################################
                 if params["LearningMode"] == 'static':
-                    #predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
                     predicted_price_test = regressor.predict(X_test)
-                    df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test)
-                time.sleep(3000)
+                    df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test,
+                                                           columns=['Predicted_Test_'+x for x in outNaming])
+                    df_real_price_test = pd.DataFrame(y_test, index=subIdx_test,
+                                                           columns=['Real_Test_'+x for x in outNaming])
+
+                df_predicted_price_train_List.append(df_predicted_price_train)
+                df_real_price_train_List.append(df_real_price_train)
+                df_predicted_price_test_List.append(df_predicted_price_test)
+                df_real_price_test_List.append(df_real_price_test)
+
+                megaCount += 1
 
                 if breakFlag:
                     break
 
-            time.sleep(3000)
+            df_predicted_price_train_DF = pd.concat(df_predicted_price_train_List, axis=0)
+            df_real_price_train_DF = pd.concat(df_real_price_train_List, axis=0)
+            df_predicted_price_test_DF = pd.concat(df_predicted_price_test_List, axis=0)
+            df_real_price_test_DF = pd.concat(df_real_price_test_List, axis=0)
 
-            df_real_price_train = pd.DataFrame(y_train, index=idx[:TrainEnd], columns=outNaming)
-            df_real_price_test = pd.DataFrame(y_test, index=idx[TrainEnd:], columns=outNaming)
-
-            if 'writeLearnStructure' in params:
-                xList = []
-                for bX in X:
-                    xList.append(pd.DataFrame(bX).T.astype(str).agg('-'.join, axis=1).values)
-                dataDF = pd.concat(
-                    [dataset_all, pd.DataFrame(dataVals, index=dataset_all.index), pd.DataFrame(xList, index=idx),
-                     pd.DataFrame(y, index=idx),
-                     df_real_price_train, df_real_price_test, df_predicted_price_train, df_predicted_price_test],
-                    axis=1)
-                dataDF.to_csv('LearnStructure.csv')
-
-            return [df_real_price_test, df_predicted_price_test, scoreDF, regressor, history]
+            return [df_predicted_price_train_DF, df_real_price_train_DF,
+                     df_predicted_price_test_DF, df_real_price_test_DF]
 
         def gGPC(dataset_all, params):
 

@@ -323,58 +323,60 @@ def runGpc(Portfolios, scanMode, mode):
             print((np.sqrt(252) * sl.sharpe(pnl)).round(4))
             print((np.sqrt(252) * sl.sharpe(rsPnL)).round(4))
 
-def Test():
-    magicNum = 1000
-    #selection = 'PCA_250_3_Head'
-    #selection = 'LLE_250_3_Head'
-    selection = 'LLE_250_0'
-    #selection = 'PCA_250_19'
-    #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-    df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-    #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
-    #df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+def Test(mode):
+    if mode == 'run':
+        magicNum = 1000
+        #selection = 'PCA_250_3_Head'
+        #selection = 'LLE_250_3_Head'
+        selection = 'LLE_250_0'
+        #selection = 'PCA_250_19'
+        #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+        df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+        #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+        #df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
-    #sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
-    #dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
+        #sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
+        #dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
 
-    dfList = [df_Main]
-    df_real_price_List = []
-    df_predicted_price_List = []
-    for df in dfList:
+        dfList = [df_Main]
+        df_real_price_List = []
+        df_predicted_price_List = []
+        for df in dfList:
 
-        print("len(df) = ", len(df))
+            print("len(df) = ", len(df))
 
-        params = {
-            "HistLag": 0,
-            "InputSequenceLength": 240, #240
-            "SubHistoryLength": 760, #760
-            "SubHistoryTrainingLength": 510, #510
-            "Scaler": None, #Standard
-            "epochsIn": 1, #100
-            "batchSIzeIn": 32, #16
-            "EarlyStopping_patience_Epochs": 10,
-            "LearningMode": 'static', #'static', 'online'
-            "medSpecs": [
-                #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
-            ],
-            "modelNum": magicNum,
-            "CompilerSettings": ['adam', 'mean_squared_error'],
-            "writeLearnStructure": 0
-        }
-        #df = sl.cs(df)
-        #RNNprocess([selection, df, params, magicNum])
-        out = sl.AI.gRNN(df, params)
-        df_real_price = out[0]
-        df_predicted_price = out[1]
-        df_predicted_price.columns = df_real_price.columns
+            params = {
+                "HistLag": 0,
+                "InputSequenceLength": 240, #240
+                "SubHistoryLength": 760, #760
+                "SubHistoryTrainingLength": 510, #510
+                "Scaler": None, #Standard
+                "epochsIn": 100, #100
+                "batchSIzeIn": 32, #16
+                "EarlyStopping_patience_Epochs": 10,
+                "LearningMode": 'static', #'static', 'online'
+                "medSpecs": [
+                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                ],
+                "modelNum": magicNum,
+                "CompilerSettings": ['adam', 'mean_squared_error'],
+                "writeLearnStructure": 0
+            }
+            #df = sl.cs(df)
+            #RNNprocess([selection, df, params, magicNum])
+            out = sl.AI.gRNN(df, params)
 
-        df_real_price_List.append(df_real_price)
-        df_predicted_price_List.append(df_predicted_price)
+            out[0].to_sql('df_predicted_price_train_DF_Test', conn, if_exists='replace')
+            out[1].to_sql('df_real_price_train_DF_Test', conn, if_exists='replace')
+            out[2].to_sql('df_predicted_price_test_DF_Test', conn, if_exists='replace')
+            out[3].to_sql('df_real_price_test_DF_Test', conn, if_exists='replace')
 
-    allRNNData = [df_real_price_List, df_predicted_price_List]
-    pickle.dump(allRNNData, open("allRNNData.p", "wb" ))
+        print(len(out[2]), len(out[3]))
+        out[2].plot()
+        out[3].plot()
+        plt.show()
 
 #runRnn("ClassicPortfolios", 'Main', "run")
 #runRnn("ClassicPortfolios", 'Main', "report")
@@ -387,6 +389,4 @@ def Test():
 #runGpc("Projections", 'Main', "run")
 #runGpc("Projections", 'Main', "report")
 
-Test()
-#allRNNData = pickle.load(open("allRNNData.p", "rb"))
-#print(allRNNData)
+Test("run")
