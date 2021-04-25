@@ -20,6 +20,8 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import multiprocessing as mp
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
 mpl.rcParams['font.family'] = ['serif']
 mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
@@ -332,27 +334,32 @@ def Test():
     #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
-    sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
-    dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
+    #sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
+    #dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
 
+    dfList = [df_Main]
     df_real_price_List = []
     df_predicted_price_List = []
     for df in dfList:
 
+        print("len(df) = ", len(df))
+
         params = {
             "HistLag": 0,
-            "TrainWindow": 240, #250
-            "epochsIn": 100, #50
+            "InputSequenceLength": 240, #240
+            "SubHistoryLength": 760, #760
+            "SubHistoryTrainingLength": 510, #510
+            "Scaler": None, #Standard
+            "epochsIn": 1, #100
             "batchSIzeIn": 32, #16
             "EarlyStopping_patience_Epochs": 10,
             "LearningMode": 'static', #'static', 'online'
             "medSpecs": [
-                {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
                 {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
             ],
             "modelNum": magicNum,
-            "TrainEndPct": round(sub_trainingSetIvlIn/len(df),2),
             "CompilerSettings": ['adam', 'mean_squared_error'],
             "writeLearnStructure": 0
         }

@@ -1552,8 +1552,8 @@ class Slider:
             while i < len(df):
                 subProcessingHistory = df.iloc[i:i + sub_trainingSetIvl + sub_testSetInv]
                 if len(subProcessingHistory) == sub_trainingSetIvl + sub_testSetInv:
-                    print(len(subProcessingHistory), ", from : ", subProcessingHistory.index[0], ", to : ",
-                          subProcessingHistory.index[-1])
+                    #print(len(subProcessingHistory), ", from : ", subProcessingHistory.index[0], ", to : ",
+                    #      subProcessingHistory.index[-1])
                     dfList.append(subProcessingHistory)
                 else:
                     subProcessingHistory = df.iloc[i:]
@@ -1564,6 +1564,18 @@ class Slider:
                 i += sub_testSetInv
 
             return dfList
+
+        def gReshape(data, Features):
+
+            samples = data.shape[0]
+            if len(data.shape) == 1:
+                TimeSteps = 1
+            else:
+                TimeSteps = data.shape[1]
+
+            data = data.reshape((samples, TimeSteps, Features))
+
+            return data
 
         ## MODELS ##
 
@@ -2368,152 +2380,125 @@ class Slider:
 
         def gRNN(dataset_all, params):
 
-            history = History()
+            ################################### Very First Data Preprocessing #########################################
 
-            ################################### Data Preprocessing ###################################################
-
-            SingleSample = False
-            if isinstance(dataset_all, pd.Series):
-                SingleSample = True
-
-            TrainEnd = int(params["TrainEndPct"] * len(dataset_all))
             dataVals = dataset_all.values
 
-            #################################### Feature Scaling #####################################################
-            # sc = StandardScaler()
-            # sc = MinMaxScaler() #feature_range=(0, 1)
-            if SingleSample:
-                # dataVals = sc.fit_transform(dataVals.reshape(-1, 1))
-                dataVals = dataVals.reshape(-1, 1)
+            if isinstance(dataset_all, pd.Series): # Single Sample
                 FeatSpaceDims = 1
                 outNaming = [dataset_all.name]
                 print(outNaming)
             else:
-                # dataVals = sc.fit_transform(dataVals)
                 FeatSpaceDims = len(dataset_all.columns)
                 outNaming = dataset_all.columns
+
+            #################################### Feature Scaling #####################################################
+            if params['Scaler'] == "Standard":
+                sc = StandardScaler()
+            elif params['Scaler'] == 'MinMax':
+                sc = MinMaxScaler() #feature_range=(0, 1)
+
             #################### Creating a data structure with N timesteps and 1 output #############################
             X = []
             y = []
-            for i in range(params["TrainWindow"], len(dataset_all)):
-                X.append(dataVals[i - params["TrainWindow"]:i - params["HistLag"]])
-                y.append(dataVals[i])
+            for i in range(params["InputSequenceLength"], len(dataset_all)):
+                X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
+                y.append(np.sign(dataVals[i]))
             X, y = np.array(X), np.array(y)
-            yBinary = np.sign(y)
-            yBinary[yBinary == -1] = 0
-            idx = dataset_all.iloc[params["TrainWindow"]:].index
+            idx = dataset_all.iloc[params["InputSequenceLength"]:].index
 
-            ####################################### Reshaping ########################################################
-            "Samples : One sequence is one sample. A batch is comprised of one or more samples."
-            "Time Steps : One time step is one point of observation in the sample."
-            "Features : One feature is one observation at a time step."
-            X = np.reshape(X, (X.shape[0], X.shape[1], FeatSpaceDims))
+            print("X.shape=", X.shape, ", y.shape=", y.shape, ", FeatSpaceDims=", FeatSpaceDims,
+                  ", InputSequenceLength=", params["InputSequenceLength"],
+                  ", SubHistoryLength=", params["SubHistoryLength"],
+                  ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
 
-            X_train, y_train, yBinary_train = X[:TrainEnd], y[:TrainEnd], yBinary[:TrainEnd]
-            X_test, y_test, yBinary_test = X[TrainEnd:], y[TrainEnd:], yBinary[TrainEnd:]
+            stepper = params["SubHistoryLength"]-params["SubHistoryTrainingLength"]
+            breakFlag = False
+            for i in range(0, X.shape[0], stepper):
+                subProcessingHistory_X, subProcessingHistory_y = X[i:i+params["SubHistoryLength"]], y[i:i+params["SubHistoryLength"]]
+                subIdx = idx[i:i+params["SubHistoryLength"]]
+                if len(subProcessingHistory_X) < params["SubHistoryLength"]:
+                    subProcessingHistory_X, subProcessingHistory_y = X[i:], y[i:]
+                    subIdx = idx[i:]
+                    breakFlag = True
+                X_train, y_train = subProcessingHistory_X[:params["SubHistoryTrainingLength"]], subProcessingHistory_y[:params["SubHistoryTrainingLength"]]
+                subIdx_train = subIdx[:params["SubHistoryTrainingLength"]]
+                X_test, y_test = subProcessingHistory_X[params["SubHistoryTrainingLength"]:], subProcessingHistory_y[params["SubHistoryTrainingLength"]:]
+                subIdx_test = subIdx[params["SubHistoryTrainingLength"]:]
 
-            # df_real_price_train = pd.DataFrame(sc.inverse_transform(y_train), index=idx[:TrainEnd], columns=outNaming)
-            # df_real_price_test = pd.DataFrame(sc.inverse_transform(y_test), index=idx[TrainEnd:], columns=outNaming)
+                print("X_train.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
+                print(len(X_train.shape), len(y_train.shape))
+
+                X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), Slider.AI.gReshape(X_test, FeatSpaceDims)
+
+                print("X_train.shape = ", X_train.shape,", X_test.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
+                print(len(X_train.shape), len(y_train.shape))
+
+                # Enable Scaling
+                #X_train = sc.fit_transform(X_train.reshape(-1, 1))
+                ####################################### Reshaping ########################################################
+                "Samples : One sequence is one sample. A batch is comprised of one or more samples."
+                "Time Steps : One time step is one point of observation in the sample."
+                "Features : One feature is one observation at a time step."
+
+                print("Data subHistories Set : i = ", i, ", len(subProcessingHistory_X) = ", len(subProcessingHistory_X),
+                      ", len(subProcessingHistory_y) = ", len(subProcessingHistory_y),
+                      ", X_train.shape = ", X_train.shape, ", y_train = ", y_train.shape, ", X_test.shape = ", X_test.shape,
+                      ", y_test.shape = ", y_test.shape)
+
+                ################################### Build the RNN (LSTM) #####################################
+
+                regressor = Sequential()
+                # Adding the first LSTM layer and some Dropout regularisation
+                for layer in range(len(params["medSpecs"])):
+                    if params["medSpecs"][layer]["units"] == 'xShape1':
+                        unitsIn = X_train.shape[1]
+                        if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                            regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                               unit_forget_bias=True, bias_initializer='ones',
+                                               input_shape=(X_train.shape[1], FeatSpaceDims)))
+                        elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                            regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                                    unit_forget_bias=True, bias_initializer='ones',
+                                                    input_shape=(X_train.shape[1], FeatSpaceDims)))
+                        regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                    else:
+                        unitsIn = params["medSpecs"][layer]["units"]
+                        if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                            regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                        elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                            regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                        regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                # Adding the output layer
+                if len(y_train.shape) == 1:
+                    regressor.add(Dense(units=1))
+                else:
+                    regressor.add(Dense(units=y_train.shape[1]))
+                ####
+                my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
+                regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
+                # Fitting the RNN to the Training set
+                regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
+                              verbose=0, callbacks=my_callbacks)
+
+                ############################### TRAIN PREDICT #################################
+                predicted_price_train = regressor.predict(X_train)
+                df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
+                                                        columns=['Predicted_Train'+x for x in outNaming])
+                ############################### TEST PREDICT ##################################
+                if params["LearningMode"] == 'static':
+                    #predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
+                    predicted_price_test = regressor.predict(X_test)
+                    df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test)
+                time.sleep(3000)
+
+                if breakFlag:
+                    break
+
+            time.sleep(3000)
+
             df_real_price_train = pd.DataFrame(y_train, index=idx[:TrainEnd], columns=outNaming)
             df_real_price_test = pd.DataFrame(y_test, index=idx[TrainEnd:], columns=outNaming)
-
-            print("X.shape=", X.shape, ", TrainWindow=", params["TrainWindow"],
-                  ", TrainEnd=", TrainEnd, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape,
-                  ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
-            # print("y_train = ", y_train, ", yBinary_train = ", yBinary_train)
-
-            ####################################### Initialising the LSTM #############################################
-            regressor = Sequential()
-            # Adding the first LSTM layer and some Dropout regularisation
-            for layer in range(len(params["medSpecs"])):
-                if params["medSpecs"][layer]["units"] == 'xShape1':
-                    unitsIn = X_train.shape[1]
-                    if params["medSpecs"][layer]["LayerType"] == "LSTM":
-                        regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
-                                           unit_forget_bias=True, bias_initializer='ones',
-                                           input_shape=(X_train.shape[1], FeatSpaceDims)))
-                    elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
-                        regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
-                                                unit_forget_bias=True, bias_initializer='ones',
-                                                input_shape=(X_train.shape[1], FeatSpaceDims)))
-                    regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
-                else:
-                    unitsIn = params["medSpecs"][layer]["units"]
-                    if params["medSpecs"][layer]["LayerType"] == "LSTM":
-                        regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
-                    elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
-                        regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
-                    regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
-            # Adding the output layer
-            regressor.add(Dense(units=yBinary_train.shape[1]))
-
-            ######################################## Compiling the RNN ###############################################
-            my_callbacks = [
-                # tf.keras.callbacks.RemoteMonitor(root="http://localhost:9000", path="/publish/epoch/end/", field="data", headers=None, send_as_json=False, ),
-                tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"]),
-                history,
-                # tf.keras.callbacks.ModelCheckpoint(filepath='model.{epoch:02d}-{val_loss:.2f}.h5'),
-                # tf.keras.callbacks.TensorBoard(log_dir='./logs'),
-            ]
-            regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
-            # Fitting the RNN to the Training set
-            regressor.fit(X_train, yBinary_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
-                          verbose=0,
-                          callbacks=my_callbacks)
-
-            ########################## Get Predictions for Static or Online Learning #################################
-            # predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
-            predicted_price_train = regressor.predict(X_train)
-
-            scoreList = []
-            if params["LearningMode"] == 'static':
-                # predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
-                predicted_price_test = regressor.predict(X_test)
-                scoreDF = pd.DataFrame(history.history['loss'], columns=['loss'])
-
-            elif params["LearningMode"] == "online":
-                rw = params["rw"]
-                predicted_price_test = []
-                c = 0
-                for t in tqdm(range(len(X_test))):
-
-                    if c > 0:
-                        subhistory_X = X_train[-rw:-1]
-                        subhistory_y = yBinary_train[-rw:-1]
-                    else:
-                        subhistory_X = X_train  # [-5:-1]
-                        subhistory_y = yBinary_train  # [-5:-1]
-
-                    newX = np.reshape(X_test[t], (1, X_test[t].shape[0], FeatSpaceDims))
-                    pred_test = regressor.predict(newX)
-                    # predicted_price_test.append(sc.inverse_transform(pred_test)[0])
-                    predicted_price_test.append(pred_test[0])
-
-                    regressor.fit(subhistory_X, subhistory_y, epochs=params["epochsIn"],
-                                  batch_size=params["batchSIzeIn"], verbose=0,
-                                  callbacks=my_callbacks)
-
-                    X_train = np.append(X_train, newX, axis=0)
-                    yBinary_train = np.append(yBinary_train, [yBinary_test[t]], axis=0)
-
-                    scores = regressor.evaluate(newX, yBinary_test[t], verbose=0)
-                    scoreList.append(scores)
-
-                    # print("X_train.shape = ", X_train.shape, ", y_train.shape = ", y_train.shape, ", scores = ", scores)
-
-                    c += 1
-
-                scoreDF = pd.DataFrame(scoreList)
-
-            df_predicted_price_train = pd.DataFrame(predicted_price_train, index=df_real_price_train.index,
-                                                    columns=['PredictedPrice_Train_' + str(c) for c in
-                                                             df_real_price_train.columns])
-            df_predicted_price_test = pd.DataFrame(predicted_price_test,
-                                                   columns=['PredictedPrice_Test_' + str(c) for c in
-                                                            df_real_price_test.columns])
-
-            if len(df_predicted_price_test) <= len(df_real_price_test):
-                df_predicted_price_test.index = df_real_price_test.index
 
             if 'writeLearnStructure' in params:
                 xList = []
