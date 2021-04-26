@@ -369,9 +369,11 @@ def Test(mode):
             out = sl.AI.gRNN(df, params)
 
             out[0].to_sql('df_predicted_price_train_DF_Test', conn, if_exists='replace')
-            out[1].to_sql('df_real_price_train_DF_Test', conn, if_exists='replace')
-            out[2].to_sql('df_predicted_price_test_DF_Test', conn, if_exists='replace')
-            out[3].to_sql('df_real_price_test_DF_Test', conn, if_exists='replace')
+            out[1].to_sql('df_real_price_class_train_DF_Test', conn, if_exists='replace')
+            out[2].to_sql('df_real_price_train_DF_Test', conn, if_exists='replace')
+            out[3].to_sql('df_predicted_price_test_DF_Test', conn, if_exists='replace')
+            out[4].to_sql('df_real_price_class_test_DF_Test', conn, if_exists='replace')
+            out[5].to_sql('df_real_price_test_DF_Test', conn, if_exists='replace')
 
     elif mode == 'read':
         df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
@@ -395,4 +397,4 @@ def Test(mode):
 #runGpc("Projections", 'Main', "report")
 
 Test("run")
-#Test("read")
+Test("read")

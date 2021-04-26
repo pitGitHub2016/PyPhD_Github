@@ -2401,16 +2401,15 @@ class Slider:
             #################### Creating a data structure with N timesteps and 1 output #############################
             X = []
             y = []
-            realY = []
             for i in range(params["InputSequenceLength"], len(dataset_all)):
                 X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
                 y.append(np.sign(dataVals[i]))
-                realY.append(dataVals[i])
-            X, y, realY = np.array(X), np.array(y), np.array(realY)
+            X, y = np.array(X), np.array(y)
             y[y==-1] = 2
             idx = dataset_all.iloc[params["InputSequenceLength"]:].index
+            RealY = dataset_all.iloc[params["InputSequenceLength"]:]
 
-            print("X.shape=", X.shape, ", y.shape=", y.shape, ", realY.shape=", realY.shape, ", FeatSpaceDims=", FeatSpaceDims,
+            print("X.shape=", X.shape, ", y.shape=", y.shape, ", FeatSpaceDims=", FeatSpaceDims,
                   ", InputSequenceLength=", params["InputSequenceLength"],
                   ", SubHistoryLength=", params["SubHistoryLength"],
                   ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
@@ -2418,8 +2417,10 @@ class Slider:
             stepper = params["SubHistoryLength"]-params["SubHistoryTrainingLength"]
 
             df_predicted_price_train_List = []
+            df_real_price_class_train_List = []
             df_real_price_train_List = []
             df_predicted_price_test_List = []
+            df_real_price_class_test_List = []
             df_real_price_test_List = []
 
             breakFlag = False
@@ -2433,8 +2434,10 @@ class Slider:
                     breakFlag = True
                 X_train, y_train = subProcessingHistory_X[:params["SubHistoryTrainingLength"]], subProcessingHistory_y[:params["SubHistoryTrainingLength"]]
                 subIdx_train = subIdx[:params["SubHistoryTrainingLength"]]
+                subRealY_train = RealY[:params["SubHistoryTrainingLength"]]
                 X_test, y_test = subProcessingHistory_X[params["SubHistoryTrainingLength"]:], subProcessingHistory_y[params["SubHistoryTrainingLength"]:]
                 subIdx_test = subIdx[params["SubHistoryTrainingLength"]:]
+                subRealY_test = RealY[params["SubHistoryTrainingLength"]:]
 
                 #print("X_train.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
                 #print(len(X_train.shape), len(y_train.shape))
@@ -2498,30 +2501,36 @@ class Slider:
                               verbose=0, callbacks=my_callbacks)
 
                 ############################### TRAIN PREDICT #################################
-                if params['Scaler'] is None:
-                    predicted_price_train = regressor.predict(X_train)
-                else:
-                    predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
+                #if params['Scaler'] is None:
+                predicted_price_train = regressor.predict(X_train)
+                #else:
+                #predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
 
                 df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
                                                         columns=['Predicted_Train_'+x for x in outNaming])
-                df_real_price_train = pd.DataFrame(y_train, index=subIdx_train,
+                df_real_price_class_train = pd.DataFrame(y_train, index=subIdx_train,
+                                                   columns=['Real_Train_Class_'+x for x in outNaming])
+                df_real_price_train = pd.DataFrame(subRealY_train, index=subIdx_train,
                                                    columns=['Real_Train_'+x for x in outNaming])
                 ############################### TEST PREDICT ##################################
                 if params["LearningMode"] == 'static':
-                    if params['Scaler'] is None:
-                        predicted_price_test = regressor.predict(X_test)
-                    else:
-                        predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
+                    #if params['Scaler'] is None:
+                    predicted_price_test = regressor.predict(X_test)
+                    #else:
+                    #predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
 
                     df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test,
                                                            columns=['Predicted_Test_'+x for x in outNaming])
-                    df_real_price_test = pd.DataFrame(y_test, index=subIdx_test,
+                    df_real_price_class_test = pd.DataFrame(y_test, index=subIdx_test,
+                                                           columns=['Real_Test_Class_'+x for x in outNaming])
+                    df_real_price_test = pd.DataFrame(subRealY_test, index=subIdx_test,
                                                            columns=['Real_Test_'+x for x in outNaming])
 
                 df_predicted_price_train_List.append(df_predicted_price_train)
+                df_real_price_class_train_List.append(df_real_price_class_train)
                 df_real_price_train_List.append(df_real_price_train)
                 df_predicted_price_test_List.append(df_predicted_price_test)
+                df_real_price_class_test_List.append(df_real_price_class_test)
                 df_real_price_test_List.append(df_real_price_test)
 
                 megaCount += 1
@@ -2530,12 +2539,14 @@ class Slider:
                     break
 
             df_predicted_price_train_DF = pd.concat(df_predicted_price_train_List, axis=0)
+            df_real_price_class_train_DF = pd.concat(df_real_price_class_train_List, axis=0)
             df_real_price_train_DF = pd.concat(df_real_price_train_List, axis=0)
             df_predicted_price_test_DF = pd.concat(df_predicted_price_test_List, axis=0)
+            df_real_price_class_test_DF = pd.concat(df_real_price_class_test_List, axis=0)
             df_real_price_test_DF = pd.concat(df_real_price_test_List, axis=0)
 
-            return [df_predicted_price_train_DF, df_real_price_train_DF,
-                     df_predicted_price_test_DF, df_real_price_test_DF]
+            return [df_predicted_price_train_DF, df_real_price_class_train_DF, df_real_price_train_DF,
+                     df_predicted_price_test_DF, df_real_price_class_test_DF, df_real_price_test_DF]
 
         def gGPC(dataset_all, params):
 
