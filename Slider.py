@@ -2499,10 +2499,10 @@ class Slider:
             #################################### Feature Scaling #####################################################
             if params['Scaler'] == "Standard":
                 sc_X = StandardScaler()
-                sc_y = StandardScaler()
+                #sc_y = StandardScaler()
             elif params['Scaler'] == 'MinMax':
                 sc_X = MinMaxScaler() #feature_range=(0, 1)
-                sc_y = MinMaxScaler() #feature_range=(0, 1)
+                #sc_y = MinMaxScaler() #feature_range=(0, 1)
 
             #################### Creating a data structure with N timesteps and 1 output #############################
             X = []
@@ -2516,10 +2516,10 @@ class Slider:
             y[y==-1] = 2
             idx = dataset_all.iloc[params["InputSequenceLength"]:].index
 
-            print("X.shape=", X.shape, ", y.shape=", y.shape,", real_y.shape=", real_y.shape, ", FeatSpaceDims=", FeatSpaceDims,
-                  ", InputSequenceLength=", params["InputSequenceLength"],
-                  ", SubHistoryLength=", params["SubHistoryLength"],
-                  ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
+            #print("X.shape=", X.shape, ", y.shape=", y.shape,", real_y.shape=", real_y.shape, ", FeatSpaceDims=", FeatSpaceDims,
+            #      ", InputSequenceLength=", params["InputSequenceLength"],
+            #      ", SubHistoryLength=", params["SubHistoryLength"],
+            #      ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
 
             stepper = params["SubHistoryLength"]-params["SubHistoryTrainingLength"]
 
@@ -2550,35 +2550,34 @@ class Slider:
                                               subProcessingHistory_real_y[params["SubHistoryTrainingLength"]:]
                 subIdx_test = subIdx[params["SubHistoryTrainingLength"]:]
 
-                #print("X_train.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
-                #print(len(X_train.shape), len(y_train.shape))
-
                 # Enable Scaling
                 if params['Scaler'] is not None:
                     X_train = sc_X.fit_transform(X_train)
                     X_test = sc_X.transform(X_test)
 
-                X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), Slider.AI.gReshape(X_test, FeatSpaceDims)
-
-                #print("X_train.shape = ", X_train.shape,", X_test.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
-                #print(len(X_train.shape), len(y_train.shape))
+                #print("Data subHistories Set : i = ", i, ", len(subProcessingHistory_X) = ", len(subProcessingHistory_X),
+                #      ", len(subProcessingHistory_y) = ", len(subProcessingHistory_y),
+                #      ", X_train.shape = ", X_train.shape, ", y_train = ", y_train.shape, ", X_test.shape = ", X_test.shape,
+                #      ", y_test.shape = ", y_test.shape)
 
                 ####################################### Reshaping ########################################################
                 "Samples : One sequence is one sample. A batch is comprised of one or more samples."
                 "Time Steps : One time step is one point of observation in the sample."
                 "Features : One feature is one observation at a time step."
 
-                print("Data subHistories Set : i = ", i, ", len(subProcessingHistory_X) = ", len(subProcessingHistory_X),
-                      ", len(subProcessingHistory_y) = ", len(subProcessingHistory_y),
-                      ", X_train.shape = ", X_train.shape, ", y_train = ", y_train.shape, ", X_test.shape = ", X_test.shape,
-                      ", y_test.shape = ", y_test.shape)
-
                 ################################### Build the RNN (LSTM) #####################################
-                print("megaCount = ", megaCount)
+                #print("megaCount = ", megaCount)
 
-                if megaCount == 0:
-                    if params["model"] == "RNN":
+                if params["model"] == "RNN":
+                    if megaCount == 0:
+                        X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), Slider.AI.gReshape(X_test,
+                                                                                                         FeatSpaceDims)
+                        #print("After Reshaping : X_train.shape = ", X_train.shape,
+                        #      ", y_train = ", y_train.shape, ", X_test.shape = ", X_test.shape,
+                        #      ", y_test.shape = ", y_test.shape)
+
                         ########################################## RNN #############################################
+                        print("Recurrent Neural Networks Classification...")
                         model = Sequential()
                         # Adding the first LSTM layer and some Dropout regularisation
                         for layer in range(len(params["medSpecs"])):
@@ -2609,36 +2608,44 @@ class Slider:
                         my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
                         model.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
 
-                    elif params["model"] == "GPC":
-                        ########################################## GPC #############################################
-                        # define model
-                        model = GaussianProcessClassifier()
-                        # define model evaluation method
-                        cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-                        # define grid
-                        grid = dict()
-                        grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
-                                          1 * WhiteKernel()]
-                        # define search
-                        search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
-                        # perform the search
-                        results = search.fit(X_train, y_train)
-                        # summarize best
-                        print('Best Mean Accuracy: %.3f' % results.best_score_)
-                        print('Best Config: %s' % results.best_params_)
-                        # summarize all
-                        means = results.cv_results_['mean_test_score']
-                        params = results.cv_results_['params']
-                        for mean, param in zip(means, params):
-                            print(">%.3f with: %r" % (mean, param))
-
-                # Fitting the model to the Training set
-                model.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
+                    # Fitting the RNN Model to the Training set
+                    model.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
                               verbose=0, callbacks=my_callbacks)
+
+                elif params["model"] == "GPC":
+                    ########################################## GPC #############################################
+                    print("Gaussian Process Classification...")
+                    # define model
+                    model = GaussianProcessClassifier()
+                    # define model evaluation method
+                    cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+                    # define grid
+                    grid = dict()
+                    grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
+                                      1 * WhiteKernel()]
+                    # define search
+                    search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
+                    # perform the search
+                    results = search.fit(X_train, y_train)
+                    # summarize best
+                    print('Best Mean Accuracy: %.3f' % results.best_score_)
+                    print('Best Config: %s' % results.best_params_)
+                    # summarize all
+                    gpc_means = results.cv_results_['mean_test_score']
+                    gpc_params = results.cv_results_['params']
+                    for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
+                        print(">%.3f with: %r" % (gpc_mean, gpc_param))
+                        print(gpc_param['kernel'])
+
+                    ##################### Running with Greedy Search Best Model ##################
+                    model = GaussianProcessClassifier(kernel=gpc_param['kernel'], random_state=0)
+                    model.fit(X_train, y_train)
 
                 ############################### TRAIN PREDICT #################################
                 #if params['Scaler'] is None:
                 predicted_price_train = model.predict(X_train)
+                if params["model"] == "GPC":
+                    predicted_price_proba_train = model.predict_proba(X_train)
                 #else:
                 #    print("model.predict(X_train) = ", model.predict(X_train))
                 #    predicted_price_train = sc_y.inverse_transform(model.predict(X_train))
@@ -2647,6 +2654,10 @@ class Slider:
 
                 df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
                                                         columns=['Predicted_Train_'+x for x in outNaming])
+                if params["model"] == "GPC":
+                    df_predicted_price_proba_train = pd.DataFrame(predicted_price_proba_train, index=subIdx_train,
+                                                        columns=['Predicted_Proba_Train_'+x for x in outNaming])
+                    df_predicted_price_train = pd.concat([df_predicted_price_train, df_predicted_price_proba_train], axis=1)
                 df_real_price_class_train = pd.DataFrame(y_train, index=subIdx_train,
                                                    columns=['Real_Train_Class_'+x for x in outNaming])
                 df_real_price_train = pd.DataFrame(real_y_train, index=subIdx_train,
@@ -2655,6 +2666,8 @@ class Slider:
                 if params["LearningMode"] == 'static':
                     #if params['Scaler'] is None:
                     predicted_price_test = model.predict(X_test)
+                    if params["model"] == "GPC":
+                        predicted_price_proba_test = model.predict_proba(X_test)
                     # else:
                     #    print("model.predict(X_test) = ", model.predict(X_test))
                     #    predicted_price_test = sc_y.inverse_transform(model.predict(X_test))
@@ -2663,6 +2676,10 @@ class Slider:
 
                     df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test,
                                                            columns=['Predicted_Test_'+x for x in outNaming])
+                    if params["model"] == "GPC":
+                        df_predicted_price_proba_test = pd.DataFrame(predicted_price_proba_test, index=subIdx_test,
+                                                                      columns=['Predicted_Proba_Test_' + x for x in outNaming])
+                        df_predicted_price_test = pd.concat([df_predicted_price_test, df_predicted_price_proba_test], axis=1)
                     df_real_price_class_test = pd.DataFrame(y_test, index=subIdx_test,
                                                            columns=['Real_Test_Class_'+x for x in outNaming])
                     df_real_price_test = pd.DataFrame(real_y_test, index=subIdx_test,
