@@ -2622,7 +2622,6 @@ class Slider:
                     # define model
                     model = GaussianProcessClassifier()
                     # define model evaluation method
-                    print("define model evaluation method")
                     cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
                     # define grid
                     grid = dict()
