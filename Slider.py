@@ -2637,15 +2637,13 @@ class Slider:
                     # summarize all
                     gpc_means = results.cv_results_['mean_test_score']
                     gpc_params = results.cv_results_['params']
-                    kernelList = []
                     for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
                         print(">%.3f with: %r" % (gpc_mean, gpc_param))
                         print(gpc_param['kernel'])
-                        kernelList.append(gpc_param['kernel'])
 
                     ##################### Running with Greedy Search Best Model ##################
-                    print("Running using Kernel = ", kernelList[0])
-                    model = GaussianProcessClassifier(kernel=kernelList[0], random_state=0)
+                    print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
+                    model = GaussianProcessClassifier(kernel=results.best_params_['kernel'], random_state=0)
                     model.fit(X_train, y_train)
 
                 ############################### TRAIN PREDICT #################################

@@ -298,9 +298,9 @@ if __name__ == '__main__':
     #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "run")
     #runClassification("Projections", 'Main', "report")
-    #runClassification("Finalists", 'Main', "run")
+    runClassification("Finalists", 'Main', "run")
     #runClassification("FinalistsProjections", 'Main', "report")
     #runClassification('ScanNotProcessed', "")
 
-    Test("run")
+    #Test("run")
     #Test("read")
