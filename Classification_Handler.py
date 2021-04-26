@@ -67,9 +67,9 @@ def ClassificationProcess(argList):
     if pnlCalculator == 0:
         sig = out[3]
 
-        sig[sig > 1.5] = -1
-        sig[(sig <= 1.5) & (sig >= 0.5)] = 1
         sig[sig < 0.5] = 0
+        sig[(sig <= 1.5) & (sig >= 0.5)] = 1
+        sig[sig > 1.5] = -1
 
     df_real_price_test_DF = out[5]
 
