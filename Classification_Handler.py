@@ -247,6 +247,18 @@ def Test(mode):
                 "CompilerSettings": ['adam', 'mean_squared_error'],
                 "writeLearnStructure": 0
             }
+            """
+            params = {
+                "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 240,  # 240
+                "SubHistoryLength": 760,  # 760
+                "SubHistoryTrainingLength": 510,  # 510
+                "Scaler": None,  # Standard
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
+            }
+            """
             out = sl.AI.gClassification(df, params)
 
             out[0].to_sql('df_predicted_price_train_DF_Test_'+selection, conn, if_exists='replace')
@@ -280,11 +292,11 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    #runClassification("ClassicPortfolios", 'Main', "run")
+    runClassification("ClassicPortfolios", 'Main', "run")
     #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "run")
     #runClassification("Projections", 'Main', "report")
-    runClassification("Finalists", 'Main', "run")
+    #runClassification("Finalists", 'Main', "run")
     #runClassification("FinalistsProjections", 'Main', "report")
     #runClassification('ScanNotProcessed', "")
 

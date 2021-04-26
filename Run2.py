@@ -34,49 +34,55 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 
 calcMode = 'run'
 #calcMode = 'read'
-pnlCalculator = 1
+pnlCalculator = 0
 
-def RNNprocess(argList):
+def ClassificationProcess(argList):
     selection = argList[0]
     df = argList[1]
     params = argList[2]
     magicNum = argList[3]
 
     if calcMode == 'run':
-        out = sl.AI.gRNN(df, params)
-        out[0].to_sql('df_real_price_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
-        out[1].to_sql('df_predicted_price_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
-        out[2].to_sql('scoreList_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+
+        out = sl.AI.gClassification(df, params)
+
+        out[0].to_sql('df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[1].to_sql('df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[2].to_sql('df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[3].to_sql('df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[4].to_sql('df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[5].to_sql('df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
 
     elif calcMode == 'read':
         print(selection)
         out = [
-            pd.read_sql('SELECT * FROM df_real_price_RNN_'+ selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_predicted_price_RNN_' + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM scoreList_RNN_' + selection + "_" + str(magicNum), conn)]
-
-    df_real_price = out[0]
-    df_predicted_price = out[1]
-    df_predicted_price.columns = df_real_price.columns
+            pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+        ]
 
     if pnlCalculator == 0:
-        sig = sl.sign(df_predicted_price)
-        pnl = sig * df_real_price
-    elif pnlCalculator == 1:
-        #pnl = (df_predicted_price-0.5) * df_real_price
-        pnl = np.sign(df_predicted_price-0.5) * df_real_price
+        sig = out[3]
 
-    reportSh = np.sqrt(252) * sl.sharpe(pnl)
-    print(reportSh)
-    fig, ax = plt.subplots(nrows=3, ncols=1)
-    sl.cs(pnl).plot(ax=ax[0], title='csPnL')
-    sl.cs(df_real_price).plot(ax=ax[1], title='Real Price')
-    df_predicted_price.plot(ax=ax[2],title = 'Predicted Price')
-    plt.show()
+        sig[sig < 0.5] = 0
+        sig[(sig <= 1.5) & (sig >= 0.5)] = 1
+        sig[sig > 1.5] = -1
 
-    pnl.to_sql('pnl_RNN_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+    df_real_price_test_DF = out[5]
 
-def runRnn(Portfolios, scanMode, mode):
+    dfPnl = pd.concat([df_real_price_test_DF, sig], axis=1)
+    dfPnl.columns = ["Real_Price", "Sig"]
+
+    pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
+    sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
+    print(sh_pnl)
+
+    pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+
+def runClassification(Portfolios, scanMode, mode):
     def Architecture(magicNum):
 
         magicNum = int(magicNum)
@@ -84,65 +90,57 @@ def runRnn(Portfolios, scanMode, mode):
         if magicNum == 0:
 
             paramsSetup = {
+                "model": "RNN",
                 "HistLag": 0,
-                "TrainWindow": 1,
-                "epochsIn": 100,
-                "batchSIzeIn": 1,
-                "LearningMode": 'online',
+                "InputSequenceLength": 240,  # 240
+                "SubHistoryLength": 760,  # 760
+                "SubHistoryTrainingLength": 510,  # 510
+                "Scaler": "Standard",  # Standard
+                "epochsIn": 100,  # 100
+                "batchSIzeIn": 16,  # 16
+                "EarlyStopping_patience_Epochs": 10,  # 10
+                "LearningMode": 'static',  # 'static', 'online'
                 "medSpecs": [
-                             {"LayerType": "SimpleRNN", "units": 10, "RsF": False, "Dropout": 0}
-                             ],
+                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                ],
                 "modelNum": magicNum,
-                "TrainEndPct": 0.3,
                 "CompilerSettings": ['adam', 'mean_squared_error'],
-                "writeLearnStructure": 0
             }
+
         elif magicNum == 1:
 
-            #'xShape1'
             paramsSetup = {
+                "model": "GPC",
                 "HistLag": 0,
-                "TrainWindow": 1,
-                "epochsIn": 100,
-                "batchSIzeIn": 1,
-                "LearningMode": 'online',
-                "medSpecs": [
-                             {"LayerType": "LSTM", "units": 10, "RsF": False, "Dropout": 0}
-                             ],
-                "modelNum": magicNum,
-                "TrainEndPct": 0.3,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
-                "writeLearnStructure": 0
+                "InputSequenceLength": 240,  # 240
+                "SubHistoryLength": 760,  # 760
+                "SubHistoryTrainingLength": 510,  # 510
+                "Scaler": None,  # Standard
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
             }
+
         return paramsSetup
 
     if Portfolios == 'Projections':
+        #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
-    elif Portfolios == 'ClassicPortfolios':
-        LOportfolio = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["LO"]
-        RPportfolio = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["RP"]
-        allProjectionsDF = pd.concat([LOportfolio, RPportfolio], axis=1)
     elif Portfolios == 'globalProjections':
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
-            globalProjectionsList.append(
-                pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True))
+             globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
-    elif Portfolios == 'FinalistsProjections':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[
-            ['PCA_ExpWindow25_0', 'PCA_ExpWindow25_19', 'LLE_ExpWindow25_0', "LLE_ExpWindow25_18"]]
-    elif Portfolios == 'FinalistsGlobalProjections':
-        globalProjectionsList = []
-        for manifoldIn in ["PCA", "LLE"]:
-            globalProjectionsList.append(
-                pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True))
-        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)[
-            ["PCA_ExpWindow25_5_Head", "PCA_ExpWindow25_5_Tail", "LLE_ExpWindow25_5_Head", "LLE_ExpWindow25_5_Tail",
-             "PCA_ExpWindow25_3_Head", "PCA_ExpWindow25_3_Tail", "LLE_ExpWindow25_3_Head", "LLE_ExpWindow25_3_Tail"]]
+    elif Portfolios == 'ClassicPortfolios':
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
+    elif Portfolios == 'Finalists':
+        allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
+        #allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
 
-    targetSystems = [0, 1]
+    targetSystems = [0]
 
     if scanMode == 'Main':
 
@@ -154,7 +152,7 @@ def runRnn(Portfolios, scanMode, mode):
                     processList.append([selection, allProjectionsDF[selection], params, magicNum])
 
             p = mp.Pool(mp.cpu_count())
-            result = p.map(RNNprocess, tqdm(processList))
+            result = p.map(ClassificationProcess, tqdm(processList))
             p.close()
             p.join()
 
@@ -162,20 +160,24 @@ def runRnn(Portfolios, scanMode, mode):
             shList = []
             notProcessed = []
             for magicNum in targetSystems:
+                if magicNum in [0]:
+                    Classifier = "RNN"
+                elif magicNum in [1]:
+                    Classifier = "GPC"
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql(
-                        'SELECT * FROM pnl_RNN_' + selection + str(magicNum), conn).set_index('Dates', drop=True)
+                        'SELECT * FROM pnl_'+Classifier+'_' + selection + str(magicNum), conn).set_index('Dates', drop=True)
                         medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).abs().values[0]
                         shList.append([selection + str(magicNum), medSh])
                     except Exception as e:
                         print(e)
-                        notProcessed.append('pnl_RNN_' + selection + str(magicNum))
+                        notProcessed.append('pnl_'+Classifier+'_' + selection + str(magicNum))
             shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True)
-            shDF.to_sql(Portfolios+"_RNN_sharpe", conn, if_exists='replace')
+            shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
             print("shDF = ", shDF)
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
-            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_RNN', conn, if_exists='replace')
+            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_'+Classifier, conn, if_exists='replace')
             print("notProcessedDF = ", notProcessedDF)
 
     elif scanMode == 'ScanNotProcessed':
@@ -205,138 +207,18 @@ def runRnn(Portfolios, scanMode, mode):
             print((np.sqrt(252) * sl.sharpe(pnl)).round(4))
             print((np.sqrt(252) * sl.sharpe(rsPnL)).round(4))
 
-def GPCprocess(argList):
-    selection = argList[0]
-    df = argList[1]
-    params = argList[2]
-
-    out = sl.AI.gGPC(df, params)
-    out[0].to_sql('df_real_price_GPC_' + selection + "_" + params["sys"], conn, if_exists='replace')
-    out[1].to_sql('df_predicted_price_GPC_' + selection + "_" + params["sys"], conn, if_exists='replace')
-    out[2].to_sql('df_proba_price_GPC_' + selection + "_" + params["sys"], conn, if_exists='replace')
-    df_real_price = out[0]
-    df_predicted_price = out[1]
-
-    df_predicted_price.columns = df_real_price.columns
-
-    # Returns Prediction
-    sig = sl.sign(df_predicted_price)
-    pnl = sig * df_real_price
-
-    pnl.to_sql('pnl_GPC_' + selection + "_" + params["sys"], conn, if_exists='replace')
-
-def runGpc(Portfolios, scanMode, mode):
-
-    def GPCparams(sys):
-        if sys == 1:
-            params = {
-                "sys": sys,
-                "TrainWindow": 5,
-                "LearningMode": 'online',
-                "subhistory": 50,
-                "Kernel": "Matern",
-                "TrainEndPct": 0.3,
-                "writeLearnStructure": 0
-            }
-        elif sys == 2:
-            params = {
-                "sys": sys,
-                "TrainWindow": 25,
-                "LearningMode": 'online',
-                "subhistory": 10,
-                "Kernel": "Matern",
-                "TrainEndPct": 0.3,
-                "writeLearnStructure": 0
-            }
-        return params
-
-    if Portfolios == 'Projections':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
-    elif Portfolios == 'ClassicPortfolios':
-        allPortfoliosList = []
-        for tw in twList:
-            subDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_' + str(tw), conn).set_index('Dates', drop=True)
-            subDF.columns = ["RP_" + str(tw)]
-            allPortfoliosList.append(subDF)
-        LOportfolio = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["LO"]
-        allPortfoliosList.append(LOportfolio)
-        allProjectionsDF = pd.concat(allPortfoliosList, axis=1)
-
-    if scanMode == 'Main':
-
-        if mode == "run":
-            processList = []
-            for sys in [1,2]:
-                for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], GPCparams(sys)])
-
-            p = mp.Pool(mp.cpu_count())
-            result = p.map(GPCprocess, tqdm(processList))
-            p.close()
-            p.join()
-
-        elif mode == "report":
-            shList = []
-            notProcessed = []
-            for sys in [1,2]:
-                for selection in allProjectionsDF.columns:
-                    try:
-                        pnl = pd.read_sql(
-                        'SELECT * FROM pnl_GPC_' + selection + "_" + str(sys), conn).set_index('Dates', drop=True)
-                        medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).abs().values[0]
-                        shList.append([selection + "_" + str(sys), medSh])
-                    except Exception as e:
-                        print(e)
-                        notProcessed.append('pnl_GPC_' + selection + "_" + str(sys))
-            shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True)
-            shDF.to_sql(Portfolios+"_GPC_sharpe", conn, if_exists='replace')
-            print("shDF = ", shDF)
-            notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
-            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_GPC', conn, if_exists='replace')
-            print("notProcessedDF = ", notProcessedDF)
-
-    elif scanMode == 'ScanNotProcessed':
-        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_GPC', conn).set_index('index', drop=True)
-        for idx, row in notProcessedDF.iterrows():
-            Info = row['NotProcessedProjection'].replace("pnl_GPC_", "")
-            selection = Info[:-1]
-            sys = Info[-1]
-            print("Rerunning NotProcessed : ", selection, ", ", sys)
-
-            params = GPCparams(sys)
-            out = sl.AI.gRNN(allProjectionsDF[selection], params)
-            out[0].to_sql('df_real_price_RNN_' + selection + "_" + str(sys), conn, if_exists='replace')
-            out[1].to_sql('df_predicted_price_RNN_' + selection + "_" + str(sys), conn, if_exists='replace')
-            out[2].to_sql('scoreList_RNN_' + selection + "_" + str(sys), conn,if_exists='replace')
-            df_real_price = out[0]
-            df_predicted_price = out[1]
-
-            df_predicted_price.columns = df_real_price.columns
-
-            # Returns Prediction
-            sig = sl.sign(df_predicted_price)
-            pnl = sig * df_real_price
-
-            pnl.to_sql('pnl_GPC_' + selection + "_" + str(sys), conn, if_exists='replace')
-            rsPnL = sl.rs(pnl)
-            print((np.sqrt(252) * sl.sharpe(pnl)).round(4))
-            print((np.sqrt(252) * sl.sharpe(rsPnL)).round(4))
-
 def Test(mode):
-    if mode == 'run':
-        magicNum = 1000
-        #selection = 'PCA_250_3_Head'
-        #selection = 'LLE_250_3_Head'
-        selection = 'LLE_250_0'
-        #selection = 'PCA_250_19'
-        df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-        #df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-        #df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
-        #df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+    magicNum = 1000
+    # selection = 'PCA_250_3_Head'
+    # selection = 'LLE_250_3_Head'
+    selection = 'PCA_250_0'
+    # selection = 'PCA_250_19'
+    df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    #df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+    # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+    # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
-        #sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
-        #dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
+    if mode == 'run':
 
         dfList = [df_Main]
         df_real_price_List = []
@@ -345,35 +227,55 @@ def Test(mode):
 
             print("len(df) = ", len(df))
 
+            """
             params = {
-                "model" : "GPC",
+                "model" : "RNN",
                 "HistLag": 0,
                 "InputSequenceLength": 240, #240
                 "SubHistoryLength": 760, #760
                 "SubHistoryTrainingLength": 510, #510
-                "Scaler": None, #Standard
+                "Scaler": "Standard", #Standard
+                "epochsIn": 2, #100
+                "batchSIzeIn": 1, #16
+                "EarlyStopping_patience_Epochs": 1, #10
                 "LearningMode": 'static', #'static', 'online'
+                "medSpecs": [
+                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 5, "RsF": False, "Dropout": 0.25}
+                ],
+                "modelNum": magicNum,
+                "CompilerSettings": ['adam', 'mean_squared_error'],
+                "writeLearnStructure": 0
+            }
+            """
+            params = {
+               "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 240,  # 240
+                "SubHistoryLength": 760,  # 760
+                "SubHistoryTrainingLength": 510,  # 510
+                "Scaler": None,  # Standard
+                "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
-            #df = sl.cs(df)
-            #RNNprocess([selection, df, params, magicNum])
             out = sl.AI.gClassification(df, params)
 
-            out[0].to_sql('df_predicted_price_train_DF_Test', conn, if_exists='replace')
-            out[1].to_sql('df_real_price_class_train_DF_Test', conn, if_exists='replace')
-            out[2].to_sql('df_real_price_train_DF_Test', conn, if_exists='replace')
-            out[3].to_sql('df_predicted_price_test_DF_Test', conn, if_exists='replace')
-            out[4].to_sql('df_real_price_class_test_DF_Test', conn, if_exists='replace')
-            out[5].to_sql('df_real_price_test_DF_Test', conn, if_exists='replace')
+            out[0].to_sql('df_predicted_price_train_DF_Test_'+selection, conn, if_exists='replace')
+            out[1].to_sql('df_real_price_class_train_DF_Test_'+selection, conn, if_exists='replace')
+            out[2].to_sql('df_real_price_train_DF_Test_'+selection, conn, if_exists='replace')
+            out[3].to_sql('df_predicted_price_test_DF_Test_'+selection, conn, if_exists='replace')
+            out[4].to_sql('df_real_price_class_test_DF_Test_'+selection, conn, if_exists='replace')
+            out[5].to_sql('df_real_price_test_DF_Test_'+selection, conn, if_exists='replace')
 
     elif mode == 'read':
 
-        df_predicted_price_test_DF_Test = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test', conn).set_index('Dates', drop=True)
-        df_predicted_price_test_DF_Test[df_predicted_price_test_DF_Test>1.5] = -1
-        df_predicted_price_test_DF_Test[(df_predicted_price_test_DF_Test<=1.5)&(df_predicted_price_test_DF_Test>=0.5)] = 1
-        df_predicted_price_test_DF_Test[df_predicted_price_test_DF_Test<0.5] = 0
-        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test', conn).set_index('Dates', drop=True)
-        dfPnl = pd.concat([df_real_price_test_DF_Test, df_predicted_price_test_DF_Test], axis=1)
+        sig = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
+        sig[sig < 0.5] = 0
+        sig[(sig <= 1.5) & (sig >= 0.5)] = 1
+        sig[sig > 1.5] = -1
+        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
+        dfPnl = pd.concat([df_real_price_test_DF_Test, sig], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
 
         pnl = dfPnl["real_price"] * dfPnl["predicted_price"]
@@ -388,24 +290,15 @@ def Test(mode):
         sl.cs(pnl).plot()
         plt.show()
 
-#runRnn("ClassicPortfolios", 'Main', "run")
-#runRnn("ClassicPortfolios", 'Main', "report")
-#runRnn("Projections", 'Main', "run")
-#runRnn("Projections", 'Main', "report")
-#runRnn("FinalistsProjections", 'Main', "run")
-#runRnn("FinalistsProjections", 'Main', "report")
-#runRnn('ScanNotProcessed', "")
+if __name__ == '__main__':
 
-#runGpc("Projections", 'Main', "run")
-#runGpc("Projections", 'Main', "report")
+    #runClassification("ClassicPortfolios", 'Main', "run")
+    #runClassification("ClassicPortfolios", 'Main', "report")
+    #runClassification("Projections", 'Main', "run")
+    #runClassification("Projections", 'Main', "report")
+    #runClassification("Finalists", 'Main', "run")
+    #runClassification("FinalistsProjections", 'Main', "report")
+    #runClassification('ScanNotProcessed', "")
 
-Test("run")
-#Test("read")
-
-#train_size = 50
-#rng = np.random.RandomState(0)
-#X = rng.uniform(0, 5, 100)[:, np.newaxis]
-#y = np.array(X[:, 0] > 2.5, dtype=int)
-#print(X)
-#print(y)
-#print(X.shape, y.shape)
+    Test("run")
+    #Test("read")
