@@ -218,6 +218,8 @@ def Test(mode):
     # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
+    df_Main = df_Main.iloc[-500:]
+
     if mode == 'run':
 
         dfList = [df_Main]
@@ -252,9 +254,9 @@ def Test(mode):
             params = {
                "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 240,  # 240
-                "SubHistoryLength": 760,  # 760
-                "SubHistoryTrainingLength": 510,  # 510
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 50,  # 760
+                "SubHistoryTrainingLength": 30,  # 510
                 "Scaler": None,  # Standard
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum

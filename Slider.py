@@ -2622,6 +2622,7 @@ class Slider:
                     # define model
                     model = GaussianProcessClassifier()
                     # define model evaluation method
+                    print("define model evaluation method")
                     cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
                     # define grid
                     grid = dict()
@@ -2637,12 +2638,15 @@ class Slider:
                     # summarize all
                     gpc_means = results.cv_results_['mean_test_score']
                     gpc_params = results.cv_results_['params']
+                    kernelList = []
                     for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
                         print(">%.3f with: %r" % (gpc_mean, gpc_param))
                         print(gpc_param['kernel'])
+                        kernelList.append(gpc_param['kernel'])
 
                     ##################### Running with Greedy Search Best Model ##################
-                    model = GaussianProcessClassifier(kernel=gpc_param['kernel'], random_state=0)
+                    print("Running using Kernel = ", kernelList[0])
+                    model = GaussianProcessClassifier(kernel=kernelList[0], random_state=0)
                     model.fit(X_train, y_train)
 
                 ############################### TRAIN PREDICT #################################
@@ -2657,15 +2661,15 @@ class Slider:
                 #    time.sleep(3000)
 
                 df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
-                                                        columns=['Predicted_Train_'+x for x in outNaming])
+                                                        columns=['Predicted_Train_'+str(x) for x in outNaming])
                 if params["model"] == "GPC":
                     df_predicted_price_proba_train = pd.DataFrame(predicted_price_proba_train, index=subIdx_train,
-                                                        columns=['Predicted_Proba_Train_'+x for x in outNaming])
+                                                                  columns=['Predicted_Proba_Train_'+str(x) for x in model.classes_])
                     df_predicted_price_train = pd.concat([df_predicted_price_train, df_predicted_price_proba_train], axis=1)
                 df_real_price_class_train = pd.DataFrame(y_train, index=subIdx_train,
-                                                   columns=['Real_Train_Class_'+x for x in outNaming])
+                                                   columns=['Real_Train_Class_'+str(x) for x in outNaming])
                 df_real_price_train = pd.DataFrame(real_y_train, index=subIdx_train,
-                                                   columns=['Real_Train_'+x for x in outNaming])
+                                                   columns=['Real_Train_'+str(x) for x in outNaming])
                 ############################### TEST PREDICT ##################################
                 if params["LearningMode"] == 'static':
                     #if params['Scaler'] is None:
@@ -2682,7 +2686,7 @@ class Slider:
                                                            columns=['Predicted_Test_'+x for x in outNaming])
                     if params["model"] == "GPC":
                         df_predicted_price_proba_test = pd.DataFrame(predicted_price_proba_test, index=subIdx_test,
-                                                                      columns=['Predicted_Proba_Test_' + x for x in outNaming])
+                                                                      columns=['Predicted_Proba_Test_' + str(x) for x in model.classes_])
                         df_predicted_price_test = pd.concat([df_predicted_price_test, df_predicted_price_proba_test], axis=1)
                     df_real_price_class_test = pd.DataFrame(y_test, index=subIdx_test,
                                                            columns=['Real_Test_Class_'+x for x in outNaming])
