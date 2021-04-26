@@ -51,11 +51,13 @@ from sklearn.metrics import mean_squared_error
 import pydiffmap
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-warnings.filterwarnings('ignore')
 import logging
 logger = logging.getLogger('pymc3')
 logger.setLevel(logging.ERROR)
+logging.getLogger('tensorflow').disabled = True
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 logger.propagate = False
+warnings.filterwarnings('ignore')
 
 class Slider:
 
@@ -2266,6 +2268,7 @@ class Slider:
 
             return [y_pred, classifier]
 
+        """
         def gRNN_Repo(dataset_all, params):
 
             history = History()
@@ -2481,6 +2484,7 @@ class Slider:
                 dataDF.to_csv('LearnStructure.csv')
 
             return [df_real_price_test, df_predicted_price_test, scoreDF, regressor, history]
+        """
 
         def gClassification(dataset_all, params):
 
@@ -2569,15 +2573,15 @@ class Slider:
                 #print("megaCount = ", megaCount)
 
                 if params["model"] == "RNN":
+                    X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), \
+                                      Slider.AI.gReshape(X_test,  FeatSpaceDims)
                     if megaCount == 0:
-                        X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), Slider.AI.gReshape(X_test,
-                                                                                                         FeatSpaceDims)
                         #print("After Reshaping : X_train.shape = ", X_train.shape,
                         #      ", y_train = ", y_train.shape, ", X_test.shape = ", X_test.shape,
                         #      ", y_test.shape = ", y_test.shape)
 
                         ########################################## RNN #############################################
-                        print("Recurrent Neural Networks Classification...")
+                        print("Recurrent Neural Networks Classification...", outNaming)
                         model = Sequential()
                         # Adding the first LSTM layer and some Dropout regularisation
                         for layer in range(len(params["medSpecs"])):
@@ -2614,7 +2618,7 @@ class Slider:
 
                 elif params["model"] == "GPC":
                     ########################################## GPC #############################################
-                    print("Gaussian Process Classification...")
+                    print("Gaussian Process Classification...", outNaming)
                     # define model
                     model = GaussianProcessClassifier()
                     # define model evaluation method

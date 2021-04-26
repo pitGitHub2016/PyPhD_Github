@@ -109,33 +109,36 @@ def runClassification(Portfolios, scanMode, mode):
                 "CompilerSettings": ['adam', 'mean_squared_error'],
             }
 
+        elif magicNum == 1:
+
+            paramsSetup = {
+                "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 240,  # 240
+                "SubHistoryLength": 760,  # 760
+                "SubHistoryTrainingLength": 510,  # 510
+                "Scaler": None,  # Standard
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
+            }
+
         return paramsSetup
 
     if Portfolios == 'Projections':
+        #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
-    elif Portfolios == 'ClassicPortfolios':
-        LOportfolio = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["LO"]
-        RPportfolio = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["RP"]
-        allProjectionsDF = pd.concat([LOportfolio, RPportfolio], axis=1)
     elif Portfolios == 'globalProjections':
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
-            globalProjectionsList.append(
-                pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True))
+             globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
-    elif Portfolios == 'FinalistsProjections':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[
-            ['PCA_ExpWindow25_0', 'PCA_ExpWindow25_19', 'LLE_ExpWindow25_0', "LLE_ExpWindow25_18"]]
-    elif Portfolios == 'FinalistsGlobalProjections':
-        globalProjectionsList = []
-        for manifoldIn in ["PCA", "LLE"]:
-            globalProjectionsList.append(
-                pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True))
-        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)[
-            ["PCA_ExpWindow25_5_Head", "PCA_ExpWindow25_5_Tail", "LLE_ExpWindow25_5_Head", "LLE_ExpWindow25_5_Tail",
-             "PCA_ExpWindow25_3_Head", "PCA_ExpWindow25_3_Tail", "LLE_ExpWindow25_3_Head", "LLE_ExpWindow25_3_Tail"]]
+    elif Portfolios == 'ClassicPortfolios':
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
+    elif Portfolios == 'Finalists':
+        allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
+        #allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
 
     targetSystems = [0]
 
@@ -157,20 +160,24 @@ def runClassification(Portfolios, scanMode, mode):
             shList = []
             notProcessed = []
             for magicNum in targetSystems:
+                if magicNum in [0]:
+                    Classifier = "RNN"
+                elif magicNum in [1]:
+                    Classifier = "GPC"
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql(
-                        'SELECT * FROM pnl_RNN_' + selection + str(magicNum), conn).set_index('Dates', drop=True)
+                        'SELECT * FROM pnl_'+Classifier+'_' + selection + str(magicNum), conn).set_index('Dates', drop=True)
                         medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).abs().values[0]
                         shList.append([selection + str(magicNum), medSh])
                     except Exception as e:
                         print(e)
-                        notProcessed.append('pnl_RNN_' + selection + str(magicNum))
+                        notProcessed.append('pnl_'+Classifier+'_' + selection + str(magicNum))
             shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True)
-            shDF.to_sql(Portfolios+"_RNN_sharpe", conn, if_exists='replace')
+            shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
             print("shDF = ", shDF)
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
-            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_RNN', conn, if_exists='replace')
+            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_'+Classifier, conn, if_exists='replace')
             print("notProcessedDF = ", notProcessedDF)
 
     elif scanMode == 'ScanNotProcessed':
@@ -201,19 +208,17 @@ def runClassification(Portfolios, scanMode, mode):
             print((np.sqrt(252) * sl.sharpe(rsPnL)).round(4))
 
 def Test(mode):
-    if mode == 'run':
-        magicNum = 1000
-        #selection = 'PCA_250_3_Head'
-        #selection = 'LLE_250_3_Head'
-        selection = 'LLE_250_0'
-        #selection = 'PCA_250_19'
-        df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-        #df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-        #df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
-        #df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+    magicNum = 1000
+    # selection = 'PCA_250_3_Head'
+    # selection = 'LLE_250_3_Head'
+    selection = 'PCA_250_0'
+    # selection = 'PCA_250_19'
+    #df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+    # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+    # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
-        #sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
-        #dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
+    if mode == 'run':
 
         dfList = [df_Main]
         df_real_price_List = []
@@ -229,38 +234,36 @@ def Test(mode):
                 "SubHistoryLength": 760, #760
                 "SubHistoryTrainingLength": 510, #510
                 "Scaler": "Standard", #Standard
-                "epochsIn": 100, #100
-                "batchSIzeIn": 16, #16
-                "EarlyStopping_patience_Epochs": 10, #10
+                "epochsIn": 2, #100
+                "batchSIzeIn": 1, #16
+                "EarlyStopping_patience_Epochs": 1, #10
                 "LearningMode": 'static', #'static', 'online'
                 "medSpecs": [
-                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 5, "RsF": False, "Dropout": 0.25}
                 ],
                 "modelNum": magicNum,
                 "CompilerSettings": ['adam', 'mean_squared_error'],
                 "writeLearnStructure": 0
             }
-            #df = sl.cs(df)
-            #RNNprocess([selection, df, params, magicNum])
             out = sl.AI.gClassification(df, params)
 
-            out[0].to_sql('df_predicted_price_train_DF_Test', conn, if_exists='replace')
-            out[1].to_sql('df_real_price_class_train_DF_Test', conn, if_exists='replace')
-            out[2].to_sql('df_real_price_train_DF_Test', conn, if_exists='replace')
-            out[3].to_sql('df_predicted_price_test_DF_Test', conn, if_exists='replace')
-            out[4].to_sql('df_real_price_class_test_DF_Test', conn, if_exists='replace')
-            out[5].to_sql('df_real_price_test_DF_Test', conn, if_exists='replace')
+            out[0].to_sql('df_predicted_price_train_DF_Test_'+selection, conn, if_exists='replace')
+            out[1].to_sql('df_real_price_class_train_DF_Test_'+selection, conn, if_exists='replace')
+            out[2].to_sql('df_real_price_train_DF_Test_'+selection, conn, if_exists='replace')
+            out[3].to_sql('df_predicted_price_test_DF_Test_'+selection, conn, if_exists='replace')
+            out[4].to_sql('df_real_price_class_test_DF_Test_'+selection, conn, if_exists='replace')
+            out[5].to_sql('df_real_price_test_DF_Test_'+selection, conn, if_exists='replace')
 
     elif mode == 'read':
 
-        df_predicted_price_test_DF_Test = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test', conn).set_index('Dates', drop=True)
-        df_predicted_price_test_DF_Test[df_predicted_price_test_DF_Test>1.5] = -1
-        df_predicted_price_test_DF_Test[(df_predicted_price_test_DF_Test<=1.5)&(df_predicted_price_test_DF_Test>=0.5)] = 1
-        df_predicted_price_test_DF_Test[df_predicted_price_test_DF_Test<0.5] = 0
-        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test', conn).set_index('Dates', drop=True)
-        dfPnl = pd.concat([df_real_price_test_DF_Test, df_predicted_price_test_DF_Test], axis=1)
+        sig = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
+        sig[sig < 0.5] = 0
+        sig[(sig <= 1.5) & (sig >= 0.5)] = 1
+        sig[sig > 1.5] = -1
+        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
+        dfPnl = pd.concat([df_real_price_test_DF_Test, sig], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
 
         pnl = dfPnl["real_price"] * dfPnl["predicted_price"]
@@ -275,13 +278,15 @@ def Test(mode):
         sl.cs(pnl).plot()
         plt.show()
 
-runClassification("ClassicPortfolios", 'Main', "run")
-#runClassification("ClassicPortfolios", 'Main', "report")
-#runClassification("Projections", 'Main', "run")
-#runClassification("Projections", 'Main', "report")
-#runClassification("FinalistsProjections", 'Main', "run")
-#runClassification("FinalistsProjections", 'Main', "report")
-#runClassification('ScanNotProcessed', "")
+if __name__ == '__main__':
 
-#Test("run")
-#Test("read")
+    #runClassification("ClassicPortfolios", 'Main', "run")
+    #runClassification("ClassicPortfolios", 'Main', "report")
+    #runClassification("Projections", 'Main', "run")
+    #runClassification("Projections", 'Main', "report")
+    runClassification("Finalists", 'Main', "run")
+    #runClassification("FinalistsProjections", 'Main', "report")
+    #runClassification('ScanNotProcessed', "")
+
+    #Test("run")
+    #Test("read")
