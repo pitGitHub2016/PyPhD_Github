@@ -21,10 +21,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.datasets import load_digits
 from sklearn.decomposition import FastICA
 from sklearn import linear_model
+import pymc3 as pm
+import arviz as az
 from statsmodels.tsa.arima_model import ARIMA
 from sklearn.gaussian_process.kernels import RBF, DotProduct, WhiteKernel, RationalQuadratic, ExpSineSquared, Matern, \
     ConstantKernel
 from sklearn.gaussian_process import GaussianProcessRegressor, GaussianProcessClassifier
+import theano.tensor as tt
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import RepeatedStratifiedKFold
 from statsmodels.tsa.stattools import adfuller
@@ -49,7 +52,10 @@ import pydiffmap
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 warnings.filterwarnings('ignore')
-
+import logging
+logger = logging.getLogger('pymc3')
+logger.setLevel(logging.ERROR)
+logger.propagate = False
 
 class Slider:
 
@@ -453,7 +459,7 @@ class Slider:
                                                                                                                      nperiods=nIn)
             else:
                 rollStatisticDF = alpha ** -1 * norm.pdf(norm.ppf(alpha)) * Slider.expanderVol(df,
-                                                                                               nIn=nIn) - Slider.ema(df,
+                                                                      nIn=nIn) - Slider.ema(df,
                                                                                                                      nperiods=nIn)
         elif method == 'Sharpe':
             if mode == 'Roll':
@@ -1052,6 +1058,7 @@ class Slider:
         size = int(len(X) * start)
         X_train, X_test = time_X[0:size], time_X[size:len(X)]
         y_train, y_test = X[0:size], X[size:len(X)]
+        idx_train, idx_test = df.index[0:size], df.index[size:len(X)]
 
         if Kernel == "RBF":
             mainKernel = 1 * RBF()
@@ -1067,8 +1074,9 @@ class Slider:
             mainKernel = 1 * Matern() + 1 * WhiteKernel()
 
         gpcparamList = []
-        history = [x for x in X_train]
-        predictions = [0] * len(history)
+        test_price = []
+        predictions = []
+
         c = 0
         for t in tqdm(range(len(X_test))):
 
@@ -1082,6 +1090,7 @@ class Slider:
             model = GaussianProcessRegressor(
                 kernel=mainKernel)  # alpha=0.0, kernel=...,  n_restarts_optimizer=10, normalize_y=True
 
+            model_prior_samples = model.sample_y(X=subhistory_X, n_samples=100)
             model_fit = model.fit(subhistory_X, subhistory_y)
 
             newX = X_test[t].reshape(1, -1)
@@ -1091,15 +1100,113 @@ class Slider:
             X_train = np.append(X_train, newX, axis=0)
             y_train = np.append(y_train, [y_test[t]], axis=0)
 
-            history.append(y_test[t])
+            test_price.append(y_test[t][0])
 
             ###
             gpcparamList.append(y_std[-1])
 
             c += 1
 
-        testDF = pd.DataFrame(history, index=df.index)
-        PredictionsDF = pd.DataFrame(predictions, index=df.index)
+        #print("len(X_test) = ", len(X_test), ", len(y_test) = ", len(y_test), ", len(idx_test) = ", len(idx_test))
+        #print("len(test_price) = ", len(test_price))
+        #print("len(predictions) = ", len(predictions))
+        #time.sleep(2000)
+
+        testDF = pd.DataFrame(test_price, index=idx_test)
+        PredictionsDF = pd.DataFrame(predictions, index=idx_test)
+
+        return [testDF, PredictionsDF, gpcparamList]
+
+    def GPR_Walk(df, start, Kernel, rw):
+
+        data_df_raw = df.reset_index()
+        data_df_raw['t'] = data_df_raw.index
+        data_df_raw['y'] = data_df_raw[df.name].fillna(0)
+        data_df = data_df_raw[['t', 'y']]
+        n = len(data_df_raw)
+
+        x = data_df['t'].values.reshape(n, 1)
+        y = data_df['y'].values.reshape(n, 1)
+        n_train = round(start * n)
+        x_train, x_test = x[:n_train], x[n_train:]
+        y_train, y_test = y[:n_train], y[n_train:]
+        idx_train, idx_test = df.index[:n_train], df.index[n_train:]
+
+        gpcparamList = []
+        test_price = []
+        predictions = []
+
+        c = 0
+        for t in tqdm(range(len(x_test))):
+
+            if c > 0:
+                subhistory_X = x_train[-rw:-1]
+                subhistory_y = y_train[-rw:-1]
+            else:
+                subhistory_X = x_train  # [-5:-1]
+                subhistory_y = y_train  # [-5:-1]
+
+            ##########################################################################################
+            newX = x_test[t].reshape(1, -1)
+
+            with pm.Model() as model:
+                # First seasonal component.
+                ls_1 = pm.Gamma(name='ls_1', alpha=2.0, beta=1.0)
+                period_1 = pm.Gamma(name='period_1', alpha=80, beta=2)
+                gp1 = pm.gp.Marginal(cov_func=pm.gp.cov.Periodic(input_dim=1, period=period_1, ls=ls_1))
+                c_3 = pm.Normal(name='c_3', mu=np.mean(x_train), sigma=np.std(x_train))
+                gp2 = pm.gp.Marginal(cov_func=pm.gp.cov.Linear(input_dim=1, c=c_3))
+                gp = gp1 + gp2
+                # Noise.
+                sigma = pm.HalfNormal(name='sigma', sigma=np.std(x_train))
+                # Likelihood.
+                y_pred = gp.marginal_likelihood('y_pred', X=subhistory_X, y=subhistory_y.flatten(), noise=sigma)
+                # Sample.
+                trace = pm.sample(draws=100, chains=3, tune=100)
+
+            with model:
+                #x_train_conditional = gp.conditional('x_train_conditional', subhistory_X)
+                #y_train_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_train_conditional], samples=1)
+
+                x_test_conditional = gp.conditional('x_test_conditional', newX)
+                y_test_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_test_conditional], samples=1)
+
+            ##########################################################################################
+            # Train
+            #y_train_pred_samples_mean = y_train_pred_samples['x_train_conditional'].mean(axis=0)
+            #y_train_pred_samples_std = y_train_pred_samples['x_train_conditional'].std(axis=0)
+            #y_train_pred_samples_mean_plus = y_train_pred_samples_mean + 2 * y_train_pred_samples_std
+            #y_train_pred_samples_mean_minus = y_train_pred_samples_mean - 2 * y_train_pred_samples_std
+            # Test
+            y_test_pred_samples_mean = y_test_pred_samples['x_test_conditional'].mean(axis=0)
+            y_test_pred_samples_std = y_test_pred_samples['x_test_conditional'].std(axis=0)
+            #y_test_pred_samples_mean_plus = y_test_pred_samples_mean + 2 * y_test_pred_samples_std
+            #y_test_pred_samples_mean_minus = y_test_pred_samples_mean - 2 * y_test_pred_samples_std
+
+            #print(y_test_pred_samples_mean)
+            #print(len(y_test_pred_samples_mean))
+            #print(y_test_pred_samples_std)
+            #print(len(y_test_pred_samples_std))
+            #time.sleep(500)
+            ##########################################################################################
+            predictions.append(y_test_pred_samples_mean[0])
+            x_train = np.append(x_train, newX, axis=0)
+            y_train = np.append(y_train, [y_test[t]], axis=0)
+
+            test_price.append(y_test[t][0])
+
+            ###
+            gpcparamList.append(y_test_pred_samples_std)
+
+            c += 1
+
+        # print("len(X_test) = ", len(X_test), ", len(y_test) = ", len(y_test), ", len(idx_test) = ", len(idx_test))
+        # print("len(test_price) = ", len(test_price))
+        # print("len(predictions) = ", len(predictions))
+        # time.sleep(2000)
+
+        testDF = pd.DataFrame(test_price, index=idx_test)
+        PredictionsDF = pd.DataFrame(predictions, index=idx_test)
 
         return [testDF, PredictionsDF, gpcparamList]
 
@@ -1141,8 +1248,7 @@ class Slider:
                 print(e)
                 yhat = np.zeros(1) + X[t - 1]
                 stderr = np.zeros(1)
-                c1 = np.nan;
-                c2 = np.nan
+                c1 = np.nan; c2 = np.nan
 
             predictions.append(yhat)
             stderrList.append(stderr)
@@ -1160,6 +1266,7 @@ class Slider:
     def ARIMA_Walk(df, start, orderIn, rw):
         X = df.values
         size = int(len(X) * start)
+        #print("size =", size)
         train, test = X[0:size], X[size:len(X)]
         history = [x for x in train]
         arparamList = []
@@ -1188,8 +1295,8 @@ class Slider:
 
                 nullSeries = pd.Series([np.nan] * (sum([x for x in orderIn]) + 1))
                 modelParamsDF = pd.DataFrame()
-                for c in ['Lower', 'Upper', 'pvalues', 'params']:
-                    modelParamsDF[c] = nullSeries
+                for col in ['Lower', 'Upper', 'pvalues', 'params']:
+                    modelParamsDF[col] = nullSeries
 
             predictions.append(yhat)
             obs = test[t]
@@ -1207,10 +1314,7 @@ class Slider:
         return [testDF, PredictionsDF, arparamList]
 
     def ARIMA_static(datalist):
-        Asset = datalist[0];
-        start = datalist[1];
-        opt = datalist[3];
-        orderList = datalist[4]
+        Asset = datalist[0]; start = datalist[1]; opt = datalist[3]; orderList = datalist[4]
         AssetName = Asset.columns[0]
         X = Asset.to_numpy()
         history = X[start:-1]
@@ -2378,7 +2482,7 @@ class Slider:
 
             return [df_real_price_test, df_predicted_price_test, scoreDF, regressor, history]
 
-        def gRNN(dataset_all, params):
+        def gClassification(dataset_all, params):
 
             ################################### Very First Data Preprocessing #########################################
 
@@ -2394,22 +2498,25 @@ class Slider:
 
             #################################### Feature Scaling #####################################################
             if params['Scaler'] == "Standard":
-                sc = StandardScaler()
+                sc_X = StandardScaler()
+                sc_y = StandardScaler()
             elif params['Scaler'] == 'MinMax':
-                sc = MinMaxScaler() #feature_range=(0, 1)
+                sc_X = MinMaxScaler() #feature_range=(0, 1)
+                sc_y = MinMaxScaler() #feature_range=(0, 1)
 
             #################### Creating a data structure with N timesteps and 1 output #############################
             X = []
             y = []
+            real_y = []
             for i in range(params["InputSequenceLength"], len(dataset_all)):
                 X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
                 y.append(np.sign(dataVals[i]))
-            X, y = np.array(X), np.array(y)
+                real_y.append(dataVals[i])
+            X, y, real_y = np.array(X), np.array(y), np.array(real_y)
             y[y==-1] = 2
             idx = dataset_all.iloc[params["InputSequenceLength"]:].index
-            RealY = dataset_all.iloc[params["InputSequenceLength"]:]
 
-            print("X.shape=", X.shape, ", y.shape=", y.shape, ", FeatSpaceDims=", FeatSpaceDims,
+            print("X.shape=", X.shape, ", y.shape=", y.shape,", real_y.shape=", real_y.shape, ", FeatSpaceDims=", FeatSpaceDims,
                   ", InputSequenceLength=", params["InputSequenceLength"],
                   ", SubHistoryLength=", params["SubHistoryLength"],
                   ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
@@ -2426,26 +2533,30 @@ class Slider:
             breakFlag = False
             megaCount = 0
             for i in tqdm(range(0, X.shape[0], stepper)):
-                subProcessingHistory_X, subProcessingHistory_y = X[i:i+params["SubHistoryLength"]], y[i:i+params["SubHistoryLength"]]
+                subProcessingHistory_X, subProcessingHistory_y, subProcessingHistory_real_y = X[i:i+params["SubHistoryLength"]], \
+                                                                                              y[i:i+params["SubHistoryLength"]], \
+                                                                                              real_y[i:i+params["SubHistoryLength"]]
                 subIdx = idx[i:i+params["SubHistoryLength"]]
                 if len(subProcessingHistory_X) < params["SubHistoryLength"]:
-                    subProcessingHistory_X, subProcessingHistory_y = X[i:], y[i:]
+                    subProcessingHistory_X, subProcessingHistory_y, subProcessingHistory_real_y = X[i:], y[i:], real_y[i:]
                     subIdx = idx[i:]
                     breakFlag = True
-                X_train, y_train = subProcessingHistory_X[:params["SubHistoryTrainingLength"]], subProcessingHistory_y[:params["SubHistoryTrainingLength"]]
+                X_train, y_train, real_y_train = subProcessingHistory_X[:params["SubHistoryTrainingLength"]],\
+                                           subProcessingHistory_y[:params["SubHistoryTrainingLength"]],\
+                                           subProcessingHistory_real_y[:params["SubHistoryTrainingLength"]],
                 subIdx_train = subIdx[:params["SubHistoryTrainingLength"]]
-                subRealY_train = RealY[:params["SubHistoryTrainingLength"]]
-                X_test, y_test = subProcessingHistory_X[params["SubHistoryTrainingLength"]:], subProcessingHistory_y[params["SubHistoryTrainingLength"]:]
+                X_test, y_test, real_y_test = subProcessingHistory_X[params["SubHistoryTrainingLength"]:], \
+                                              subProcessingHistory_y[params["SubHistoryTrainingLength"]:],\
+                                              subProcessingHistory_real_y[params["SubHistoryTrainingLength"]:]
                 subIdx_test = subIdx[params["SubHistoryTrainingLength"]:]
-                subRealY_test = RealY[params["SubHistoryTrainingLength"]:]
 
                 #print("X_train.shape = ", X_train.shape, ", y_train.shape", y_train.shape)
                 #print(len(X_train.shape), len(y_train.shape))
 
                 # Enable Scaling
                 if params['Scaler'] is not None:
-                    X_train = sc.fit_transform(X_train)
-                    X_test = sc.transform(X_test)
+                    X_train = sc_X.fit_transform(X_train)
+                    X_test = sc_X.transform(X_test)
 
                 X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), Slider.AI.gReshape(X_test, FeatSpaceDims)
 
@@ -2466,64 +2577,95 @@ class Slider:
                 print("megaCount = ", megaCount)
 
                 if megaCount == 0:
-                    regressor = Sequential()
-                    # Adding the first LSTM layer and some Dropout regularisation
-                    for layer in range(len(params["medSpecs"])):
-                        if params["medSpecs"][layer]["units"] == 'xShape1':
-                            unitsIn = X_train.shape[1]
-                            if params["medSpecs"][layer]["LayerType"] == "LSTM":
-                                regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
-                                                   unit_forget_bias=True, bias_initializer='ones',
-                                                   input_shape=(X_train.shape[1], FeatSpaceDims)))
-                            elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
-                                regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
-                                                        unit_forget_bias=True, bias_initializer='ones',
-                                                        input_shape=(X_train.shape[1], FeatSpaceDims)))
-                            regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                    if params["model"] == "RNN":
+                        ########################################## RNN #############################################
+                        model = Sequential()
+                        # Adding the first LSTM layer and some Dropout regularisation
+                        for layer in range(len(params["medSpecs"])):
+                            if params["medSpecs"][layer]["units"] == 'xShape1':
+                                unitsIn = X_train.shape[1]
+                                if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                                    model.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                                       unit_forget_bias=True, bias_initializer='ones',
+                                                       input_shape=(X_train.shape[1], FeatSpaceDims)))
+                                elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                                    model.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                                            unit_forget_bias=True, bias_initializer='ones',
+                                                            input_shape=(X_train.shape[1], FeatSpaceDims)))
+                                model.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                            else:
+                                unitsIn = params["medSpecs"][layer]["units"]
+                                if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                                    model.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                                elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                                    model.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                                model.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                        # Adding the output layer
+                        if len(y_train.shape) == 1:
+                            model.add(Dense(units=1))
                         else:
-                            unitsIn = params["medSpecs"][layer]["units"]
-                            if params["medSpecs"][layer]["LayerType"] == "LSTM":
-                                regressor.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
-                            elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
-                                regressor.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
-                            regressor.add(Dropout(params["medSpecs"][layer]["Dropout"]))
-                    # Adding the output layer
-                    if len(y_train.shape) == 1:
-                        regressor.add(Dense(units=1))
-                    else:
-                        regressor.add(Dense(units=y_train.shape[1]))
-                    ####
-                    my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
-                    regressor.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
+                            model.add(Dense(units=y_train.shape[1]))
+                        ####
+                        my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
+                        model.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
 
-                # Fitting the RNN to the Training set
-                regressor.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
+                    elif params["model"] == "GPC":
+                        ########################################## GPC #############################################
+                        # define model
+                        model = GaussianProcessClassifier()
+                        # define model evaluation method
+                        cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+                        # define grid
+                        grid = dict()
+                        grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
+                                          1 * WhiteKernel()]
+                        # define search
+                        search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
+                        # perform the search
+                        results = search.fit(X_train, y_train)
+                        # summarize best
+                        print('Best Mean Accuracy: %.3f' % results.best_score_)
+                        print('Best Config: %s' % results.best_params_)
+                        # summarize all
+                        means = results.cv_results_['mean_test_score']
+                        params = results.cv_results_['params']
+                        for mean, param in zip(means, params):
+                            print(">%.3f with: %r" % (mean, param))
+
+                # Fitting the model to the Training set
+                model.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
                               verbose=0, callbacks=my_callbacks)
 
                 ############################### TRAIN PREDICT #################################
                 #if params['Scaler'] is None:
-                predicted_price_train = regressor.predict(X_train)
+                predicted_price_train = model.predict(X_train)
                 #else:
-                #predicted_price_train = sc.inverse_transform(regressor.predict(X_train))
+                #    print("model.predict(X_train) = ", model.predict(X_train))
+                #    predicted_price_train = sc_y.inverse_transform(model.predict(X_train))
+                #    print("predicted_price_train = ", predicted_price_train)
+                #    time.sleep(3000)
 
                 df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
                                                         columns=['Predicted_Train_'+x for x in outNaming])
                 df_real_price_class_train = pd.DataFrame(y_train, index=subIdx_train,
                                                    columns=['Real_Train_Class_'+x for x in outNaming])
-                df_real_price_train = pd.DataFrame(subRealY_train, index=subIdx_train,
+                df_real_price_train = pd.DataFrame(real_y_train, index=subIdx_train,
                                                    columns=['Real_Train_'+x for x in outNaming])
                 ############################### TEST PREDICT ##################################
                 if params["LearningMode"] == 'static':
                     #if params['Scaler'] is None:
-                    predicted_price_test = regressor.predict(X_test)
-                    #else:
-                    #predicted_price_test = sc.inverse_transform(regressor.predict(X_test))
+                    predicted_price_test = model.predict(X_test)
+                    # else:
+                    #    print("model.predict(X_test) = ", model.predict(X_test))
+                    #    predicted_price_test = sc_y.inverse_transform(model.predict(X_test))
+                    #    print("predicted_price_test = ", predicted_price_test)
+                    #    time.sleep(3000)
 
                     df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test,
                                                            columns=['Predicted_Test_'+x for x in outNaming])
                     df_real_price_class_test = pd.DataFrame(y_test, index=subIdx_test,
                                                            columns=['Real_Test_Class_'+x for x in outNaming])
-                    df_real_price_test = pd.DataFrame(subRealY_test, index=subIdx_test,
+                    df_real_price_test = pd.DataFrame(real_y_test, index=subIdx_test,
                                                            columns=['Real_Test_'+x for x in outNaming])
 
                 df_predicted_price_train_List.append(df_predicted_price_train)
@@ -2547,118 +2689,6 @@ class Slider:
 
             return [df_predicted_price_train_DF, df_real_price_class_train_DF, df_real_price_train_DF,
                      df_predicted_price_test_DF, df_real_price_class_test_DF, df_real_price_test_DF]
-
-        def gGPC(dataset_all, params):
-
-            SingleSample = False
-            if isinstance(dataset_all, pd.Series):
-                SingleSample = True
-
-            TrainEnd = int(params["TrainEndPct"] * len(dataset_all))
-            dataVals = dataset_all.values
-
-            #################################### Feature Scaling #####################################################
-            if SingleSample:
-                dataVals = dataVals.reshape(-1, 1)
-                FeatSpaceDims = 1
-                outNaming = [dataset_all.name]
-                print(outNaming)
-            else:
-                FeatSpaceDims = len(dataset_all.columns)
-                outNaming = dataset_all.columns
-
-            #################### Creating a data structure with N timesteps and 1 output #############################
-            X = []
-            y = []
-            for i in range(params["TrainWindow"], len(dataset_all)):
-                X.append(dataVals[i - params["TrainWindow"]:i])
-                y.append(np.sign(dataVals[i]))
-            X, y = np.array(X), np.array(y)
-            idx = dataset_all.iloc[params["TrainWindow"]:].index
-
-            ####################################### Reshaping ########################################################
-            "Samples : One sequence is one sample. A batch is comprised of one or more samples."
-            "Time Steps : One time step is one point of observation in the sample."
-            "Features : One feature is one observation at a time step."
-            X = np.reshape(X, (X.shape[0], X.shape[1]))
-            y = np.reshape(y, y.shape[0])
-            # time.sleep(3000)
-
-            X_train, y_train = X[:TrainEnd], y[:TrainEnd]
-            X_test, y_test = X[TrainEnd:], y[TrainEnd:]
-
-            df_real_price_train = pd.DataFrame(y_train, index=idx[:TrainEnd], columns=outNaming)
-            df_real_price_test = pd.DataFrame(y_test, index=idx[TrainEnd:], columns=outNaming)
-
-            # print("X.shape=", X.shape, ", y.shape=", y.shape, ", X_train.shape=", X_train.shape, ", y_train.shape=", y_train.shape, ", X_test.shape=", X_test.shape, ", y_test.shape=", y_test.shape)
-            # print("A = ", X_train[-5:].shape)
-            # print("B = ", X_test[0].shape)
-            # print("C = ", X_train[-2:])
-            # print("Dx = ", X_test[0])
-            # print("Dy = ", y_test[0])
-            # print("E = ", X_test[0].reshape(1,X_train.shape[1]))
-            # print("F = ", np.append(X_train[-2:],X_test[0].reshape(1,X_train.shape[1]), axis=0))
-            # time.sleep(3000)
-
-            ####################################### CORE of the GPC #############################################
-            kernelList = params['Kernel'].split("_")
-            mainKernel = 1 * RBF()
-            for k in kernelList:
-                if k == "DotProduct":
-                    mainKernel += 1 * DotProduct()
-                elif k == "Matern":
-                    mainKernel += 1 * Matern()
-                elif k == "RationalQuadratic":
-                    mainKernel += 1 * RationalQuadratic()
-                elif k == "WhiteKernel":
-                    mainKernel += 1 * WhiteKernel()
-
-            model = GaussianProcessClassifier(kernel=mainKernel)
-
-            model_fit = model.fit(X_train, y_train)
-            ########################## Get Predictions for Static or Online Learning #################################
-            predicted_price_train = model_fit.predict(X_train)
-
-            if params["LearningMode"] == 'static':
-                predicted_price_test = model_fit.predict(X_test)
-                predicted_proba_test = model_fit.predict_proba(X_test)
-
-            elif params["LearningMode"] == 'online':
-
-                # X_test, y_test
-                predicted_price_test = []
-                predicted_proba_test = []
-                for i in tqdm(range(len(X_test))):
-                    # print(subhistory_X.shape)
-                    # print(subhistory_y.shape)
-                    newX = X_test[i].reshape(1, X_train.shape[1])
-
-                    predicted_price_test.append(model_fit.predict(newX))
-                    predicted_proba_test.append(model_fit.predict_proba(newX)[0])
-
-                    X_train = np.append(X_train, newX, axis=0)
-                    y_train = np.append(y_train, [y_test[i]], axis=0)
-
-                    subhistory_X = X_train[-params['subhistory']:]
-                    subhistory_y = y_train[-params['subhistory']:]
-
-                    model_fit = model.fit(subhistory_X, subhistory_y)
-                    # print(predicted_price_test)
-                    # print(predicted_proba_test)
-                    # time.sleep(300)
-
-            df_predicted_price_train = pd.DataFrame(predicted_price_train, index=df_real_price_train.index,
-                                                    columns=['PredictedPrice_Train_' + str(c) for c in
-                                                             df_real_price_train.columns])
-            df_predicted_price_test = pd.DataFrame(predicted_price_test,
-                                                   columns=['PredictedPrice_Test_' + str(c) for c in
-                                                            df_real_price_test.columns])
-            df_predicted_proba_test = pd.DataFrame(predicted_proba_test)  # , columns=[c for c in model_fit.classes_])
-
-            if len(df_predicted_price_test) <= len(df_real_price_test):
-                df_predicted_price_test.index = df_real_price_test.index
-
-            return [df_real_price_test, df_predicted_price_test, df_predicted_proba_test]
 
     class Strategies:
 

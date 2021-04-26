@@ -330,10 +330,10 @@ def Test(mode):
         #selection = 'LLE_250_3_Head'
         selection = 'LLE_250_0'
         #selection = 'PCA_250_19'
-        #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-        df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-        #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
-        #df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+        df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+        #df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+        #df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+        #df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
         #sub_trainingSetIvlIn, sub_testSetInvIn = 750, 250
         #dfList = sl.AI.overlappingPeriodSplitter(df_Main, sub_trainingSetIvl=sub_trainingSetIvlIn, sub_testSetInv=sub_testSetInvIn)
@@ -346,14 +346,15 @@ def Test(mode):
             print("len(df) = ", len(df))
 
             params = {
+                "model" : "RNN",
                 "HistLag": 0,
                 "InputSequenceLength": 240, #240
                 "SubHistoryLength": 760, #760
                 "SubHistoryTrainingLength": 510, #510
                 "Scaler": "Standard", #Standard
                 "epochsIn": 100, #100
-                "batchSIzeIn": 32, #16
-                "EarlyStopping_patience_Epochs": 10,
+                "batchSIzeIn": 16, #16
+                "EarlyStopping_patience_Epochs": 10, #10
                 "LearningMode": 'static', #'static', 'online'
                 "medSpecs": [
                     {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
@@ -366,7 +367,7 @@ def Test(mode):
             }
             #df = sl.cs(df)
             #RNNprocess([selection, df, params, magicNum])
-            out = sl.AI.gRNN(df, params)
+            out = sl.AI.gClassification(df, params)
 
             out[0].to_sql('df_predicted_price_train_DF_Test', conn, if_exists='replace')
             out[1].to_sql('df_real_price_class_train_DF_Test', conn, if_exists='replace')
@@ -376,13 +377,25 @@ def Test(mode):
             out[5].to_sql('df_real_price_test_DF_Test', conn, if_exists='replace')
 
     elif mode == 'read':
-        df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
-        df_predicted_price_test_DF_Test = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test', conn).set_index('Dates', drop=True)
-        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test', conn).set_index('Dates', drop=True)
 
-        print(len(df_predicted_price_test_DF_Test), len(df_real_price_test_DF_Test))
-        df_predicted_price_test_DF_Test.plot()
-        df_real_price_test_DF_Test.plot()
+        df_predicted_price_test_DF_Test = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test', conn).set_index('Dates', drop=True)
+        df_predicted_price_test_DF_Test[df_predicted_price_test_DF_Test>1.5] = -1
+        df_predicted_price_test_DF_Test[(df_predicted_price_test_DF_Test<=1.5)&(df_predicted_price_test_DF_Test>=0.5)] = 1
+        df_predicted_price_test_DF_Test[df_predicted_price_test_DF_Test<0.5] = 0
+        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test', conn).set_index('Dates', drop=True)
+        dfPnl = pd.concat([df_real_price_test_DF_Test, df_predicted_price_test_DF_Test], axis=1)
+        dfPnl.columns = ["real_price", "predicted_price"]
+
+        pnl = dfPnl["real_price"] * dfPnl["predicted_price"]
+        sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
+        print(sh_pnl)
+
+        #print(len(df_predicted_price_test_DF_Test), len(df_real_price_test_DF_Test))
+        #print(df_predicted_price_test_DF_Test.tail(10))
+        #print(df_real_price_test_DF_Test.tail(10))
+        #df_predicted_price_test_DF_Test.plot()
+        #df_real_price_test_DF_Test.plot()
+        sl.cs(pnl).plot()
         plt.show()
 
 #runRnn("ClassicPortfolios", 'Main', "run")
