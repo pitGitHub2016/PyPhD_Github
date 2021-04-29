@@ -32,9 +32,10 @@ except:
     conn = sqlite3.connect('Temp.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
-calcMode = 'run'
-#calcMode = 'read'
+#calcMode = 'run'
+calcMode = 'read'
 pnlCalculator = 0
+targetSystems = [0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -64,21 +65,33 @@ def ClassificationProcess(argList):
             pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
         ]
 
-    if pnlCalculator == 0:
-        sig = out[3]
-
-        sig[sig < 0.5] = 0
-        sig[(sig <= 1.5) & (sig >= 0.5)] = 1
-        sig[sig > 1.5] = -1
-
+    sig = out[3] # Predicted Price
+    df_real_price_class_DF = out[4]
     df_real_price_test_DF = out[5]
 
-    dfPnl = pd.concat([df_real_price_test_DF, sig], axis=1)
+    if pnlCalculator == 0:
+        sigDF = sig.copy()["Predicted_Test_"+selection]
+    elif pnlCalculator == 1:
+        sigDF = sig.copy()["Predicted_Test_"+selection]
+        sigDF[sigDF < 1/3] = 0
+        sigDF[(sigDF>=1/3)&(sigDF<=1+2/3)] = 1
+        sigDF[sigDF > 1+2/3] = -1
+
+    sigDF.columns = ["ScaledSignal"]
+
+    if selection == "LO1":
+        fig, ax = plt.subplots(sharex=True, nrows=3, ncols=1)
+        df_real_price_class_DF.plot(ax=ax[0])
+        sig.plot(ax=ax[1])
+        sigDF.plot(ax=ax[2])
+        plt.show()
+
+    dfPnl = pd.concat([df_real_price_test_DF, sigDF], axis=1)
     dfPnl.columns = ["Real_Price", "Sig"]
 
     pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
     sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
-    print(sh_pnl)
+    print("Target System = ", magicNum, ", ", sh_pnl)
 
     pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
 
@@ -139,8 +152,6 @@ def runClassification(Portfolios, scanMode, mode):
     elif Portfolios == 'Finalists':
         allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
         #allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
-
-    targetSystems = [0]
 
     if scanMode == 'Main':
 
@@ -213,10 +224,12 @@ def Test(mode):
     # selection = 'LLE_250_3_Head'
     selection = 'PCA_250_0'
     # selection = 'PCA_250_19'
-    #df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-    df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+    df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    #df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
     # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+
+    df_Main = df_Main.iloc[-500:]
 
     if mode == 'run':
 
@@ -227,6 +240,7 @@ def Test(mode):
 
             print("len(df) = ", len(df))
 
+            """
             params = {
                 "model" : "RNN",
                 "HistLag": 0,
@@ -246,6 +260,17 @@ def Test(mode):
                 "modelNum": magicNum,
                 "CompilerSettings": ['adam', 'mean_squared_error'],
                 "writeLearnStructure": 0
+            }
+            """
+            params = {
+               "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 50,  # 760
+                "SubHistoryTrainingLength": 30,  # 510
+                "Scaler": None,  # Standard
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
             }
             out = sl.AI.gClassification(df, params)
 
@@ -280,11 +305,11 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    #runClassification("ClassicPortfolios", 'Main', "run")
+    runClassification("ClassicPortfolios", 'Main', "run")
     #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "run")
     #runClassification("Projections", 'Main', "report")
-    runClassification("Finalists", 'Main', "run")
+    #runClassification("Finalists", 'Main', "run")
     #runClassification("FinalistsProjections", 'Main', "report")
     #runClassification('ScanNotProcessed', "")
 

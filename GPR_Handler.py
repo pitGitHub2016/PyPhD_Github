@@ -3,6 +3,8 @@ import seaborn as sns
 import numpy as np, investpy, time, pickle
 import pandas as pd
 from tqdm import tqdm
+import pymc3 as pm
+import arviz as az
 import warnings, sqlite3, os, tensorflow as tf
 import multiprocessing as mp
 import matplotlib as mpl
@@ -248,37 +250,36 @@ def Test(mode):
         plt.show()
 
     elif mode == 'GPR':
-        selection = 'PCA_ExpWindow25_2'
-        trainLength = 0.9
+        selection = 'LLE_250_0'
+        trainLength = 0.1
         kernelIn = "RBF"
-        rw = 10
-        df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+        rw = 250
+        df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection].iloc[-250:]
         GPR_Results = sl.GPR_Walk(df, trainLength, kernelIn, rw)
+
         GPR_Results[0].to_sql(selection + '_GPR_testDF_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
         GPR_Results[1].to_sql(selection + '_GPR_PredictionsDF_' + kernelIn + '_' + str(rw), conn,
                               if_exists='replace')
 
-        pickle.dump(GPR_Results[2],
-                    open(selection + '_GPR_gprparamList_' + kernelIn + '_' + str(rw) + ".p", "wb"))
+        pd.concat([sl.cs(GPR_Results[0]), sl.cs(GPR_Results[1])], axis=1).plot()
+        plt.show()
+
+        pickle.dump(GPR_Results[2],open(selection + '_GPR_gprparamList_' + kernelIn + '_' + str(rw) + ".p", "wb"))
 
         sig = sl.sign(GPR_Results[1])
 
         pnl = sig * GPR_Results[0]
+        pnl_sh = np.sqrt(252) * sl.sharpe(pnl)
+        print("pnl Sharpe = ", pnl_sh)
         pnl.to_sql(selection + '_GPR_pnl_' + kernelIn + '_' + str(rw), conn, if_exists='replace')
 
-    elif mode == 'GPR_template':
-        import numpy as np
-        import pandas as pd
-        import matplotlib.pyplot as plt
+    elif mode == 'GPR_template_pymc3':
         sns.set_style(
             style='darkgrid',
             rc={'axes.facecolor': '.9', 'grid.color': '.8'}
         )
         sns.set_palette(palette='deep')
         sns_c = sns.color_palette(palette='deep')
-
-        import pymc3 as pm
-        import arviz as az
 
         plt.rcParams['figure.figsize'] = [12, 6]
         plt.rcParams['figure.dpi'] = 100
@@ -308,10 +309,11 @@ def Test(mode):
         # Generate data.
         #data_df = generate_data(n=n)
         data_df_raw = pd.read_sql('SELECT * FROM allProjectionsDF', conn).reset_index()
-        n = len(data_df_raw)#450
         data_df_raw['t'] = data_df_raw['index']
-        data_df_raw['y'] = sl.cs(data_df_raw['LLE_250_0'].fillna(0))
-        data_df = data_df_raw[['t', 'y']].iloc[-n:]
+        data_df_raw['y'] = data_df_raw['LLE_250_0'].fillna(0)
+        n = len(data_df_raw)
+        #data_df_raw['y'] = sl.cs(data_df_raw['LLE_250_0'].fillna(0))
+        data_df = data_df_raw[['t', 'y']]
 
         # Plot.
         fig, ax = plt.subplots()
@@ -322,22 +324,22 @@ def Test(mode):
         x = data_df['t'].values.reshape(n, 1)
         y = data_df['y'].values.reshape(n, 1)
 
-        prop_train = 0.3
+        prop_train = 0.1
         n_train = round(prop_train * n)
 
         x_train = x[:n_train]
         y_train = y[:n_train]
 
-        x_test = x[n_train:]
-        y_test = y[n_train:]
+        x_test = x[n_train:n_train+1]
+        y_test = y[n_train:n_train+1]
 
         # Plot.
-        fig, ax = plt.subplots()
-        sns.lineplot(x=x_train.flatten(), y=y_train.flatten(), color=sns_c[0], label='y_train', ax=ax)
-        sns.lineplot(x=x_test.flatten(), y=y_test.flatten(), color=sns_c[1], label='y_test', ax=ax)
-        ax.axvline(x=x_train.flatten()[-1], color=sns_c[7], linestyle='--', label='train-test-split')
-        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-        ax.set(title='y train-test split ', xlabel='t', ylabel='')
+        #fig, ax = plt.subplots()
+        #sns.lineplot(x=x_train.flatten(), y=y_train.flatten(), color=sns_c[0], label='y_train', ax=ax)
+        #sns.lineplot(x=x_test.flatten(), y=y_test.flatten(), color=sns_c[1], label='y_test', ax=ax)
+        #ax.axvline(x=x_train.flatten()[-1], color=sns_c[7], linestyle='--', label='train-test-split')
+        #ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+        #ax.set(title='y train-test split ', xlabel='t', ylabel='')
         #plt.show()
 
         with pm.Model() as model:
@@ -346,14 +348,15 @@ def Test(mode):
             period_1 = pm.Gamma(name='period_1', alpha=80, beta=2)
             gp_1 = pm.gp.Marginal(cov_func=pm.gp.cov.Periodic(input_dim=1, period=period_1, ls=ls_1))
             # Second seasonal component.
-            ls_2 = pm.Gamma(name='ls_2', alpha=2.0, beta=1.0)
-            period_2 = pm.Gamma(name='period_2', alpha=30, beta=2)
-            gp_2 = pm.gp.Marginal(cov_func=pm.gp.cov.Periodic(input_dim=1, period=period_2, ls=ls_2))
+            #ls_2 = pm.Gamma(name='ls_2', alpha=2.0, beta=1.0)
+            #period_2 = pm.Gamma(name='period_2', alpha=30, beta=2)
+            #gp_2 = pm.gp.Marginal(cov_func=pm.gp.cov.Periodic(input_dim=1, period=period_2, ls=ls_2))
             # Linear trend.
-            c_3 = pm.Normal(name='c_3', mu=1, sigma=2)
-            gp_3 = pm.gp.Marginal(cov_func=pm.gp.cov.Linear(input_dim=1, c=c_3))
+            #c_3 = pm.Normal(name='c_3', mu=np.mean(x_train), sigma=np.std(x_train))
+            #gp_3 = pm.gp.Marginal(cov_func=pm.gp.cov.Linear(input_dim=1, c=c_3))
             # Define gaussian process.
-            gp = gp_1 + gp_2 + gp_3
+            #gp = gp_1 + gp_2 + gp_3
+            gp = gp_1
             print(gp)
             # Noise.
             sigma = pm.HalfNormal(name='sigma', sigma=10)
@@ -361,7 +364,7 @@ def Test(mode):
             y_pred = gp.marginal_likelihood('y_pred', X=x_train, y=y_train.flatten(), noise=sigma)
             print(y_pred)
             # Sample.
-            trace = pm.sample(draws=100, chains=1, tune=50)
+            trace = pm.sample(draws=10, chains=1, tune=10)
             print(trace)
 
             az.plot_trace(trace)
@@ -370,10 +373,10 @@ def Test(mode):
 
         with model:
             x_train_conditional = gp.conditional('x_train_conditional', x_train)
-            y_train_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_train_conditional], samples=100)
+            y_train_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_train_conditional], samples=1)
 
             x_test_conditional = gp.conditional('x_test_conditional', x_test)
-            y_test_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_test_conditional], samples=100)
+            y_test_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_test_conditional], samples=1)
 
         # Train
         y_train_pred_samples_mean = y_train_pred_samples['x_train_conditional'].mean(axis=0)
@@ -385,6 +388,13 @@ def Test(mode):
         y_test_pred_samples_std = y_test_pred_samples['x_test_conditional'].std(axis=0)
         y_test_pred_samples_mean_plus = y_test_pred_samples_mean + 2 * y_test_pred_samples_std
         y_test_pred_samples_mean_minus = y_test_pred_samples_mean - 2 * y_test_pred_samples_std
+
+        print(y_test_pred_samples_mean)
+        print(len(y_test_pred_samples_mean))
+        print(y_test_pred_samples_std)
+        print(len(y_test_pred_samples_std))
+
+        time.sleep(3000)
 
         fig, ax = plt.subplots()
         sns.lineplot(x=x_train.flatten(), y=y_train.flatten(), color=sns_c[0], label='y_train', ax=ax)
@@ -433,4 +443,5 @@ def Test(mode):
 #GPRonPortfolios("Specific", 'Main', "report")
 #GPRonPortfolios("Specific", "ScanNotProcessed", "")
 
-Test("GPR_template")
+Test("GPR")
+#Test("GPR_template_pymc3")

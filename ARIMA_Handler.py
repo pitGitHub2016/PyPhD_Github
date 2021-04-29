@@ -34,26 +34,31 @@ def ARIMAlocal(argList):
     rw = argList[4]
     print(selection, ",", trainLength, ",", orderIn, ", ", rw)
 
-    Arima_Results = sl.ARIMA_Walk(df, trainLength, orderIn, rw)
+    try:
+        Arima_Results = sl.ARIMA_Walk(df, trainLength, orderIn, rw)
 
-    Arima_Results[0].to_sql(selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn,
-                            if_exists='replace')
-    Arima_Results[1].to_sql(selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn,
-                            if_exists='replace')
+        Arima_Results[0].to_sql(selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn,
+                                if_exists='replace')
+        Arima_Results[1].to_sql(selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn,
+                                if_exists='replace')
 
-    pickle.dump(Arima_Results[2], open(selection + '_ARIMA_arparamList_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw) +".p", "wb"))
+        pickle.dump(Arima_Results[2], open(selection + '_ARIMA_arparamList_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw) +".p", "wb"))
 
-    if pnlCalculator == 0:
-        sig = sl.sign(Arima_Results[1])
-        pnl = sig * Arima_Results[0]
-    elif pnlCalculator == 1:
-        sig = sl.S(sl.sign(Arima_Results[1]))
-        pnl = sig * Arima_Results[0]
-    elif pnlCalculator == 2:
-        sig = sl.sign(Arima_Results[1])
-        pnl = sig * sl.S(Arima_Results[0], nperiods=-1)
+        if pnlCalculator == 0:
+            sig = sl.sign(Arima_Results[1])
+            pnl = sig * Arima_Results[0]
+        elif pnlCalculator == 1:
+            sig = sl.S(sl.sign(Arima_Results[1]))
+            pnl = sig * Arima_Results[0]
+        elif pnlCalculator == 2:
+            sig = sl.sign(Arima_Results[1])
+            pnl = sig * sl.S(Arima_Results[0], nperiods=-1)
 
-    pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn, if_exists='replace')
+        pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn, if_exists='replace')
+
+    except Exception as e:
+        print(e)
+        print("General break-error...")
 
 def ARIMAonPortfolios(Portfolios, scanMode, mode):
 
@@ -65,17 +70,16 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
              globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
     elif Portfolios == 'ClassicPortfolios':
-        LOportfolio = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["LO"]
-        RPportfolio = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["RP"]
-        allProjectionsDF = pd.concat([LOportfolio, RPportfolio], axis=1)
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
     elif Portfolios == 'Finalists':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_0', 'PCA_ExpWindow25_2']].iloc[-200:,:]
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
 
-    #orderList = [(1, 0, 0), (3, 0, 0), (3, 0, 1), (5, 0, 0), (5, 0, 1)]
-    #orderList = [(3, 0, 0)]
-    orderList = [(2, 0, 1)]
+    allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
+
+    orderList = [(1, 0, 0), (2, 0, 0), (3, 0, 0)]
+    #orderList = [(2, 0, 1)]
     startPct = 0.1
     rw = 250
     if scanMode == 'Main':
@@ -99,6 +103,9 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
                     try:
                         pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw),
                                           conn).set_index('Dates', drop=True).iloc[round(startPct*len(allProjectionsDF)):]
+                        AR_paramList = pickle.load( open( selection+"_ARIMA_arparamList_"+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_'+str(rw)+".p", "rb" ) )
+                        print(AR_paramList)
+                        time.sleep(3000)
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
 
@@ -108,27 +115,34 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
                         STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
 
                         ttestPair = st.ttest_ind(pnl[selection].values, pnl['RW'].values, equal_var=False)
+                        pnl_ttest_0 = st.ttest_1samp(pnl[selection].values, 0)
+                        rw_pnl_ttest_0 = st.ttest_1samp(pnl['RW'].values, 0)
                         statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
 
                         stats = pd.concat([statsMat.iloc[0,:], statsMat.iloc[1,:]], axis=0)
-                        stats.index = ["ARIMA_sh", "ARIMA_Mean", "ARIMA_tConf", "ARIMA_Std", "RW_sh", "RW_Mean", "RW_tConf", "RW_Std"]
+                        stats.index = ["ARIMA_sh", "ARIMA_Mean", "ARIMA_tConf", "ARIMA_Std", "RW_sh", "RW_Mean",
+                                       "RW_tConf", "RW_Std"]
                         stats[["ARIMA_tConf", "RW_tConf"]] = stats[["ARIMA_tConf", "RW_tConf"]].astype(str)
                         stats["selection"] = selection
-                        stats["ttestPair_statistic"] = np.round(ttestPair.statistic,2)
+                        stats["order"] = str(orderIn[0])+str(orderIn[1])+str(orderIn[2])
                         stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue,2)
-                        stats["order"] = str(orderIn[0])
+                        stats["pnl_ttest_0_pvalue"] = np.round(pnl_ttest_0.pvalue, 2)
+                        stats["rw_pnl_ttest_0_value"] = np.round(rw_pnl_ttest_0.pvalue, 2)
 
                         shList.append(stats)
                     except Exception as e:
                         print(e)
                         notProcessed.append(selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw))
             shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(2)
+            shDF = shDF[["order", "ARIMA_sh","ARIMA_Mean","ARIMA_tConf","ARIMA_Std","RW_Mean","RW_tConf","RW_Std",
+                         "ttestPair_pvalue","pnl_ttest_0_pvalue","rw_pnl_ttest_0_value"]]
             shDF.to_sql(Portfolios+'_sh_ARIMA_pnl_' + str(rw), conn, if_exists='replace')
             shDF_Filtered = shDF[shDF["ttestPair_pvalue"] < 0.05]
 
             shDF_Filtered.to_sql(Portfolios+'_sh_ARIMA_pnl_tFiltered_' + str(rw), conn, if_exists='replace')
 
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
+            print("Len notProcessedDF = ", len(notProcessedDF))
             notProcessedDF.to_sql(Portfolios+'_notProcessedDF_' + str(rw), conn, if_exists='replace')
 
     elif scanMode == 'ScanNotProcessed':
@@ -154,48 +168,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
         stats.to_sql('ARIMA_SpecificStatistics_' + Portfolios, conn, if_exists='replace')
 
 def Test(mode):
-    if mode == 'GPC':
-        selection = 'PCA_ExpWindow25_2'
-        trainLength = 0.3
-        tw = 250
-        df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-        rwDF = pd.read_sql('SELECT * FROM PCA_randomWalkPnlRSprojections_tw_ExpWindow25', conn).set_index('Dates',
-                                                                                                          drop=True).iloc[
-               round(0.3 * len(df)):, 2]
-        medSh = (np.sqrt(252) * sl.sharpe(rwDF)).round(4)
-        print("Random Walk Sharpe : ", medSh)
-        # GaussianProcess_Results = sl.GPC_Walk(df, trainLength, tw)
-        magicNum = 1
-        params = {
-            "TrainWindow": 5,
-            "LearningMode": 'static',
-            "Kernel": "DotProduct",
-            "modelNum": magicNum,
-            "TrainEndPct": 0.3,
-            "writeLearnStructure": 0
-        }
-        out = sl.AI.gGPC(df, params)
-
-        out[0].to_sql('df_real_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                      if_exists='replace')
-        out[1].to_sql('df_predicted_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                      if_exists='replace')
-        out[2].to_sql('df_predicted_proba_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                      if_exists='replace')
-        df_real_price = out[0]
-        df_predicted_price = out[1]
-        df_predicted_price.columns = df_real_price.columns
-        # Returns Prediction
-        sig = sl.sign(df_predicted_price)
-        pnl = sig * df_real_price
-        pnl.to_sql('pnl_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn, if_exists='replace')
-        print("pnl_GPC_TEST_sharpe = ", np.sqrt(252) * sl.sharpe(pnl))
-        sl.cs(pnl).plot()
-        print(out[2].tail(10))
-        out[2].plot()
-        plt.show()
-
-    elif mode == 'test0':
+    if mode == 'test0':
 
         from quantstats import stats as qs
         from scipy.stats import norm
@@ -243,8 +216,9 @@ def Test(mode):
 #####################################################
 
 #ARIMAonPortfolios("ClassicPortfolios", 'Main', "run")
-#ARIMAonPortfolios("ClassicPortfolios", 'Main', "report")
-ARIMAonPortfolios("Projections", 'Main', "run")
+ARIMAonPortfolios("ClassicPortfolios", 'Main', "report")
+#ARIMAonPortfolios("ClassicPortfolios", 'ScanNotProcessed', "")
+#ARIMAonPortfolios("Projections", 'Main', "run")
 #ARIMAonPortfolios("Projections", 'Main', "report")
 #ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("globalProjections", 'Main', "run")
@@ -252,5 +226,6 @@ ARIMAonPortfolios("Projections", 'Main', "run")
 #ARIMAonPortfolios("globalProjections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("Projections", "ReportSpecificStatistics", "")
 #ARIMAonPortfolios("Finalists", 'Main', "run")
+#ARIMAonPortfolios("Finalists", 'Main', "report")
 
 #Test('GPC')
