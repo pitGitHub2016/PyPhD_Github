@@ -32,10 +32,10 @@ except:
     conn = sqlite3.connect('Temp.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
-#calcMode = 'run'
-calcMode = 'read'
+calcMode = 'run'
+#calcMode = 'read'
 pnlCalculator = 0
-targetSystems = [0,1]
+targetSystems = [2]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -135,6 +135,40 @@ def runClassification(Portfolios, scanMode, mode):
                 "modelNum": magicNum
             }
 
+        elif magicNum == 2:
+
+            paramsSetup = {
+                "model": "RNN",
+                "HistLag": 0,
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 150,  # 510
+                "Scaler": "Standard",  # Standard
+                "epochsIn": 100,  # 100
+                "batchSIzeIn": 10,  # 16
+                "EarlyStopping_patience_Epochs": 10,  # 10
+                "LearningMode": 'static',  # 'static', 'online'
+                "medSpecs": [
+                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                ],
+                "modelNum": magicNum,
+                "CompilerSettings": ['adam', 'mean_squared_error'],
+            }
+
+        elif magicNum == 1:
+
+            paramsSetup = {
+                "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 150,  # 510
+                "Scaler": None,  # Standard
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
+            }
+
         return paramsSetup
 
     if Portfolios == 'Projections':
@@ -150,8 +184,8 @@ def runClassification(Portfolios, scanMode, mode):
         allProjectionsDF.columns = ["RP"]
         allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
     elif Portfolios == 'Finalists':
-        allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
-        #allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
+        #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
 
     if scanMode == 'Main':
 
@@ -171,7 +205,7 @@ def runClassification(Portfolios, scanMode, mode):
             shList = []
             notProcessed = []
             for magicNum in targetSystems:
-                if magicNum in [0]:
+                if magicNum in [0,2]:
                     Classifier = "RNN"
                 elif magicNum in [1]:
                     Classifier = "GPC"
@@ -305,11 +339,11 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    runClassification("ClassicPortfolios", 'Main', "run")
+    #runClassification("ClassicPortfolios", 'Main', "run")
     #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "run")
     #runClassification("Projections", 'Main', "report")
-    #runClassification("Finalists", 'Main', "run")
+    runClassification("Finalists", 'Main', "run")
     #runClassification("FinalistsProjections", 'Main', "report")
     #runClassification('ScanNotProcessed', "")
 
