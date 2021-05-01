@@ -1,6 +1,10 @@
 import pandas as pd, numpy as np, matplotlib.pyplot as plt
 import sqlite3, time, pickle
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+    from hurst import compute_Hc
+except:
+    pass
 from itertools import combinations
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
 from sklearn.preprocessing import StandardScaler
@@ -8,7 +12,6 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
 from statsmodels.tsa.arima_model import ARIMA
 from statsmodels.tsa.stattools import adfuller
-from hurst import compute_Hc
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import LSTM
@@ -35,7 +38,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 calcMode = 'run'
 #calcMode = 'read'
 pnlCalculator = 0
-targetSystems = [2]#[0,1]
+targetSystems = [0]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -177,8 +180,11 @@ def runClassification(Portfolios, scanMode, mode):
     elif Portfolios == 'globalProjections':
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
-             globalProjectionsList.append(pd.read_sql('SELECT * FROM globalProjectionsDF_'+manifoldIn, conn).set_index('Dates', drop=True))
+            #medDF = pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True)
+            medDF = pd.read_csv('globalProjectionsDF_' + manifoldIn +'.csv').set_index('Dates', drop=True)
+            globalProjectionsList.append(medDF)
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
+        print("len(allProjectionsDF.columns) = ", len(allProjectionsDF.columns))
     elif Portfolios == 'ClassicPortfolios':
         allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
         allProjectionsDF.columns = ["RP"]
@@ -197,7 +203,8 @@ def runClassification(Portfolios, scanMode, mode):
                     processList.append([selection, allProjectionsDF[selection], params, magicNum])
 
             p = mp.Pool(mp.cpu_count())
-            result = p.map(ClassificationProcess, tqdm(processList))
+            #result = p.map(ClassificationProcess, tqdm(processList))
+            result = p.map(ClassificationProcess, processList)
             p.close()
             p.join()
 
@@ -212,12 +219,12 @@ def runClassification(Portfolios, scanMode, mode):
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql(
-                        'SELECT * FROM pnl_'+Classifier+'_' + selection + str(magicNum), conn).set_index('Dates', drop=True)
+                        'SELECT * FROM pnl_'+Classifier+'_' + selection + '_' + str(magicNum), conn).set_index('Dates', drop=True)
                         medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).abs().values[0]
                         shList.append([selection + str(magicNum), medSh])
                     except Exception as e:
                         print(e)
-                        notProcessed.append('pnl_'+Classifier+'_' + selection + str(magicNum))
+                        notProcessed.append('pnl_'+Classifier+'_' + selection + '_' + str(magicNum))
             shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True)
             shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
             print("shDF = ", shDF)
@@ -227,30 +234,20 @@ def runClassification(Portfolios, scanMode, mode):
 
     elif scanMode == 'ScanNotProcessed':
         notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_RNN', conn).set_index('index', drop=True)
+        print("len(notProcessedDF) = ", len(notProcessedDF))
+        notProcessedList = []
         for idx, row in notProcessedDF.iterrows():
             Info = row['NotProcessedProjection'].replace("pnl_RNN_", "")
-            selection = Info[:-1]
+            selection = Info[:-2]
             magicNum = Info[-1]
-            print("Rerunning NotProcessed : ", selection, ", ", magicNum)
-
             params = Architecture(magicNum)
-            out = sl.AI.gRNN(allProjectionsDF[selection], params)
-            out[0].to_sql('df_real_price_RNN_' + selection + str(magicNum), conn, if_exists='replace')
-            out[1].to_sql('df_predicted_price_RNN_' + selection + str(magicNum), conn, if_exists='replace')
-            out[2].to_sql('scoreList_RNN_' + selection + str(magicNum), conn,if_exists='replace')
-            df_real_price = out[0]
-            df_predicted_price = out[1]
+            print("Rerunning NotProcessed : ", selection, ", ", magicNum)
+            notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
 
-            df_predicted_price.columns = df_real_price.columns
-
-            # Returns Prediction
-            sig = sl.sign(df_predicted_price)
-            pnl = sig * df_real_price
-
-            pnl.to_sql('pnl_RNN_' + selection + str(magicNum), conn, if_exists='replace')
-            rsPnL = sl.rs(pnl)
-            print((np.sqrt(252) * sl.sharpe(pnl)).round(4))
-            print((np.sqrt(252) * sl.sharpe(rsPnL)).round(4))
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(ClassificationProcess, notProcessedList)
+        p.close()
+        p.join()
 
 def Test(mode):
     magicNum = 1000
@@ -343,9 +340,11 @@ if __name__ == '__main__':
     #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "run")
     #runClassification("Projections", 'Main', "report")
-    runClassification("Finalists", 'Main', "run")
+    #runClassification("globalProjections", 'Main', "run")
+    #runClassification("globalProjections", 'Main', "report")
+    runClassification('globalProjections', 'ScanNotProcessed', "")
+    #runClassification("Finalists", 'Main', "run")
     #runClassification("FinalistsProjections", 'Main', "report")
-    #runClassification('ScanNotProcessed', "")
 
     #Test("run")
     #Test("read")
