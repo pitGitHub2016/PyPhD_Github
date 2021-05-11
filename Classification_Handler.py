@@ -18,6 +18,7 @@ from keras.layers import LSTM
 from keras.layers import Dropout
 from keras.callbacks import History
 import warnings, os, tensorflow as tf
+from scipy import stats as st
 from Slider import Slider as sl
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -38,7 +39,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 calcMode = 'run'
 #calcMode = 'read'
 pnlCalculator = 0
-targetSystems = [1]#[0,1]
+targetSystems = [0]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -144,8 +145,8 @@ def runClassification(Portfolios, scanMode, mode):
                 "model": "RNN",
                 "HistLag": 0,
                 "InputSequenceLength": 25,  # 240
-                "SubHistoryLength": 25,  # 760
-                "SubHistoryTrainingLength": 20,  # 510
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 150,  # 510
                 "Scaler": "Standard",  # Standard
                 "epochsIn": 100,  # 100
                 "batchSIzeIn": 10,  # 16
@@ -162,28 +163,21 @@ def runClassification(Portfolios, scanMode, mode):
         elif magicNum == 3:
 
             paramsSetup = {
-                "model": "RNN",
+                "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 250,  # 240
-                "SubHistoryLength": 25,  # 760
-                "SubHistoryTrainingLength": 20,  # 510
-                "Scaler": "Standard",  # Standard
-                "epochsIn": 200,  # 100
-                "batchSIzeIn": 10,  # 16
-                "EarlyStopping_patience_Epochs": 5,  # 10
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 150,  # 510
+                "Scaler": None,  # Standard
                 "LearningMode": 'static',  # 'static', 'online'
-                "medSpecs": [
-                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
-                ],
-                "modelNum": magicNum,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
+                "modelNum": magicNum
             }
 
         return paramsSetup
 
     if Portfolios == 'Projections':
-        #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
+        allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
+        #allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
     elif Portfolios == 'globalProjections':
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
@@ -196,21 +190,9 @@ def runClassification(Portfolios, scanMode, mode):
         allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
         allProjectionsDF.columns = ["RP"]
         allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
-    elif Portfolios == 'FinalistsProjections':
+    elif Portfolios == 'Finalists':
         #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
-    elif Portfolios == 'FinalistsGlobalProjections':
-        globalProjectionsList = []
-        for manifoldIn in ["PCA", "LLE"]:
-            medDF = pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True)
-            #medDF = pd.read_csv('globalProjectionsDF_' + manifoldIn +'.csv').set_index('Dates', drop=True)
-            globalProjectionsList.append(medDF)
-        allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
-        print("len(allProjectionsDF.columns) = ", len(allProjectionsDF.columns))
-        allProjectionsDF = allProjectionsDF[["PCA_250_3_Head","PCA_250_3_Tail",
-                                             "LLE_250_3_Head","LLE_250_3_Tail",
-                                             "PCA_ExpWindow25_3_Head","PCA_ExpWindow25_3_Tail",
-                                             "LLE_ExpWindow25_3_Head","LLE_ExpWindow25_3_Tail"]]
 
     if scanMode == 'Main':
 
@@ -239,20 +221,41 @@ def runClassification(Portfolios, scanMode, mode):
                     try:
                         pnl = pd.read_sql(
                         'SELECT * FROM pnl_'+Classifier+'_' + selection + '_' + str(magicNum), conn).set_index('Dates', drop=True)
-                        medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).abs().values[0]
-                        shList.append([selection + str(magicNum), medSh])
+
+                        pnl.columns = [selection]
+                        pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
+
+                        sh = (np.sqrt(252) * sl.sharpe(pnl)).round(2)
+                        MEANs = (252 * pnl.mean() * 100).round(2)
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252 * 100).set_index("index",drop=True).round(2)
+                        STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
+
+                        ttestPair = st.ttest_ind(pnl[selection].values, pnl['RW'].values, equal_var=False)
+                        statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
+
+                        stats = pd.concat([statsMat.iloc[0, :], statsMat.iloc[1, :]], axis=0)
+                        stats.index = ["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std", "RW_sh", "RW_Mean",
+                                       "RW_tConf", "RW_Std"]
+                        stats[["Classifier_tConf", "RW_tConf"]] = stats[["Classifier_tConf", "RW_tConf"]].astype(str)
+                        stats["selection"] = selection
+                        stats["ttestPair_statistic"] = np.round(ttestPair.statistic, 2)
+                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue, 2)
+
+                        shList.append(stats)
                     except Exception as e:
                         print(e)
                         notProcessed.append('pnl_'+Classifier+'_' + selection + '_' + str(magicNum))
-            shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True)
+
+            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(2)
             shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
             print("shDF = ", shDF)
+
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
             notProcessedDF.to_sql(Portfolios+'_notProcessedDF_'+Classifier, conn, if_exists='replace')
             print("notProcessedDF = ", notProcessedDF)
 
     elif scanMode == 'ScanNotProcessed':
-        systemClass = 'GPC'
+        systemClass = 'RNN'
         notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_'+systemClass, conn).set_index('index', drop=True)
         print("len(notProcessedDF) = ", len(notProcessedDF))
         notProcessedList = []
@@ -265,7 +268,7 @@ def runClassification(Portfolios, scanMode, mode):
             notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
 
         p = mp.Pool(mp.cpu_count())
-        result = p.map(ClassificationProcess, notProcessedList)
+        result = p.map(ClassificationProcess, tqdm(notProcessedList))
         p.close()
         p.join()
 
@@ -359,13 +362,13 @@ if __name__ == '__main__':
     #runClassification("ClassicPortfolios", 'Main', "run")
     #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "run")
-    #runClassification("Projections", 'Main', "report")
-    #runClassification("Projections", 'ScanNotProcessed', "")
+    runClassification("Projections", 'Main', "report")
+    #runClassification('Projections', 'ScanNotProcessed', "")
     #runClassification("globalProjections", 'Main', "run")
     #runClassification("globalProjections", 'Main', "report")
     #runClassification('globalProjections', 'ScanNotProcessed', "")
-    #runClassification("FinalistsProjections", 'Main', "run")
-    runClassification("FinalistsGlobalProjections", 'Main', "run")
+    #runClassification("Finalists", 'Main', "run")
+    #runClassification("FinalistsProjections", 'Main', "report")
 
     #Test("run")
     #Test("read")
