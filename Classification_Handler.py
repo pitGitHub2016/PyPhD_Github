@@ -242,6 +242,7 @@ def runClassification(Portfolios, scanMode, mode):
                         stats["selection"] = selection
                         stats["ttestPair_statistic"] = np.round(ttestPair.statistic, 2)
                         stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue, 2)
+                        stats["Classifier"] = Classifier
 
                         shList.append(stats)
                     except Exception as e:
