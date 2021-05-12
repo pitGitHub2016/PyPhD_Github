@@ -38,7 +38,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 
 #calcMode = 'run'
 calcMode = 'read'
-pnlCalculator = 2
+pnlCalculator = 1
 targetSystems = [0]#[0,1]
 
 def ClassificationProcess(argList):
@@ -78,8 +78,12 @@ def ClassificationProcess(argList):
         sigDF = (sigDF-sigDF.mean()) / sigDF.std()
     elif pnlCalculator == 1:
         sigDF[sigDF < 2/3] = 0
-        sigDF[(sigDF >= 2/3) & (sigDF <= 1+2/3)] = 1
-        sigDF[sigDF > 1+2/3] = -1
+        sigDF[(sigDF >= 2/3) & (sigDF <= 1+1/3)] = 1
+        sigDF[sigDF > 1+1/3] = -1
+    elif pnlCalculator == 2:
+        sigDF[sigDF < 0.2] = 0
+        sigDF[(sigDF >= 0.9) & (sigDF <= 1.1)] = 1
+        sigDF[sigDF > 1.8] = -1
 
     sigDF.columns = ["ScaledSignal"]
 
@@ -92,9 +96,9 @@ def ClassificationProcess(argList):
 
     dfPnl = pd.concat([df_real_price_test_DF, sigDF], axis=1)
     dfPnl.columns = ["Real_Price", "Sig"]
-    dfPnl["Sig"].plot()
-    plt.show()
-    time.sleep(3000)
+    #dfPnl["Sig"].plot()
+    #plt.show()
+    #time.sleep(3000)
 
     pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
     #pnl = dfPnl["Real_Price"] * sl.sign(dfPnl["Sig"])
@@ -138,7 +142,7 @@ def runClassification(Portfolios, scanMode, mode):
                 "InputSequenceLength": 240,  # 240
                 "SubHistoryLength": 760,  # 760
                 "SubHistoryTrainingLength": 510,  # 510
-                "Scaler": None,  # Standard
+                "Scaler": "Standard",  # Standard
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
@@ -209,7 +213,10 @@ def runClassification(Portfolios, scanMode, mode):
                 for selection in allProjectionsDF.columns:
                     processList.append([selection, allProjectionsDF[selection], params, magicNum])
 
-            p = mp.Pool(mp.cpu_count())
+            if calcMode == 'run':
+                p = mp.Pool(mp.cpu_count())
+            else:
+                p = mp.Pool(2)
             #result = p.map(ClassificationProcess, tqdm(processList))
             result = p.map(ClassificationProcess, processList)
             p.close()
