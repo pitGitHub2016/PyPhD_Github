@@ -36,10 +36,10 @@ except:
     conn = sqlite3.connect('Temp.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
-#calcMode = 'run'
-calcMode = 'read'
+calcMode = 'run'
+#calcMode = 'read'
 pnlCalculator = 1
-targetSystems = [0]#[0,1]
+targetSystems = [1]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -81,9 +81,9 @@ def ClassificationProcess(argList):
         sigDF[(sigDF >= 2/3) & (sigDF <= 1+1/3)] = 1
         sigDF[sigDF > 1+1/3] = -1
     elif pnlCalculator == 2:
-        sigDF[sigDF < 0.2] = 0
-        sigDF[(sigDF >= 0.9) & (sigDF <= 1.1)] = 1
-        sigDF[sigDF > 1.8] = -1
+        sigDF[sigDF < 0.1] = 0
+        sigDF[(sigDF >= 0.95) & (sigDF <= 1.05)] = 1
+        sigDF[sigDF > 1.9] = -1
 
     sigDF.columns = ["ScaledSignal"]
 
