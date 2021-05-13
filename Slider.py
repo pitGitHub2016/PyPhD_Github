@@ -2652,11 +2652,16 @@ class Slider:
                         elif params['Kernel'] == '3':
                             mainKernel = 1**2 * RBF(length_scale=1)
                         elif params['Kernel'] == '4':
-                            mainKernel = 1**2 * DotProduct(sigma_0=1)
-                        elif params['Kernel'] == '5':
                             mainKernel = 1**2 * Matern(length_scale=1, nu=1.5)
-                        elif params['Kernel'] == '6':
+                        elif params['Kernel'] == '5':
                             mainKernel = 1**2 * RationalQuadratic(alpha=1, length_scale=1)
+                        elif params['Kernel'] == '6':
+                            mainKernel = 1**2 * DotProduct(sigma_0=1) + \
+                                         1**2 * RBF(length_scale=1) + \
+                                         1**2 * Matern(length_scale=1, nu=1.5)+ \
+                                         1**2 * RationalQuadratic(alpha=1, length_scale=1)
+                        elif params['Kernel'] == '7':
+                            mainKernel = ConstantKernel() + DotProduct() + RBF() + WhiteKernel()
                         ##################### Running with Greedy Search Best Model ##################
                         model = GaussianProcessClassifier(kernel=mainKernel, random_state=0)
                     # Fitting the GPC Model to the Training set
