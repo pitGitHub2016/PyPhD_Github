@@ -2570,7 +2570,7 @@ class Slider:
                 "Features : One feature is one observation at a time step."
 
                 ################################### Build the RNN (LSTM) #####################################
-                #print("megaCount = ", megaCount)
+                print("megaCount = ", megaCount)
 
                 if params["model"] == "RNN":
                     X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), \

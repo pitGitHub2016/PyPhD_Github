@@ -36,7 +36,8 @@ except:
     conn = sqlite3.connect('Temp.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
-calcMode = 'run'
+#calcMode = 'runSerial'
+calcMode = 'runParallel'
 #calcMode = 'read'
 pnlCalculator = 1
 targetSystems = [1]#[0,1]
@@ -47,8 +48,8 @@ def ClassificationProcess(argList):
     params = argList[2]
     magicNum = argList[3]
 
-    if calcMode == 'run':
-
+    if calcMode in ['runSerial', 'runParallel']:
+        print("Running gClassification")
         out = sl.AI.gClassification(df, params)
 
         out[0].to_sql('df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
@@ -148,6 +149,20 @@ def runClassification(Portfolios, scanMode, mode):
                 "modelNum": magicNum
             }
 
+        elif magicNum == 2:
+
+            paramsSetup = {
+                "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 255,  # 760
+                "SubHistoryTrainingLength": 250,  # 510
+                "Scaler": "Standard",  # Standard
+                'Kernel': '0',
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
+            }
+
         return paramsSetup
 
     if Portfolios == 'Projections':
@@ -173,7 +188,13 @@ def runClassification(Portfolios, scanMode, mode):
 
     if scanMode == 'Main':
 
-        if mode == "run":
+        if mode == "runSerial":
+            for magicNum in targetSystems:
+                params = Architecture(magicNum)
+                for selection in allProjectionsDF.columns:
+                    ClassificationProcess([selection, allProjectionsDF[selection], params, magicNum])
+
+        elif mode == "runParallel":
             processList = []
             for magicNum in targetSystems:
                 params = Architecture(magicNum)
@@ -181,7 +202,7 @@ def runClassification(Portfolios, scanMode, mode):
                     processList.append([selection, allProjectionsDF[selection], params, magicNum])
 
             if calcMode == 'run':
-                p = mp.Pool(mp.cpu_count())
+                p = mp.Pool(len(processList))
             else:
                 p = mp.Pool(2)
             #result = p.map(ClassificationProcess, tqdm(processList))
@@ -259,11 +280,16 @@ def Test(mode):
     # selection = 'LLE_250_3_Head'
     #selection = 'PCA_250_0'
     #selection = 'PCA_250_19'
-    selection = 'PCA_ExpWindow25_19'
-    df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    #selection = 'PCA_ExpWindow25_19'
+    selection = 'RP'
+    #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+    allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
+    allProjectionsDF.columns = ["RP"]
+    allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
+    df = allProjectionsDF[selection]
 
     #df_Main = df_Main.iloc[-500:]
 
@@ -274,11 +300,11 @@ def Test(mode):
         params = {
             "model": "GPC",
             "HistLag": 0,
-            "InputSequenceLength": 25,  # 240
-            "SubHistoryLength": 255,  # 760
-            "SubHistoryTrainingLength": 250,  # 510
+            "InputSequenceLength": 240,  # 240
+            "SubHistoryLength": 760,  # 760
+            "SubHistoryTrainingLength": 510,  # 510
             "Scaler": "Standard",  # Standard
-            'Kernel': '1',
+            'Kernel': 'Optimize',
             "LearningMode": 'static',  # 'static', 'online'
             "modelNum": magicNum
         }
@@ -312,8 +338,9 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    runClassification("ClassicPortfolios", 'Main', "run")
-    runClassification("ClassicPortfolios", 'Main', "report")
+    #runClassification("ClassicPortfolios", 'Main', "runSerial")
+    runClassification("ClassicPortfolios", 'Main', "runParallel")
+    #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "run")
     #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
