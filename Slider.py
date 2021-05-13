@@ -2611,40 +2611,101 @@ class Slider:
                         ####
                         my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
                         model.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
-
                     # Fitting the RNN Model to the Training set
                     model.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
                               verbose=0, callbacks=my_callbacks)
 
                 elif params["model"] == "GPC":
                     ########################################## GPC #############################################
-                    print("Gaussian Process Classification...", outNaming)
                     # define model
-                    model = GaussianProcessClassifier()
-                    # define model evaluation method
-                    cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-                    # define grid
-                    grid = dict()
-                    grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
-                                      1 * WhiteKernel()]
-                    # define search
-                    search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
-                    # perform the search
-                    results = search.fit(X_train, y_train)
-                    # summarize best
-                    print('Best Mean Accuracy: %.3f' % results.best_score_)
-                    print('Best Config: %s' % results.best_params_)
-                    # summarize all
-                    gpc_means = results.cv_results_['mean_test_score']
-                    gpc_params = results.cv_results_['params']
-                    for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
-                        print(">%.3f with: %r" % (gpc_mean, gpc_param))
-                        print(gpc_param['kernel'])
-
-                    ##################### Running with Greedy Search Best Model ##################
-                    print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
-                    model = GaussianProcessClassifier(kernel=results.best_params_['kernel'], random_state=0)
+                    if megaCount == 0:
+                        print("Gaussian Process Classification...", outNaming)
+                        model = GaussianProcessClassifier()
+                        if params['Kernel'] == 'Optimize':
+                            # define model evaluation method
+                            cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+                            # define grid
+                            grid = dict()
+                            grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
+                                              1 * WhiteKernel()]
+                            # define search
+                            search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
+                            # perform the search
+                            results = search.fit(X_train, y_train)
+                            # summarize best
+                            print('Best Mean Accuracy: %.3f' % results.best_score_)
+                            print('Best Config: %s' % results.best_params_)
+                            # summarize all
+                            gpc_means = results.cv_results_['mean_test_score']
+                            gpc_params = results.cv_results_['params']
+                            for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
+                                print(">%.3f with: %r" % (gpc_mean, gpc_param))
+                                print(gpc_param['kernel'])
+                            print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
+                            mainKernel = results.best_params_['kernel']
+                        elif params['Kernel'] == '0':
+                            mainKernel = ConstantKernel() + ConstantKernel() * RBF() + WhiteKernel()
+                        elif params['Kernel'] == '1':
+                            mainKernel = ConstantKernel(1.0) + ConstantKernel(1.0) * RBF(10) + WhiteKernel(5)
+                        elif params['Kernel'] == '2':
+                            mainKernel = 1**2 * DotProduct(sigma_0=1)
+                        elif params['Kernel'] == '3':
+                            mainKernel = 1**2 * RBF(length_scale=1)
+                        elif params['Kernel'] == '4':
+                            mainKernel = 1**2 * DotProduct(sigma_0=1)
+                        elif params['Kernel'] == '5':
+                            mainKernel = 1**2 * Matern(length_scale=1, nu=1.5)
+                        elif params['Kernel'] == '6':
+                            mainKernel = 1**2 * RationalQuadratic(alpha=1, length_scale=1)
+                        ##################### Running with Greedy Search Best Model ##################
+                        model = GaussianProcessClassifier(kernel=mainKernel, random_state=0)
+                    # Fitting the GPC Model to the Training set
                     model.fit(X_train, y_train)
+
+                elif params["model"] == "GPR":
+                    if megaCount == 0:
+                        print("Gaussian Process Regression...", outNaming)
+                        if params['Kernel'] == 'Optimize':
+                            # define model evaluation method
+                            cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+                            # define grid
+                            grid = dict()
+                            grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
+                                              1 * WhiteKernel()]
+                            # define search
+                            search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
+                            # perform the search
+                            results = search.fit(X_train, y_train)
+                            # summarize best
+                            print('Best Mean Accuracy: %.3f' % results.best_score_)
+                            print('Best Config: %s' % results.best_params_)
+                            # summarize all
+                            gpc_means = results.cv_results_['mean_test_score']
+                            gpc_params = results.cv_results_['params']
+                            for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
+                                print(">%.3f with: %r" % (gpc_mean, gpc_param))
+                                print(gpc_param['kernel'])
+                            print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
+                            mainKernel = results.best_params_['kernel']
+                        elif params['Kernel'] == '0':
+                            mainKernel = ConstantKernel() + ConstantKernel() * RBF() + WhiteKernel()
+                        elif params['Kernel'] == '1':
+                            mainKernel = ConstantKernel(1.0) + ConstantKernel(1.0) * RBF(10) + WhiteKernel(5)
+                        elif params['Kernel'] == '2':
+                            mainKernel = 1**2 * DotProduct(sigma_0=1)
+                        elif params['Kernel'] == '3':
+                            mainKernel = 1**2 * RBF(length_scale=1)
+                        elif params['Kernel'] == '4':
+                            mainKernel = 1**2 * DotProduct(sigma_0=1)
+                        elif params['Kernel'] == '5':
+                            mainKernel = 1**2 * Matern(length_scale=1, nu=1.5)
+                        elif params['Kernel'] == '6':
+                            mainKernel = 1**2 * RationalQuadratic(alpha=1, length_scale=1)
+                        model = GaussianProcessRegressor(kernel=mainKernel)
+
+                    model.fit(X_train, y_train)
+                    y_pred_tr, y_pred_tr_std = model.predict(X_train, return_std=True)
+                    y_pred_te, y_pred_te_std = model.predict(X_test, return_std=True)
 
                 ############################### TRAIN PREDICT #################################
                 #if params['Scaler'] is None:

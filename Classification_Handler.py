@@ -143,40 +143,7 @@ def runClassification(Portfolios, scanMode, mode):
                 "SubHistoryLength": 760,  # 760
                 "SubHistoryTrainingLength": 510,  # 510
                 "Scaler": "Standard",  # Standard
-                "LearningMode": 'static',  # 'static', 'online'
-                "modelNum": magicNum
-            }
-
-        elif magicNum == 2:
-
-            paramsSetup = {
-                "model": "RNN",
-                "HistLag": 0,
-                "InputSequenceLength": 25,  # 240
-                "SubHistoryLength": 250,  # 760
-                "SubHistoryTrainingLength": 150,  # 510
-                "Scaler": "Standard",  # Standard
-                "epochsIn": 100,  # 100
-                "batchSIzeIn": 10,  # 16
-                "EarlyStopping_patience_Epochs": 10,  # 10
-                "LearningMode": 'static',  # 'static', 'online'
-                "medSpecs": [
-                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
-                ],
-                "modelNum": magicNum,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
-            }
-
-        elif magicNum == 3:
-
-            paramsSetup = {
-                "model": "GPC",
-                "HistLag": 0,
-                "InputSequenceLength": 25,  # 240
-                "SubHistoryLength": 250,  # 760
-                "SubHistoryTrainingLength": 150,  # 510
-                "Scaler": None,  # Standard
+                'Kernel': 'Optimize',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
@@ -290,93 +257,65 @@ def Test(mode):
     magicNum = 1000
     # selection = 'PCA_250_3_Head'
     # selection = 'LLE_250_3_Head'
-    selection = 'PCA_250_0'
-    # selection = 'PCA_250_19'
-    df_Main = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-    #df_Main = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-    # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
-    # df_Main = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+    #selection = 'PCA_250_0'
+    #selection = 'PCA_250_19'
+    selection = 'PCA_ExpWindow25_19'
+    df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    #df = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+    # df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+    # df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
 
     #df_Main = df_Main.iloc[-500:]
 
     if mode == 'run':
 
-        dfList = [df_Main]
-        df_real_price_List = []
-        df_predicted_price_List = []
-        for df in dfList:
+        print("len(df) = ", len(df))
 
-            print("len(df) = ", len(df))
+        params = {
+            "model": "GPC",
+            "HistLag": 0,
+            "InputSequenceLength": 25,  # 240
+            "SubHistoryLength": 255,  # 760
+            "SubHistoryTrainingLength": 250,  # 510
+            "Scaler": "Standard",  # Standard
+            'Kernel': '1',
+            "LearningMode": 'static',  # 'static', 'online'
+            "modelNum": magicNum
+        }
 
-            """
-            params = {
-                "model" : "RNN",
-                "HistLag": 0,
-                "InputSequenceLength": 240, #240
-                "SubHistoryLength": 760, #760
-                "SubHistoryTrainingLength": 510, #510
-                "Scaler": "Standard", #Standard
-                "epochsIn": 2, #100
-                "batchSIzeIn": 1, #16
-                "EarlyStopping_patience_Epochs": 1, #10
-                "LearningMode": 'static', #'static', 'online'
-                "medSpecs": [
-                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 5, "RsF": False, "Dropout": 0.25}
-                ],
-                "modelNum": magicNum,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
-                "writeLearnStructure": 0
-            }
-            """
-            params = {
-               "model": "GPC",
-                "HistLag": 0,
-                "InputSequenceLength": 25,  # 240
-                "SubHistoryLength": 50,  # 760
-                "SubHistoryTrainingLength": 30,  # 510
-                "Scaler": None,  # Standard
-                "LearningMode": 'static',  # 'static', 'online'
-                "modelNum": magicNum
-            }
-            out = sl.AI.gClassification(df, params)
+        out = sl.AI.gClassification(df, params)
 
-            out[0].to_sql('df_predicted_price_train_DF_Test_'+selection, conn, if_exists='replace')
-            out[1].to_sql('df_real_price_class_train_DF_Test_'+selection, conn, if_exists='replace')
-            out[2].to_sql('df_real_price_train_DF_Test_'+selection, conn, if_exists='replace')
-            out[3].to_sql('df_predicted_price_test_DF_Test_'+selection, conn, if_exists='replace')
-            out[4].to_sql('df_real_price_class_test_DF_Test_'+selection, conn, if_exists='replace')
-            out[5].to_sql('df_real_price_test_DF_Test_'+selection, conn, if_exists='replace')
+        out[0].to_sql('df_predicted_price_train_DF_Test_'+selection, conn, if_exists='replace')
+        out[1].to_sql('df_real_price_class_train_DF_Test_'+selection, conn, if_exists='replace')
+        out[2].to_sql('df_real_price_train_DF_Test_'+selection, conn, if_exists='replace')
+        out[3].to_sql('df_predicted_price_test_DF_Test_'+selection, conn, if_exists='replace')
+        out[4].to_sql('df_real_price_class_test_DF_Test_'+selection, conn, if_exists='replace')
+        out[5].to_sql('df_real_price_test_DF_Test_'+selection, conn, if_exists='replace')
 
     elif mode == 'read':
 
-        sig = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
-        sig[sig < 0.5] = 0
-        sig[(sig <= 1.5) & (sig >= 0.5)] = 1
-        sig[sig > 1.5] = -1
+        sigDF = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
+        sigDF = sigDF["Predicted_Test_"+selection]
+        sigDF[sigDF < 2 / 3] = 0
+        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3)] = 1
+        sigDF[sigDF > 1 + 1 / 3] = -1
         df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
-        dfPnl = pd.concat([df_real_price_test_DF_Test, sig], axis=1)
+        dfPnl = pd.concat([df_real_price_test_DF_Test, sigDF], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
 
         pnl = dfPnl["real_price"] * dfPnl["predicted_price"]
         sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
         print(sh_pnl)
 
-        #print(len(df_predicted_price_test_DF_Test), len(df_real_price_test_DF_Test))
-        #print(df_predicted_price_test_DF_Test.tail(10))
-        #print(df_real_price_test_DF_Test.tail(10))
-        #df_predicted_price_test_DF_Test.plot()
-        #df_real_price_test_DF_Test.plot()
         sl.cs(pnl).plot()
         plt.show()
 
 if __name__ == '__main__':
 
-    #runClassification("ClassicPortfolios", 'Main', "run")
-    #runClassification("ClassicPortfolios", 'Main', "report")
-    runClassification("Projections", 'Main', "run")
-    runClassification("Projections", 'Main', "report")
+    runClassification("ClassicPortfolios", 'Main', "run")
+    runClassification("ClassicPortfolios", 'Main', "report")
+    #runClassification("Projections", 'Main', "run")
+    #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
     #runClassification("globalProjections", 'Main', "run")
     #runClassification("globalProjections", 'Main', "report")
