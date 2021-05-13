@@ -201,10 +201,11 @@ def runClassification(Portfolios, scanMode, mode):
                 for selection in allProjectionsDF.columns:
                     processList.append([selection, allProjectionsDF[selection], params, magicNum])
 
-            if calcMode == 'run':
-                p = mp.Pool(len(processList))
-            else:
+            if calcMode == 'read':
                 p = mp.Pool(2)
+            else:
+                p = mp.Pool(mp.cpu_count())
+                #p = mp.Pool(len(processList))
             #result = p.map(ClassificationProcess, tqdm(processList))
             result = p.map(ClassificationProcess, processList)
             p.close()
