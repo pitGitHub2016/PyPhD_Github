@@ -2644,24 +2644,20 @@ class Slider:
                             print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
                             mainKernel = results.best_params_['kernel']
                         elif params['Kernel'] == '0':
-                            mainKernel = ConstantKernel() + ConstantKernel() * RBF() + WhiteKernel()
+                            mainKernel = 1**2 * ConstantKernel()
                         elif params['Kernel'] == '1':
-                            mainKernel = ConstantKernel(1.0) + ConstantKernel(1.0) * RBF(10) + WhiteKernel(5)
-                        elif params['Kernel'] == '2':
                             mainKernel = 1**2 * DotProduct(sigma_0=1)
-                        elif params['Kernel'] == '3':
+                        elif params['Kernel'] == '2':
                             mainKernel = 1**2 * RBF(length_scale=1)
-                        elif params['Kernel'] == '4':
+                        elif params['Kernel'] == '3':
                             mainKernel = 1**2 * Matern(length_scale=1, nu=1.5)
-                        elif params['Kernel'] == '5':
+                        elif params['Kernel'] == '4':
                             mainKernel = 1**2 * RationalQuadratic(alpha=1, length_scale=1)
+                        elif params['Kernel'] == '5':
+                            mainKernel = 1 ** 2 * WhiteKernel()
                         elif params['Kernel'] == '6':
-                            mainKernel = 1**2 * DotProduct(sigma_0=1) + \
-                                         1**2 * RBF(length_scale=1) + \
-                                         1**2 * Matern(length_scale=1, nu=1.5)+ \
-                                         1**2 * RationalQuadratic(alpha=1, length_scale=1)
-                        elif params['Kernel'] == '7':
-                            mainKernel = ConstantKernel() + DotProduct() + RBF() + WhiteKernel()
+                            mainKernel = 1**2 * (DotProduct(sigma_0=1)+ Matern(length_scale=1, nu=1.5)+
+                                                 RationalQuadratic(alpha=1, length_scale=1))
                         ##################### Running with Greedy Search Best Model ##################
                         model = GaussianProcessClassifier(kernel=mainKernel, random_state=0)
                     # Fitting the GPC Model to the Training set
@@ -2693,19 +2689,20 @@ class Slider:
                             print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
                             mainKernel = results.best_params_['kernel']
                         elif params['Kernel'] == '0':
-                            mainKernel = ConstantKernel() + ConstantKernel() * RBF() + WhiteKernel()
+                            mainKernel = 1 ** 2 * ConstantKernel()
                         elif params['Kernel'] == '1':
-                            mainKernel = ConstantKernel(1.0) + ConstantKernel(1.0) * RBF(10) + WhiteKernel(5)
+                            mainKernel = 1 ** 2 * DotProduct(sigma_0=1)
                         elif params['Kernel'] == '2':
-                            mainKernel = 1**2 * DotProduct(sigma_0=1)
+                            mainKernel = 1 ** 2 * RBF(length_scale=1)
                         elif params['Kernel'] == '3':
-                            mainKernel = 1**2 * RBF(length_scale=1)
+                            mainKernel = 1 ** 2 * Matern(length_scale=1, nu=1.5)
                         elif params['Kernel'] == '4':
-                            mainKernel = 1**2 * DotProduct(sigma_0=1)
+                            mainKernel = 1 ** 2 * RationalQuadratic(alpha=1, length_scale=1)
                         elif params['Kernel'] == '5':
-                            mainKernel = 1**2 * Matern(length_scale=1, nu=1.5)
+                            mainKernel = 1 ** 2 * WhiteKernel()
                         elif params['Kernel'] == '6':
-                            mainKernel = 1**2 * RationalQuadratic(alpha=1, length_scale=1)
+                            mainKernel = 1 ** 2 * (DotProduct(sigma_0=1) + Matern(length_scale=1, nu=1.5) +
+                                                   RationalQuadratic(alpha=1, length_scale=1))
                         model = GaussianProcessRegressor(kernel=mainKernel)
 
                     model.fit(X_train, y_train)
