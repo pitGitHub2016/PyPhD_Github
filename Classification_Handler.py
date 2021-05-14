@@ -166,7 +166,7 @@ def runClassification(Portfolios, scanMode, mode):
         return paramsSetup
 
     if Portfolios == 'Projections':
-        allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)
+        allProjectionsDF = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)
         #allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
     elif Portfolios == 'globalProjections':
         globalProjectionsList = []
