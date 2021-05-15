@@ -40,7 +40,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 calcMode = 'runParallel'
 #calcMode = 'read'
 pnlCalculator = 1
-targetSystems = [1]#[0,1]
+targetSystems = [2]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -154,11 +154,11 @@ def runClassification(Portfolios, scanMode, mode):
             paramsSetup = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 240,  # 240
-                "SubHistoryLength": 760,  # 760
-                "SubHistoryTrainingLength": 510,  # 510
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 245,  # 510
                 "Scaler": "Standard",  # Standard
-                'Kernel': '3',
+                'Kernel': '4a',  # 4a = 1.57, 4b=1.52
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
@@ -182,7 +182,10 @@ def runClassification(Portfolios, scanMode, mode):
         allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
     elif Portfolios == 'Finalists':
         #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
+        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0',
+                                                                                                              'PCA_250_19', 'LLE_250_18',
+                                                                                                              'PCA_ExpWindow25_0', 'LLE_ExpWindow25_0',
+                                                                                                              'PCA_ExpWindow25_19', 'LLE_ExpWindow25_18']]
 
     #allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
 
@@ -258,7 +261,7 @@ def runClassification(Portfolios, scanMode, mode):
             print("notProcessedDF = ", notProcessedDF)
 
     elif scanMode == 'ScanNotProcessed':
-        systemClass = 'RNN'
+        systemClass = 'GPC'
         notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_'+systemClass, conn).set_index('index', drop=True)
         print("len(notProcessedDF) = ", len(notProcessedDF))
         notProcessedList = []
@@ -280,9 +283,9 @@ def Test(mode):
     # selection = 'PCA_250_3_Head'
     # selection = 'LLE_250_3_Head'
     #selection = 'PCA_250_0'
-    selection = 'PCA_250_19'
+    #selection = 'PCA_250_19'
     #selection = 'PCA_ExpWindow25_0' #
-    #selection = 'PCA_ExpWindow25_19' # 6,7 --> 0.7+
+    selection = 'PCA_ExpWindow25_19' # 6,7 --> 0.7+
     #selection = 'RP'
     df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
@@ -302,11 +305,11 @@ def Test(mode):
         params = {
             "model": "GPC",
             "HistLag": 0,
-            "InputSequenceLength": 240,  # 240
-            "SubHistoryLength": 760,  # 760
-            "SubHistoryTrainingLength": 510,  # 510
+            "InputSequenceLength": 25,  # 240
+            "SubHistoryLength": 250,  # 760
+            "SubHistoryTrainingLength": 245,  # 510
             "Scaler": "Standard",  # Standard
-            'Kernel': '2',
+            'Kernel': '4b', #4a = 1.57, 4b=1.52
             "LearningMode": 'static',  # 'static', 'online'
             "modelNum": magicNum
         }
@@ -343,13 +346,13 @@ if __name__ == '__main__':
     #runClassification("ClassicPortfolios", 'Main', "runSerial")
     #runClassification("ClassicPortfolios", 'Main', "runParallel")
     #runClassification("ClassicPortfolios", 'Main', "report")
-    runClassification("Projections", 'Main', "runParallel")
+    #runClassification("Projections", 'Main', "runParallel")
     #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
     #runClassification("globalProjections", 'Main', "run")
     #runClassification("globalProjections", 'Main', "report")
     #runClassification('globalProjections', 'ScanNotProcessed', "")
-    #runClassification("Finalists", 'Main', "run")
+    runClassification("Finalists", 'Main', "runParallel")
     #runClassification("FinalistsProjections", 'Main', "report")
 
     #Test("run")

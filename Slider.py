@@ -2570,7 +2570,7 @@ class Slider:
                 "Features : One feature is one observation at a time step."
 
                 ################################### Build the RNN (LSTM) #####################################
-                print("megaCount = ", megaCount)
+                #print("megaCount = ", megaCount)
 
                 if params["model"] == "RNN":
                     X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), \
@@ -2653,6 +2653,10 @@ class Slider:
                             mainKernel = 1**2 * Matern(length_scale=1, nu=1.5)
                         elif params['Kernel'] == '4':
                             mainKernel = 1**2 * RationalQuadratic(alpha=1, length_scale=1)
+                        elif params['Kernel'] == '4a':
+                            mainKernel = Matern(length_scale=1, nu=1.5) + RationalQuadratic(alpha=1, length_scale=1)
+                        elif params['Kernel'] == '4b':
+                            mainKernel = ConstantKernel(1.0) + ConstantKernel(1.0) * RBF(10) + WhiteKernel(5)
                         elif params['Kernel'] == '5':
                             mainKernel = 1 ** 2 * WhiteKernel()
                         elif params['Kernel'] == '6':
@@ -2698,6 +2702,8 @@ class Slider:
                             mainKernel = 1 ** 2 * Matern(length_scale=1, nu=1.5)
                         elif params['Kernel'] == '4':
                             mainKernel = 1 ** 2 * RationalQuadratic(alpha=1, length_scale=1)
+                        elif params['Kernel'] == '4a':
+                            mainKernel = Matern(length_scale=1, nu=1.5)+RationalQuadratic(alpha=1, length_scale=1)
                         elif params['Kernel'] == '5':
                             mainKernel = 1 ** 2 * WhiteKernel()
                         elif params['Kernel'] == '6':
