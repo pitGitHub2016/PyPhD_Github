@@ -40,7 +40,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 calcMode = 'runParallel'
 #calcMode = 'read'
 pnlCalculator = 1
-targetSystems = [2]#[0,1]
+targetSystems = [1]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -154,9 +154,9 @@ def runClassification(Portfolios, scanMode, mode):
             paramsSetup = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 25,  # 240
-                "SubHistoryLength": 250,  # 760
-                "SubHistoryTrainingLength": 245,  # 510
+                "InputSequenceLength": 500,  # 240
+                "SubHistoryLength": 1000,  # 760
+                "SubHistoryTrainingLength": 975,  # 510
                 "Scaler": "Standard",  # Standard
                 'Kernel': '4a',  # 4a = 1.57, 4b=1.52
                 "LearningMode": 'static',  # 'static', 'online'
@@ -218,9 +218,9 @@ def runClassification(Portfolios, scanMode, mode):
             shList = []
             notProcessed = []
             for magicNum in targetSystems:
-                if magicNum in [0,2]:
+                if magicNum in [0]:
                     Classifier = "RNN"
-                elif magicNum in [1]:
+                elif magicNum in [1,2]:
                     Classifier = "GPC"
                 for selection in allProjectionsDF.columns:
                     try:
@@ -282,13 +282,14 @@ def Test(mode):
     magicNum = 1000
     # selection = 'PCA_250_3_Head'
     # selection = 'LLE_250_3_Head'
-    #selection = 'PCA_250_0'
+    selection = 'PCA_250_0'
     #selection = 'PCA_250_19'
     #selection = 'PCA_ExpWindow25_0' #
-    selection = 'PCA_ExpWindow25_19' # 6,7 --> 0.7+
+    #selection = 'PCA_ExpWindow25_19' # 6,7 --> 0.7+
+    #selection = 'LLE_ExpWindow25_0' #
     #selection = 'RP'
     df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-    #df = pd.read_csv("E:/PyPhD\PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+    #df = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
     #allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
@@ -305,11 +306,11 @@ def Test(mode):
         params = {
             "model": "GPC",
             "HistLag": 0,
-            "InputSequenceLength": 25,  # 240
-            "SubHistoryLength": 250,  # 760
-            "SubHistoryTrainingLength": 245,  # 510
+            "InputSequenceLength": 5,  # 240
+            "SubHistoryLength": 300,  # 760
+            "SubHistoryTrainingLength": 295,  # 510
             "Scaler": "Standard",  # Standard
-            'Kernel': '4b', #4a = 1.57, 4b=1.52
+            'Kernel': '0',
             "LearningMode": 'static',  # 'static', 'online'
             "modelNum": magicNum
         }
@@ -349,11 +350,11 @@ if __name__ == '__main__':
     #runClassification("Projections", 'Main', "runParallel")
     #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
-    #runClassification("globalProjections", 'Main', "run")
+    #runClassification("globalProjections", 'Main', "runParallel")
     #runClassification("globalProjections", 'Main', "report")
     #runClassification('globalProjections', 'ScanNotProcessed', "")
-    runClassification("Finalists", 'Main', "runParallel")
-    #runClassification("FinalistsProjections", 'Main', "report")
+    #runClassification("Finalists", 'Main', "runParallel")
+    #runClassification("Finalists", 'Main', "report")
 
-    #Test("run")
-    #Test("read")
+    Test("run")
+    Test("read")
