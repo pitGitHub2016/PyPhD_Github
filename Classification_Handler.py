@@ -40,7 +40,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 calcMode = 'runParallel'
 #calcMode = 'read'
 pnlCalculator = 1
-targetSystems = [1]#[0,1]
+targetSystems = [2]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -154,11 +154,11 @@ def runClassification(Portfolios, scanMode, mode):
             paramsSetup = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 500,  # 240
-                "SubHistoryLength": 1000,  # 760
-                "SubHistoryTrainingLength": 975,  # 510
+                "InputSequenceLength": 5,  # 240 || 5
+                "SubHistoryLength": 300,  # 760 || 300
+                "SubHistoryTrainingLength": 295,  # 510 || 295
                 "Scaler": "Standard",  # Standard
-                'Kernel': '4a',  # 4a = 1.57, 4b=1.52
+                'Kernel': '0',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
@@ -282,10 +282,10 @@ def Test(mode):
     magicNum = 1000
     # selection = 'PCA_250_3_Head'
     # selection = 'LLE_250_3_Head'
-    selection = 'PCA_250_0'
+    #selection = 'PCA_250_0'
     #selection = 'PCA_250_19'
     #selection = 'PCA_ExpWindow25_0' #
-    #selection = 'PCA_ExpWindow25_19' # 6,7 --> 0.7+
+    selection = 'PCA_ExpWindow25_19' #
     #selection = 'LLE_ExpWindow25_0' #
     #selection = 'RP'
     df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
@@ -306,9 +306,9 @@ def Test(mode):
         params = {
             "model": "GPC",
             "HistLag": 0,
-            "InputSequenceLength": 5,  # 240
-            "SubHistoryLength": 300,  # 760
-            "SubHistoryTrainingLength": 295,  # 510
+            "InputSequenceLength": 5,  # 240 || 5
+            "SubHistoryLength": 300,  # 760 || 300
+            "SubHistoryTrainingLength": 295,  # 510 || 295
             "Scaler": "Standard",  # Standard
             'Kernel': '0',
             "LearningMode": 'static',  # 'static', 'online'
@@ -344,9 +344,8 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    #runClassification("ClassicPortfolios", 'Main', "runSerial")
-    #runClassification("ClassicPortfolios", 'Main', "runParallel")
-    #runClassification("ClassicPortfolios", 'Main', "report")
+    runClassification("ClassicPortfolios", 'Main', "runParallel")
+    runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "runParallel")
     #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
@@ -356,5 +355,5 @@ if __name__ == '__main__':
     #runClassification("Finalists", 'Main', "runParallel")
     #runClassification("Finalists", 'Main', "report")
 
-    Test("run")
-    Test("read")
+    #Test("run")
+    #Test("read")
