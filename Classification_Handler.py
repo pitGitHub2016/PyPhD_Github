@@ -92,9 +92,9 @@ def ClassificationProcess(argList):
         probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
         sigDF = sigDF["Predicted_Test_" + selection]
 
-        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] > 0.7)] = 0
-        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] > 0.7)] = 1
-        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] > 0.7)] = -1
+        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= 0.7)] = 0
+        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= 0.7)] = 1
+        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= 0.7)] = -1
 
     sigDF.columns = ["ScaledSignal"]
 
@@ -290,17 +290,17 @@ def runClassification(Portfolios, scanMode, mode):
 
 def Test(mode):
     magicNum = 1000
-    selection = 'PCA_250_3_Head'
+    #selection = 'PCA_250_3_Head'
     # selection = 'LLE_250_3_Head'
     #selection = 'PCA_250_0'
-    #selection = 'PCA_250_19'
+    selection = 'PCA_250_19'
     #selection = 'PCA_ExpWindow25_0' #
     #selection = 'PCA_ExpWindow25_19' #
     #selection = 'LLE_ExpWindow25_0' #
     #selection = 'RP'
-    #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-    df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+    #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
     #allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
     #allProjectionsDF.columns = ["RP"]
@@ -316,9 +316,9 @@ def Test(mode):
         params = {
             "model": "GPC",
             "HistLag": 0,
-            "InputSequenceLength": 240,  # 240 || 5
-            "SubHistoryLength": 760,  # 760 || 300
-            "SubHistoryTrainingLength": 510,  # 510 || 295
+            "InputSequenceLength": 5,  # 240 || 5
+            "SubHistoryLength": 300,  # 760 || 300
+            "SubHistoryTrainingLength": 295,  # 510 || 295
             "Scaler": "Standard",  # Standard
             'Kernel': '0',
             "LearningMode": 'static',  # 'static', 'online'
@@ -337,12 +337,14 @@ def Test(mode):
     elif mode == 'read':
 
         sigDF = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
-        probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
-        sigDF = sigDF["Predicted_Test_"+selection]
 
-        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] > 0.7)] = 0
-        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] > 0.7)] = 1
-        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] > 0.7)] = -1
+        probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
+        sigDF = sigDF["Predicted_Test_" + selection]
+
+        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= 0.7)] = 0
+        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= 0.7)] = 1
+        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= 0.7)] = -1
+
         df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
         dfPnl = pd.concat([df_real_price_test_DF_Test, sigDF], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
@@ -358,8 +360,8 @@ if __name__ == '__main__':
 
     #runClassification("ClassicPortfolios", 'Main', "runParallel")
     #runClassification("ClassicPortfolios", 'Main', "report")
-    runClassification("Projections", 'Main', "runParallel")
-    runClassification("Projections", 'Main', "report")
+    #runClassification("Projections", 'Main', "runParallel")
+    #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
     #runClassification("globalProjections", 'Main', "runParallel")
     #runClassification("globalProjections", 'Main', "report")
@@ -367,5 +369,5 @@ if __name__ == '__main__':
     #runClassification("Finalists", 'Main', "runParallel")
     #runClassification("Finalists", 'Main', "report")
 
-    #Test("run")
-    #Test("read")
+    Test("run")
+    Test("read")

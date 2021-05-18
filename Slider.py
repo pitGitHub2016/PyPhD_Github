@@ -2679,21 +2679,6 @@ class Slider:
                             mainKernel = results.best_params_['kernel']
                         elif params['Kernel'] == '0':
                             mainKernel = 1 ** 2 * ConstantKernel()
-                        elif params['Kernel'] == '1':
-                            mainKernel = 1 ** 2 * DotProduct(sigma_0=1)
-                        elif params['Kernel'] == '2':
-                            mainKernel = 1 ** 2 * RBF(length_scale=1)
-                        elif params['Kernel'] == '3':
-                            mainKernel = 1 ** 2 * Matern(length_scale=1, nu=1.5)
-                        elif params['Kernel'] == '4':
-                            mainKernel = 1 ** 2 * RationalQuadratic(alpha=1, length_scale=1)
-                        elif params['Kernel'] == '4a':
-                            mainKernel = Matern(length_scale=1, nu=1.5)+RationalQuadratic(alpha=1, length_scale=1)
-                        elif params['Kernel'] == '5':
-                            mainKernel = 1 ** 2 * WhiteKernel()
-                        elif params['Kernel'] == '6':
-                            mainKernel = 1 ** 2 * (DotProduct(sigma_0=1) + Matern(length_scale=1, nu=1.5) +
-                                                   RationalQuadratic(alpha=1, length_scale=1))
                         model = GaussianProcessRegressor(kernel=mainKernel)
 
                     model.fit(X_train, y_train)
