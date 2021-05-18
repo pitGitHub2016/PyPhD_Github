@@ -37,10 +37,10 @@ except:
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 #calcMode = 'runSerial'
-calcMode = 'runParallel'
-#calcMode = 'read'
-pnlCalculator = 1
-targetSystems = [2]#[0,1]
+#calcMode = 'runParallel'
+calcMode = 'read'
+pnlCalculator = 3
+targetSystems = [1]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -74,17 +74,27 @@ def ClassificationProcess(argList):
     df_real_price_class_DF = out[4]
     df_real_price_test_DF = out[5]
 
-    sigDF = sig.copy()["Predicted_Test_" + selection]
+    sigDF = sig.copy()
     if pnlCalculator == 0:
+        sigDF = sigDF["Predicted_Test_" + selection]
         sigDF = (sigDF-sigDF.mean()) / sigDF.std()
     elif pnlCalculator == 1:
+        sigDF = sigDF["Predicted_Test_" + selection]
         sigDF[sigDF < 2/3] = 0
         sigDF[(sigDF >= 2/3) & (sigDF <= 1+1/3)] = 1
         sigDF[sigDF > 1+1/3] = -1
     elif pnlCalculator == 2:
+        sigDF = sigDF["Predicted_Test_" + selection]
         sigDF[sigDF < 0.1] = 0
         sigDF[(sigDF >= 0.95) & (sigDF <= 1.05)] = 1
         sigDF[sigDF > 1.9] = -1
+    elif pnlCalculator == 3:
+        probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
+        sigDF = sigDF["Predicted_Test_" + selection]
+
+        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] > 0.7)] = 0
+        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] > 0.7)] = 1
+        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] > 0.7)] = -1
 
     sigDF.columns = ["ScaledSignal"]
 
@@ -280,17 +290,17 @@ def runClassification(Portfolios, scanMode, mode):
 
 def Test(mode):
     magicNum = 1000
-    # selection = 'PCA_250_3_Head'
+    selection = 'PCA_250_3_Head'
     # selection = 'LLE_250_3_Head'
     #selection = 'PCA_250_0'
     #selection = 'PCA_250_19'
     #selection = 'PCA_ExpWindow25_0' #
-    selection = 'PCA_ExpWindow25_19' #
+    #selection = 'PCA_ExpWindow25_19' #
     #selection = 'LLE_ExpWindow25_0' #
     #selection = 'RP'
-    df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
+    #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-    # df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+    df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
     #allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
     #allProjectionsDF.columns = ["RP"]
@@ -306,9 +316,9 @@ def Test(mode):
         params = {
             "model": "GPC",
             "HistLag": 0,
-            "InputSequenceLength": 5,  # 240 || 5
-            "SubHistoryLength": 300,  # 760 || 300
-            "SubHistoryTrainingLength": 295,  # 510 || 295
+            "InputSequenceLength": 240,  # 240 || 5
+            "SubHistoryLength": 760,  # 760 || 300
+            "SubHistoryTrainingLength": 510,  # 510 || 295
             "Scaler": "Standard",  # Standard
             'Kernel': '0',
             "LearningMode": 'static',  # 'static', 'online'
@@ -327,10 +337,12 @@ def Test(mode):
     elif mode == 'read':
 
         sigDF = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
+        probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
         sigDF = sigDF["Predicted_Test_"+selection]
-        sigDF[sigDF < 2 / 3] = 0
-        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3)] = 1
-        sigDF[sigDF > 1 + 1 / 3] = -1
+
+        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] > 0.7)] = 0
+        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] > 0.7)] = 1
+        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] > 0.7)] = -1
         df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
         dfPnl = pd.concat([df_real_price_test_DF_Test, sigDF], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
@@ -344,10 +356,10 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    runClassification("ClassicPortfolios", 'Main', "runParallel")
-    runClassification("ClassicPortfolios", 'Main', "report")
-    #runClassification("Projections", 'Main', "runParallel")
-    #runClassification("Projections", 'Main', "report")
+    #runClassification("ClassicPortfolios", 'Main', "runParallel")
+    #runClassification("ClassicPortfolios", 'Main', "report")
+    runClassification("Projections", 'Main', "runParallel")
+    runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
     #runClassification("globalProjections", 'Main', "runParallel")
     #runClassification("globalProjections", 'Main', "report")
