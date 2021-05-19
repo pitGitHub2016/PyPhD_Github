@@ -26,6 +26,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 #calcMode = 'runParallel'
 calcMode = 'read'
 pnlCalculator = 3
+probaThr = 0.7
 targetSystems = [1]#[0,1]
 
 def ClassificationProcess(argList):
@@ -78,9 +79,10 @@ def ClassificationProcess(argList):
         probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
         sigDF = sigDF["Predicted_Test_" + selection]
 
-        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= 0.7)] = 0
-        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= 0.7)] = 1
-        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= 0.7)] = -1
+        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= probaThr)] = 0
+        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= probaThr)] = 1
+        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= probaThr)] = -1
+        sigDF[(sigDF != 0) & (sigDF != 1) & (sigDF != -1)] = np.nan
 
     sigDF.columns = ["ScaledSignal"]
 
@@ -98,7 +100,7 @@ def ClassificationProcess(argList):
     #time.sleep(3000)
 
     pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
-    #pnl = dfPnl["Real_Price"] * sl.sign(dfPnl["Sig"])
+    pnl = pnl.dropna()
     sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
     print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
 
@@ -232,6 +234,8 @@ def runClassification(Portfolios, scanMode, mode):
                         STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
 
                         ttestPair = st.ttest_ind(pnl[selection].values, pnl['RW'].values, equal_var=False)
+                        pnl_ttest_0 = st.ttest_1samp(pnl[selection].values, 0)
+                        rw_pnl_ttest_0 = st.ttest_1samp(pnl['RW'].values, 0)
                         statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
 
                         stats = pd.concat([statsMat.iloc[0, :], statsMat.iloc[1, :]], axis=0)
@@ -239,8 +243,9 @@ def runClassification(Portfolios, scanMode, mode):
                                        "RW_tConf", "RW_Std"]
                         stats[["Classifier_tConf", "RW_tConf"]] = stats[["Classifier_tConf", "RW_tConf"]].astype(str)
                         stats["selection"] = selection
-                        stats["ttestPair_statistic"] = np.round(ttestPair.statistic, 2)
-                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue, 2)
+                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue,2)
+                        stats["pnl_ttest_0_pvalue"] = np.round(pnl_ttest_0.pvalue, 2)
+                        stats["rw_pnl_ttest_0_value"] = np.round(rw_pnl_ttest_0.pvalue, 2)
                         stats["Classifier"] = Classifier
 
                         shList.append(stats)
@@ -290,6 +295,8 @@ def Test(mode):
     #df = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
     df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
+    #df = pd.read_csv("globalProjectionsDF_PCA.csv").set_index('Dates', drop=True)[selection]
+    #df = pd.read_csv("globalProjectionsDF_LLE.csv").set_index('Dates', drop=True)[selection]
     #allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
     #allProjectionsDF.columns = ["RP"]
     #allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
@@ -301,17 +308,40 @@ def Test(mode):
 
         print("len(df) = ", len(df))
 
-        params = {
-            "model": "GPC",
-            "HistLag": 0,
-            "InputSequenceLength": 250,  # 240 (main) || 5 (MR) ||
-            "SubHistoryLength": 500,  # 760 (main) || 500 (MR) ||
-            "SubHistoryTrainingLength": 500-25,  # 510 (main) || 500-25 (MR) ||
-            "Scaler": "Standard",  # Standard
-            'Kernel': '0',
-            "LearningMode": 'static',  # 'static', 'online'
-            "modelNum": magicNum
-        }
+        if magicNum == 1000:
+            params = {
+                "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 250,  # 240 (main) || 5 (MR) ||
+                "SubHistoryLength": 500,  # 760 (main) || 500 (MR) ||
+                "SubHistoryTrainingLength": 500-25,  # 510 (main) || 500-25 (MR) ||
+                "Scaler": "Standard",  # Standard
+                'Kernel': '0',
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
+            }
+
+        elif magicNum == 2000:
+
+            params = {
+                "model": "RNN",
+                "HistLag": 0,
+                "InputSequenceLength": 240,  # 240
+                "SubHistoryLength": 760,  # 760
+                "SubHistoryTrainingLength": 510,  # 510
+                "Scaler": "Standard",  # Standard
+                "epochsIn": 100,  # 100
+                "batchSIzeIn": 16,  # 16
+                "EarlyStopping_patience_Epochs": 10,  # 10
+                "LearningMode": 'static',  # 'static', 'online'
+                "medSpecs": [
+                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                ],
+                "modelNum": magicNum,
+                "CompilerSettings": ['adam', 'mean_squared_error'],
+            }
 
         out = sl.AI.gClassification(df, params)
 
@@ -329,24 +359,18 @@ def Test(mode):
         probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
         sigDF = sigDF["Predicted_Test_" + selection]
 
-        probThr = 0.7
+        probThr = 0.5
         sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= probThr)] = 0
         sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= probThr)] = 1
         sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= probThr)] = -1
-
-        #sigDF[(sigDF < 2 / 3)] = 0
-        #sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3)] = 1
-        #sigDF[(sigDF > 1 + 1 / 3)] = -1
-
-        #sigDF[sigDF < 0.1] = 0
-        #sigDF[(sigDF >= 0.95) & (sigDF <= 1.05)] = 1
-        #sigDF[sigDF > 1.9] = -1
+        sigDF[(sigDF != 0) & (sigDF != 1) & (sigDF != -1)] = 0
 
         df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
         dfPnl = pd.concat([df_real_price_test_DF_Test, sigDF], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
 
         pnl = dfPnl["real_price"] * dfPnl["predicted_price"]
+        #pnl = pnl.dropna()
         sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
         print(sh_pnl)
 
