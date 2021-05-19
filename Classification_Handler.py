@@ -1,23 +1,9 @@
 import pandas as pd, numpy as np, matplotlib.pyplot as plt
-import sqlite3, time, pickle
+import sqlite3, time, pickle, os
 try:
     from tqdm import tqdm
-    from hurst import compute_Hc
 except:
     pass
-from itertools import combinations
-from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
-from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.decomposition import PCA
-from statsmodels.tsa.arima_model import ARIMA
-from statsmodels.tsa.stattools import adfuller
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import LSTM
-from keras.layers import Dropout
-from keras.callbacks import History
-import warnings, os, tensorflow as tf
 from scipy import stats as st
 from Slider import Slider as sl
 import matplotlib as mpl
