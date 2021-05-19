@@ -43,7 +43,7 @@ def semaOnProjections(space, mode):
     elif space == 'Finalists':
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_ExpWindow25_0', 'PCA_ExpWindow25_2']]
 
-    allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
+    #allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
 
     if mode == 'Direct':
 
@@ -75,72 +75,16 @@ def semaOnProjections(space, mode):
 
             pnlSharpes = pnlSharpes.set_index("index", drop=True)
             pnlSharpes = pd.concat([pnlSharpes, pnl.mean()*100*252, tConfDf_sema.astype(str), pnl.std()*100*np.sqrt(252),
-                                    rw_pnl.mean()*100*252, tConfDf_rw.astype(str), rw_pnl.std()*100*np.sqrt(252), tPairsDF], axis=1)
+                                    rw_pnlSharpes, rw_pnl.mean()*100*252, tConfDf_rw.astype(str), rw_pnl.std()*100*np.sqrt(252), tPairsDF], axis=1)
             pnlSharpes.columns = ["pnlSharpes", "Lag", "pnl_mean", "tConfDf_sema", "pnl_std",
-                                    "rw_pnl_mean", "tConfDf_rw", "rw_pnl_std", "ttestPair_pvalue","pnl_ttest_0_pvalue", "rw_pnl_ttest_0_pvalue"]
-            pnlSharpes = pnlSharpes[["Lag", "pnlSharpes", "pnl_mean", "tConfDf_sema", "pnl_std",
-                                    "rw_pnl_mean", "tConfDf_rw", "rw_pnl_std", "ttestPair_pvalue","pnl_ttest_0_pvalue", "rw_pnl_ttest_0_pvalue"]]
+                                    "rw_pnl_sharpe", "rw_pnl_mean", "tConfDf_rw", "rw_pnl_std", "ttestPair_pvalue","pnl_ttest_0_pvalue", "rw_pnl_ttest_0_pvalue"]
             shSema.append(pnlSharpes)
     
         shSemaDF = pd.concat(shSema).round(2)
         shSemaDF.to_sql('semapnlSharpes_'+space, conn, if_exists='replace')
-        shSemaDFFiltered = shSemaDF[shSemaDF["ttestPair_pvalue"] < 0.05]
-        shSemaDFFiltered.to_sql('semapnlSharpes_tFiltered_'+space, conn,if_exists='replace')
-
-def Test(mode):
-    if mode == 'GPC':
-        selection = 'PCA_ExpWindow25_2'
-        trainLength = 0.3
-        tw = 250
-        df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-        rwDF = pd.read_sql('SELECT * FROM PCA_randomWalkPnlRSprojections_tw_ExpWindow25', conn).set_index('Dates',
-                                                                                                          drop=True).iloc[
-               round(0.3 * len(df)):, 2]
-        medSh = (np.sqrt(252) * sl.sharpe(rwDF)).round(4)
-        print("Random Walk Sharpe : ", medSh)
-        # GaussianProcess_Results = sl.GPC_Walk(df, trainLength, tw)
-        magicNum = 1
-        params = {
-            "TrainWindow": 5,
-            "LearningMode": 'static',
-            "Kernel": "DotProduct",
-            "modelNum": magicNum,
-            "TrainEndPct": 0.3,
-            "writeLearnStructure": 0
-        }
-        out = sl.AI.gGPC(df, params)
-
-        out[0].to_sql('df_real_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                      if_exists='replace')
-        out[1].to_sql('df_predicted_price_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                      if_exists='replace')
-        out[2].to_sql('df_predicted_proba_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn,
-                      if_exists='replace')
-        df_real_price = out[0]
-        df_predicted_price = out[1]
-        df_predicted_price.columns = df_real_price.columns
-        # Returns Prediction
-        sig = sl.sign(df_predicted_price)
-        pnl = sig * df_real_price
-        pnl.to_sql('pnl_GPC_TEST_' + params["Kernel"] + "_" + selection + str(magicNum), conn, if_exists='replace')
-        print("pnl_GPC_TEST_sharpe = ", np.sqrt(252) * sl.sharpe(pnl))
-        sl.cs(pnl).plot()
-        print(out[2].tail(10))
-        out[2].plot()
-        plt.show()
-
-    elif mode == 'GPR':
-        selection = 'PCA_ExpWindow25_2'
-        trainLength = 0.3
-        tw = 250
-        df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-        out = sl.GPR_Walk(df, 0.3, "RBF_DotProduct", 250)
 
 #####################################################
 semaOnProjections("ClassicPortfolios", "Direct")
-#semaOnProjections("Projections", "Direct")
-#semaOnProjections("globalProjections", "Direct")
-#semaOnProjections("Projections", "BasketsCombos")
-#semaOnProjections("Projections", "MtM")
-#semaOnProjections("globalProjections", "MtM")
+semaOnProjections("Projections", "Direct")
+semaOnProjections("globalProjections", "Direct")
 

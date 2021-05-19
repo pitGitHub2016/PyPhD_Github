@@ -280,7 +280,7 @@ def runClassification(Portfolios, scanMode, mode):
         p.join()
 
 def Test(mode):
-    magicNum = 1000
+    magicNum = 2000
     selection = 'PCA_ExpWindow25_3_Head'
     #selection = 'LLE_ExpWindow25_3_Head'
     #selection = 'PCA_250_3_Head'
@@ -302,45 +302,44 @@ def Test(mode):
     #allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
     #df = allProjectionsDF[selection]
 
-    #df_Main = df_Main.iloc[-500:]
-
     if mode == 'run':
 
         print("len(df) = ", len(df))
 
         if magicNum == 1000:
+
             params = {
-                "model": "GPC",
+                "model": "RNN",
                 "HistLag": 0,
-                "InputSequenceLength": 250,  # 240 (main) || 5 (MR) ||
-                "SubHistoryLength": 500,  # 760 (main) || 500 (MR) ||
-                "SubHistoryTrainingLength": 500-25,  # 510 (main) || 500-25 (MR) ||
+                "InputSequenceLength": 5,  # 240
+                "SubHistoryLength": 500,  # 760
+                "SubHistoryTrainingLength": 500-25,  # 510
                 "Scaler": "Standard",  # Standard
-                'Kernel': '0',
+                "epochsIn": 100,  # 100
+                "batchSIzeIn": 5,  # 16
+                "EarlyStopping_patience_Epochs": 10,  # 10
                 "LearningMode": 'static',  # 'static', 'online'
-                "modelNum": magicNum
+                "medSpecs": [
+                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
+                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                ],
+                "modelNum": magicNum,
+                "CompilerSettings": ['adam', 'mean_squared_error'],
             }
 
         elif magicNum == 2000:
 
             params = {
-                "model": "RNN",
+                "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 240,  # 240
-                "SubHistoryLength": 760,  # 760
-                "SubHistoryTrainingLength": 510,  # 510
+                "InputSequenceLength": 5,  # 240 (main) || 5 (MR) ||
+                "SubHistoryLength": 500,  # 760 (main) || 500 (MR) ||
+                "SubHistoryTrainingLength": 500 - 25,  # 510 (main) || 500-25 (MR) ||
                 "Scaler": "Standard",  # Standard
-                "epochsIn": 100,  # 100
-                "batchSIzeIn": 16,  # 16
-                "EarlyStopping_patience_Epochs": 10,  # 10
+                'Kernel': '0',
                 "LearningMode": 'static',  # 'static', 'online'
-                "medSpecs": [
-                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
-                ],
-                "modelNum": magicNum,
-                "CompilerSettings": ['adam', 'mean_squared_error'],
+                "modelNum": magicNum
             }
 
         out = sl.AI.gClassification(df, params)

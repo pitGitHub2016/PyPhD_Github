@@ -76,7 +76,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
     elif Portfolios == 'Finalists':
         allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
 
-    allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
+    #allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
 
     orderList = [(1, 0, 0), (2, 0, 0), (3, 0, 0)]
     #orderList = [(2, 0, 1)]
@@ -100,12 +100,11 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
             shList = []
             for orderIn in orderList:
                 for selection in allProjectionsDF.columns:
+                    print(selection)
                     try:
                         pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw),
                                           conn).set_index('Dates', drop=True).iloc[round(startPct*len(allProjectionsDF)):]
                         AR_paramList = pickle.load( open( selection+"_ARIMA_arparamList_"+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_'+str(rw)+".p", "rb" ) )
-                        print(AR_paramList)
-                        time.sleep(3000)
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
 
@@ -134,12 +133,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
                         print(e)
                         notProcessed.append(selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw))
             shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(2)
-            shDF = shDF[["order", "ARIMA_sh","ARIMA_Mean","ARIMA_tConf","ARIMA_Std","RW_Mean","RW_tConf","RW_Std",
-                         "ttestPair_pvalue","pnl_ttest_0_pvalue","rw_pnl_ttest_0_value"]]
             shDF.to_sql(Portfolios+'_sh_ARIMA_pnl_' + str(rw), conn, if_exists='replace')
-            shDF_Filtered = shDF[shDF["ttestPair_pvalue"] < 0.05]
-
-            shDF_Filtered.to_sql(Portfolios+'_sh_ARIMA_pnl_tFiltered_' + str(rw), conn, if_exists='replace')
 
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
             print("Len notProcessedDF = ", len(notProcessedDF))
@@ -219,10 +213,10 @@ def Test(mode):
 ARIMAonPortfolios("ClassicPortfolios", 'Main', "report")
 #ARIMAonPortfolios("ClassicPortfolios", 'ScanNotProcessed', "")
 #ARIMAonPortfolios("Projections", 'Main', "run")
-#ARIMAonPortfolios("Projections", 'Main', "report")
+ARIMAonPortfolios("Projections", 'Main', "report")
 #ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("globalProjections", 'Main', "run")
-#ARIMAonPortfolios("globalProjections", 'Main', "report")
+ARIMAonPortfolios("globalProjections", 'Main', "report")
 #ARIMAonPortfolios("globalProjections", "ScanNotProcessed", "")
 #ARIMAonPortfolios("Projections", "ReportSpecificStatistics", "")
 #ARIMAonPortfolios("Finalists", 'Main', "run")
