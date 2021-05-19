@@ -2644,9 +2644,14 @@ class Slider:
                             print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
                             mainKernel = results.best_params_['kernel']
 
-                        if params['Kernel'] == '0':
+                        elif params['Kernel'] == '0':
                             mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
                                                   1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
+                        elif params['Kernel'] == '1':
+                            # Add Noise
+                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
+                                                  1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()+\
+                                         1**2 * WhiteKernel()
                         ##################### Running with Greedy Search Best Model ##################
                         model = GaussianProcessClassifier(kernel=mainKernel, random_state=0)
                     # Fitting the GPC Model to the Training set
@@ -2677,8 +2682,15 @@ class Slider:
                                 print(gpc_param['kernel'])
                             print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
                             mainKernel = results.best_params_['kernel']
+
                         elif params['Kernel'] == '0':
-                            mainKernel = 1 ** 2 * ConstantKernel()
+                            mainKernel = 1 ** 2 * Matern(length_scale=1, nu=0.5) + 1 ** 2 * DotProduct(sigma_0=1) + \
+                                         1 ** 2 * RationalQuadratic(alpha=1, length_scale=1) + 1 ** 2 * ConstantKernel()
+                        elif params['Kernel'] == '1':
+                            # Add Noise
+                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
+                                                  1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()+\
+                                         1**2 * WhiteKernel()
                         model = GaussianProcessRegressor(kernel=mainKernel)
 
                     model.fit(X_train, y_train)
