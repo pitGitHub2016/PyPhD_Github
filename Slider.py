@@ -2486,9 +2486,17 @@ class Slider:
                     y_pred_te, y_pred_te_std = model.predict(X_test, return_std=True)
 
                 ############################### TRAIN PREDICT #################################
-                predicted_price_train = model.predict(X_train)
-                if params["model"] == "GPC":
-                    predicted_price_proba_train = model.predict_proba(X_train)
+                try:
+                    predicted_price_train = model.predict(X_train)
+                    if params["model"] == "GPC":
+                        predicted_price_proba_train = model.predict_proba(X_train)
+                except Exception as e:
+                    print(e)
+                    predicted_price_train = np.zeros(X_train.shape[0])
+                    if params["model"] == "GPC":
+                        predicted_price_proba_train = np.zeros((X_train.shape[0], len(model.classes_)))
+                #print(predicted_price_train.shape, ", ", (np.zeros(X_train.shape[0])).shape)
+                #print(predicted_price_proba_train.shape, ", ", (np.zeros((X_train.shape[0], len(model.classes_)))).shape)
 
                 df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
                                                         columns=['Predicted_Train_'+str(x) for x in outNaming])
@@ -2502,9 +2510,16 @@ class Slider:
                                                    columns=['Real_Train_'+str(x) for x in outNaming])
                 ############################### TEST PREDICT ##################################
                 if params["LearningMode"] == 'static':
-                    predicted_price_test = model.predict(X_test)
-                    if params["model"] == "GPC":
-                        predicted_price_proba_test = model.predict_proba(X_test)
+
+                    try:
+                        predicted_price_test = model.predict(X_test)
+                        if params["model"] == "GPC":
+                            predicted_price_proba_test = model.predict_proba(X_test)
+                    except Exception as e:
+                        print(e)
+                        predicted_price_test = np.zeros(X_test.shape[0])
+                        if params["model"] == "GPC":
+                            predicted_price_proba_test = np.zeros((X_test.shape[0], len(model.classes_)))
 
                     df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test,
                                                            columns=['Predicted_Test_'+x for x in outNaming])

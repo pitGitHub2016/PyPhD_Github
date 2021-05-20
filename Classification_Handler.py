@@ -333,7 +333,7 @@ def Test(mode):
             params = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 5,  # 240 (main) || 5 (MR) ||
+                "InputSequenceLength": 500,  # 240 (main) || 5 (MR) ||
                 "SubHistoryLength": 500,  # 760 (main) || 500 (MR) ||
                 "SubHistoryTrainingLength": 500 - 25,  # 510 (main) || 500-25 (MR) ||
                 "Scaler": "Standard",  # Standard
@@ -358,18 +358,18 @@ def Test(mode):
         probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
         sigDF = sigDF["Predicted_Test_" + selection]
 
-        probThr = 0.5
+        probThr = 0.7
         sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= probThr)] = 0
         sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= probThr)] = 1
         sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= probThr)] = -1
-        sigDF[(sigDF != 0) & (sigDF != 1) & (sigDF != -1)] = 0
+        sigDF[(sigDF != 0) & (sigDF != 1) & (sigDF != -1)] = np.nan
 
         df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
         dfPnl = pd.concat([df_real_price_test_DF_Test, sigDF], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
 
         pnl = dfPnl["real_price"] * dfPnl["predicted_price"]
-        #pnl = pnl.dropna()
+        pnl = pnl.dropna()
         sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
         print(sh_pnl)
 
