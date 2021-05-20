@@ -2434,9 +2434,7 @@ class Slider:
                                                   1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
                         elif params['Kernel'] == '1':
                             # Add Noise
-                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
-                                                  1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()+\
-                                         1**2 * WhiteKernel()
+                            mainKernel = RBF(length_scale=1)
                         ##################### Running with Greedy Search Best Model ##################
                         model = GaussianProcessClassifier(kernel=mainKernel, random_state=0)
                     # Fitting the GPC Model to the Training set

@@ -23,8 +23,8 @@ except:
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 #calcMode = 'runSerial'
-#calcMode = 'runParallel'
-calcMode = 'read'
+calcMode = 'runParallel'
+#calcMode = 'read'
 pnlCalculator = 3
 probaThr = 0.7
 targetSystems = [2]#[0,1]
@@ -142,7 +142,7 @@ def runClassification(Portfolios, scanMode, mode):
                 "SubHistoryLength": 760,  # 760
                 "SubHistoryTrainingLength": 510,  # 510
                 "Scaler": "Standard",  # Standard
-                'Kernel': '6',
+                'Kernel': '0',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
@@ -152,11 +152,11 @@ def runClassification(Portfolios, scanMode, mode):
             paramsSetup = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 5,  # 240 || 5
-                "SubHistoryLength": 500,  # 760 || 300
-                "SubHistoryTrainingLength": 500-25,  # 510 || 295
+                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
+                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
+                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
                 "Scaler": "Standard",  # Standard
-                'Kernel': '0',
+                'Kernel': '1',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
@@ -223,12 +223,12 @@ def runClassification(Portfolios, scanMode, mode):
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql(
-                        'SELECT * FROM pnl_'+Classifier+'_' + selection + '_' + str(magicNum), conn).set_index('Dates', drop=True)
+                        'SELECT * FROM pnl_'+Classifier+'_' + selection + '_' + str(magicNum), conn).set_index('Dates', drop=True).dropna()
 
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
 
-                        sh = (np.sqrt(252) * sl.sharpe(pnl)).round(2)
+                        sh = np.sqrt(252) * sl.sharpe(pnl)
                         MEANs = (252 * pnl.mean() * 100).round(2)
                         tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252 * 100).set_index("index",drop=True).round(2)
                         STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
@@ -246,7 +246,7 @@ def runClassification(Portfolios, scanMode, mode):
                         stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue,2)
                         stats["pnl_ttest_0_pvalue"] = np.round(pnl_ttest_0.pvalue, 2)
                         stats["rw_pnl_ttest_0_value"] = np.round(rw_pnl_ttest_0.pvalue, 2)
-                        stats["Classifier"] = Classifier
+                        stats["Classifier"] = Classifier+str(magicNum)
 
                         shList.append(stats)
                     except Exception as e:
@@ -281,19 +281,19 @@ def runClassification(Portfolios, scanMode, mode):
 
 def Test(mode):
     magicNum = 2000
-    selection = 'PCA_ExpWindow25_3_Head'
+    #selection = 'PCA_ExpWindow25_3_Head'
     #selection = 'LLE_ExpWindow25_3_Head'
     #selection = 'PCA_250_3_Head'
     #selection = 'LLE_250_3_Head'
     #selection = 'PCA_250_0'
-    #selection = 'PCA_250_19'
+    selection = 'PCA_250_19'
     #selection = 'PCA_ExpWindow25_0' #
     #selection = 'PCA_ExpWindow25_19' #
     #selection = 'LLE_ExpWindow25_0' #
     #selection = 'RP'
     #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
-    #df = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
-    df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
+    df = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)[selection]
+    #df = pd.read_sql('SELECT * FROM globalProjectionsDF_PCA', conn).set_index('Dates', drop=True)[selection]
     # df = pd.read_sql('SELECT * FROM globalProjectionsDF_LLE', conn).set_index('Dates', drop=True)[selection]
     #df = pd.read_csv("globalProjectionsDF_PCA.csv").set_index('Dates', drop=True)[selection]
     #df = pd.read_csv("globalProjectionsDF_LLE.csv").set_index('Dates', drop=True)[selection]
@@ -333,11 +333,11 @@ def Test(mode):
             params = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 1000,  # 240 (main) || 5 (MR) ||
-                "SubHistoryLength": 1000,  # 760 (main) || 500 (MR) ||
-                "SubHistoryTrainingLength": 1000-25,  # 510 (main) || 500-25 (MR) ||
+                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
+                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
+                "SubHistoryTrainingLength": 250-1,  # 510 (main) || 250-1 (Siettos) ||
                 "Scaler": "Standard",  # Standard
-                'Kernel': '0',
+                'Kernel': '1',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
