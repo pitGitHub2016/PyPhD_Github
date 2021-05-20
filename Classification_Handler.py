@@ -27,7 +27,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 calcMode = 'read'
 pnlCalculator = 3
 probaThr = 0.7
-targetSystems = [1]#[0,1]
+targetSystems = [2]#[0,1]
 
 def ClassificationProcess(argList):
     selection = argList[0]
@@ -153,8 +153,8 @@ def runClassification(Portfolios, scanMode, mode):
                 "model": "GPC",
                 "HistLag": 0,
                 "InputSequenceLength": 5,  # 240 || 5
-                "SubHistoryLength": 300,  # 760 || 300
-                "SubHistoryTrainingLength": 295,  # 510 || 295
+                "SubHistoryLength": 500,  # 760 || 300
+                "SubHistoryTrainingLength": 500-25,  # 510 || 295
                 "Scaler": "Standard",  # Standard
                 'Kernel': '0',
                 "LearningMode": 'static',  # 'static', 'online'
@@ -333,9 +333,9 @@ def Test(mode):
             params = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 500,  # 240 (main) || 5 (MR) ||
-                "SubHistoryLength": 500,  # 760 (main) || 500 (MR) ||
-                "SubHistoryTrainingLength": 500 - 25,  # 510 (main) || 500-25 (MR) ||
+                "InputSequenceLength": 1000,  # 240 (main) || 5 (MR) ||
+                "SubHistoryLength": 1000,  # 760 (main) || 500 (MR) ||
+                "SubHistoryTrainingLength": 1000-25,  # 510 (main) || 500-25 (MR) ||
                 "Scaler": "Standard",  # Standard
                 'Kernel': '0',
                 "LearningMode": 'static',  # 'static', 'online'
