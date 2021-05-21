@@ -378,8 +378,8 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    #runClassification("ClassicPortfolios", 'Main', "runParallel")
-    #runClassification("ClassicPortfolios", 'Main', "report")
+    runClassification("ClassicPortfolios", 'Main', "runParallel")
+    runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "runParallel")
     #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
@@ -389,5 +389,5 @@ if __name__ == '__main__':
     #runClassification("Finalists", 'Main', "runParallel")
     #runClassification("Finalists", 'Main', "report")
 
-    Test("run")
-    Test("read")
+    #Test("run")
+    #Test("read")
