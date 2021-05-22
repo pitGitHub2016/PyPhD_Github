@@ -111,40 +111,24 @@ def runClassification(Portfolios, scanMode, mode):
 
         magicNum = int(magicNum)
 
-        if magicNum == 0:
+        if magicNum == 1:
 
             paramsSetup = {
                 "model": "RNN",
                 "HistLag": 0,
-                "InputSequenceLength": 240,  # 240
-                "SubHistoryLength": 760,  # 760
-                "SubHistoryTrainingLength": 510,  # 510
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 250-1,  # 510
                 "Scaler": "Standard",  # Standard
                 "epochsIn": 100,  # 100
-                "batchSIzeIn": 16,  # 16
+                "batchSIzeIn": 10,  # 16
                 "EarlyStopping_patience_Epochs": 10,  # 10
                 "LearningMode": 'static',  # 'static', 'online'
                 "medSpecs": [
-                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                    {"LayerType": "LSTM", "units": 25, "RsF": False, "Dropout": 0.25}
                 ],
                 "modelNum": magicNum,
                 "CompilerSettings": ['adam', 'mean_squared_error'],
-            }
-
-        elif magicNum == 1:
-
-            paramsSetup = {
-                "model": "GPC",
-                "HistLag": 0,
-                "InputSequenceLength": 240,  # 240
-                "SubHistoryLength": 760,  # 760
-                "SubHistoryTrainingLength": 510,  # 510
-                "Scaler": "Standard",  # Standard
-                'Kernel': '0',
-                "LearningMode": 'static',  # 'static', 'online'
-                "modelNum": magicNum
             }
 
         elif magicNum == 2:
@@ -216,9 +200,9 @@ def runClassification(Portfolios, scanMode, mode):
             shList = []
             notProcessed = []
             for magicNum in targetSystems:
-                if magicNum in [0]:
+                if magicNum in [1]:
                     Classifier = "RNN"
-                elif magicNum in [1,2]:
+                elif magicNum in [2]:
                     Classifier = "GPC"
                 for selection in allProjectionsDF.columns:
                     try:
@@ -383,8 +367,8 @@ if __name__ == '__main__':
     #runClassification("Projections", 'Main', "runParallel")
     #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
-    #runClassification("globalProjections", 'Main', "runParallel")
-    #runClassification("globalProjections", 'Main', "report")
+    runClassification("globalProjections", 'Main', "runParallel")
+    runClassification("globalProjections", 'Main', "report")
     #runClassification('globalProjections', 'ScanNotProcessed', "")
     #runClassification("Finalists", 'Main', "runParallel")
     #runClassification("Finalists", 'Main', "report")
