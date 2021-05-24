@@ -264,15 +264,15 @@ def runClassification(Portfolios, scanMode, mode):
         p.join()
 
 def Test(mode):
-    magicNum = 2000
+    magicNum = 3000
     #selection = 'PCA_ExpWindow25_3_Head'
     #selection = 'LLE_ExpWindow25_3_Head'
     #selection = 'PCA_250_3_Head'
     #selection = 'LLE_250_3_Head'
     #selection = 'PCA_250_0'
-    selection = 'PCA_250_19'
+    #selection = 'PCA_250_19'
     #selection = 'PCA_ExpWindow25_0' #
-    #selection = 'PCA_ExpWindow25_19' #
+    selection = 'PCA_ExpWindow25_19' #
     #selection = 'LLE_ExpWindow25_0' #
     #selection = 'RP'
     #df = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[selection]
@@ -324,29 +324,58 @@ def Test(mode):
                 "modelNum": magicNum
             }
 
-        out = sl.AI.gClassification(df, params)
+            out = sl.AI.gClassification(df, params)
 
-        out[0].to_sql('df_predicted_price_train_DF_Test_'+selection, conn, if_exists='replace')
-        out[1].to_sql('df_real_price_class_train_DF_Test_'+selection, conn, if_exists='replace')
-        out[2].to_sql('df_real_price_train_DF_Test_'+selection, conn, if_exists='replace')
-        out[3].to_sql('df_predicted_price_test_DF_Test_'+selection, conn, if_exists='replace')
-        out[4].to_sql('df_real_price_class_test_DF_Test_'+selection, conn, if_exists='replace')
-        out[5].to_sql('df_real_price_test_DF_Test_'+selection, conn, if_exists='replace')
+        elif magicNum == 3000:
+
+            params = {
+                "model": "GPR",
+                "HistLag": 0,
+                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
+                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
+                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
+                "Mode": "Spacial",
+                "Scaler": "Standard",  # Standard
+                'Kernel': '1',
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
+            }
+
+            out = sl.AI.gGPRegression(df, params)
+
+        out[0].to_sql('df_predicted_price_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
+        out[1].to_sql('df_real_price_class_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
+        out[2].to_sql('df_real_price_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
+        out[3].to_sql('df_predicted_price_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
+        out[4].to_sql('df_real_price_class_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
+        out[5].to_sql('df_real_price_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
+        out[6].to_sql('df_score_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
 
     elif mode == 'read':
 
-        sigDF = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
+        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection+"_"+str(magicNum), conn).set_index('Dates', drop=True)
+        sigDF = pd.read_sql('SELECT * FROM df_predicted_price_test_DF_Test_'+selection+"_"+str(magicNum), conn).set_index('Dates', drop=True)
+        scoreDF = pd.read_sql('SELECT * FROM df_score_test_DF_Test_'+selection+"_"+str(magicNum), conn).set_index('index', drop=True)
 
-        probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
-        sigDF = sigDF["Predicted_Test_" + selection]
+        #pd.concat([sl.cs(df_real_price_test_DF_Test), sl.cs(sigDF)], axis=1).plot()
+        #sl.cs(df_real_price_test_DF_Test).plot()
+        #sl.cs(sigDF).plot()
+        #scoreDF.plot()
+        #plt.show()
+        #time.sleep(3000)
 
-        probThr = 0.7
-        sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= probThr)] = 0
-        sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= probThr)] = 1
-        sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= probThr)] = -1
-        sigDF[(sigDF != 0) & (sigDF != 1) & (sigDF != -1)] = np.nan
+        if magicNum in [13000]:
+            sigDF = sigDF["Predicted_Test_" + selection]
+            sigDF = sl.sign(sigDF)
+        else:
+            probThr = 0.5
+            probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
+            sigDF = sigDF["Predicted_Test_" + selection]
+            sigDF[(sigDF < 2 / 3) & (probDF["Predicted_Proba_Test_0.0"] >= probThr)] = 0
+            sigDF[(sigDF >= 2 / 3) & (sigDF <= 1 + 1 / 3) & (probDF["Predicted_Proba_Test_1.0"] >= probThr)] = 1
+            sigDF[(sigDF > 1 + 1 / 3) & (probDF["Predicted_Proba_Test_2.0"] >= probThr)] = -1
+            sigDF[(sigDF != 0) & (sigDF != 1) & (sigDF != -1)] = np.nan
 
-        df_real_price_test_DF_Test = pd.read_sql('SELECT * FROM df_real_price_test_DF_Test_'+selection, conn).set_index('Dates', drop=True)
         dfPnl = pd.concat([df_real_price_test_DF_Test, sigDF], axis=1)
         dfPnl.columns = ["real_price", "predicted_price"]
 
@@ -367,9 +396,9 @@ if __name__ == '__main__':
     #runClassification('Projections', 'ScanNotProcessed', "")
     #runClassification("globalProjections", 'Main', "runParallel")
     #runClassification("globalProjections", 'Main', "report")
-    runClassification('globalProjections', 'ScanNotProcessed', "")
+    #runClassification('globalProjections', 'ScanNotProcessed', "")
     #runClassification("Finalists", 'Main', "runParallel")
     #runClassification("Finalists", 'Main', "report")
 
-    #Test("run")
+    Test("run")
     #Test("read")
