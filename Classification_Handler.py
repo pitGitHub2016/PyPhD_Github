@@ -264,7 +264,7 @@ def runClassification(Portfolios, scanMode, mode):
         p.join()
 
 def Test(mode):
-    magicNum = 3000
+    magicNum = 2000
     #selection = 'PCA_ExpWindow25_3_Head'
     #selection = 'LLE_ExpWindow25_3_Head'
     #selection = 'PCA_250_3_Head'
@@ -319,7 +319,7 @@ def Test(mode):
                 "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
                 "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
                 "Scaler": "Standard",  # Standard
-                'Kernel': '1',
+                'Kernel': '2',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
@@ -401,4 +401,4 @@ if __name__ == '__main__':
     #runClassification("Finalists", 'Main', "report")
 
     Test("run")
-    #Test("read")
+    Test("read")

@@ -2442,8 +2442,9 @@ class Slider:
                             mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
                                                   1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
                         elif params['Kernel'] == '1':
-                            # Add Noise
                             mainKernel = RBF(length_scale=1)
+                        elif params['Kernel'] == '2':
+                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5)
                         ##################### Running with Greedy Search Best Model ##################
                         model = GaussianProcessClassifier(kernel=mainKernel, random_state=0)
                     # Fitting the GPC Model to the Training set
@@ -2557,10 +2558,7 @@ class Slider:
             y = []
             real_y = []
             for i in range(params["InputSequenceLength"], len(dataset_all)):
-                if params["Mode"] == "Spacial":
-                    X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
-                elif params["Mode"] == "Temporal":
-                    X.append(timeVals[i])
+                X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
                 y.append(dataVals[i])
                 real_y.append(dataVals[i])
             X, y, real_y = np.array(X), np.array(y), np.array(real_y)
@@ -2653,8 +2651,9 @@ class Slider:
                             mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
                                                   1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
                         elif params['Kernel'] == '1':
-                            # Add Noise
                             mainKernel = RBF(length_scale=1)
+                        elif params['Kernel'] == '2':
+                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5)
                         ##################### Running with Greedy Search Best Model ##################
                         model = GaussianProcessRegressor(kernel=mainKernel, random_state=0)
                     # Fitting the GPR Model to the Training set
