@@ -295,18 +295,16 @@ def Test(mode):
             params = {
                 "model": "RNN",
                 "HistLag": 0,
-                "InputSequenceLength": 5,  # 240
-                "SubHistoryLength": 500,  # 760
-                "SubHistoryTrainingLength": 500-25,  # 510
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 250 - 1,  # 510
                 "Scaler": "Standard",  # Standard
                 "epochsIn": 100,  # 100
-                "batchSIzeIn": 5,  # 16
+                "batchSIzeIn": 10,  # 16
                 "EarlyStopping_patience_Epochs": 10,  # 10
                 "LearningMode": 'static',  # 'static', 'online'
                 "medSpecs": [
-                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    #{"LayerType": "LSTM", "units": 50, "RsF": True, "Dropout": 0.25},
-                    {"LayerType": "LSTM", "units": 50, "RsF": False, "Dropout": 0.25}
+                    {"LayerType": "LSTM", "units": 25, "RsF": False, "Dropout": 0.25}
                 ],
                 "modelNum": magicNum,
                 "CompilerSettings": ['adam', 'mean_squared_error'],
@@ -319,7 +317,7 @@ def Test(mode):
                 "HistLag": 0,
                 "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
                 "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
-                "SubHistoryTrainingLength": 250-1,  # 510 (main) || 250-1 (Siettos) ||
+                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
                 "Scaler": "Standard",  # Standard
                 'Kernel': '1',
                 "LearningMode": 'static',  # 'static', 'online'
@@ -362,14 +360,14 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    runClassification("ClassicPortfolios", 'Main', "runParallel")
-    runClassification("ClassicPortfolios", 'Main', "report")
+    #runClassification("ClassicPortfolios", 'Main', "runParallel")
+    #runClassification("ClassicPortfolios", 'Main', "report")
     #runClassification("Projections", 'Main', "runParallel")
     #runClassification("Projections", 'Main', "report")
     #runClassification('Projections', 'ScanNotProcessed', "")
-    runClassification("globalProjections", 'Main', "runParallel")
-    runClassification("globalProjections", 'Main', "report")
-    #runClassification('globalProjections', 'ScanNotProcessed', "")
+    #runClassification("globalProjections", 'Main', "runParallel")
+    #runClassification("globalProjections", 'Main', "report")
+    runClassification('globalProjections', 'ScanNotProcessed', "")
     #runClassification("Finalists", 'Main', "runParallel")
     #runClassification("Finalists", 'Main', "report")
 
