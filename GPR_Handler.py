@@ -29,7 +29,7 @@ calcMode = 'runParallel'
 pnlCalculator = 0
 targetSystems = [1]#[0,1]
 
-def ClassificationProcess(argList):
+def RegressionProcess(argList):
     selection = argList[0]
     df = argList[1]
     params = argList[2]
@@ -109,7 +109,6 @@ def runRegression(Portfolios, scanMode, mode):
                 "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
                 "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
                 "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
-                "Mode": "Spacial",
                 "Scaler": "Standard",  # Standard
                 'Kernel': '1',
                 "LearningMode": 'static',  # 'static', 'online'
@@ -124,7 +123,6 @@ def runRegression(Portfolios, scanMode, mode):
                 "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
                 "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
                 "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
-                "Mode": "Spacial",
                 "Scaler": "Standard",  # Standard
                 'Kernel': '1',
                 "LearningMode": 'static',  # 'static', 'online'
@@ -163,7 +161,7 @@ def runRegression(Portfolios, scanMode, mode):
             for magicNum in targetSystems:
                 params = Architecture(magicNum)
                 for selection in allProjectionsDF.columns:
-                    ClassificationProcess([selection, allProjectionsDF[selection], params, magicNum])
+                    RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
 
         elif mode == "runParallel":
             processList = []
@@ -177,8 +175,8 @@ def runRegression(Portfolios, scanMode, mode):
             else:
                 p = mp.Pool(mp.cpu_count())
                 #p = mp.Pool(len(processList))
-            #result = p.map(ClassificationProcess, tqdm(processList))
-            result = p.map(ClassificationProcess, processList)
+            #result = p.map(RegressionProcess, tqdm(processList))
+            result = p.map(RegressionProcess, processList)
             p.close()
             p.join()
 
@@ -242,7 +240,7 @@ def runRegression(Portfolios, scanMode, mode):
             notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
 
         p = mp.Pool(mp.cpu_count())
-        result = p.map(ClassificationProcess, tqdm(notProcessedList))
+        result = p.map(RegressionProcess, tqdm(notProcessedList))
         p.close()
         p.join()
 
@@ -279,7 +277,6 @@ def Test(mode):
             "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
             "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
             "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
-            "Mode": "Spacial",
             "Scaler": "Standard",  # Standard
             'Kernel': '1',
             "LearningMode": 'static',  # 'static', 'online'
@@ -325,13 +322,13 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    runRegression("ClassicPortfolios", 'Main', "runParallel")
-    runRegression("ClassicPortfolios", 'Main', "report")
+    #runRegression("ClassicPortfolios", 'Main', "runParallel")
+    #runRegression("ClassicPortfolios", 'Main', "report")
     #runRegression("Projections", 'Main', "runParallel")
     #runRegression("Projections", 'Main', "report")
     #runRegression('Projections', 'ScanNotProcessed', "")
-    #runRegression("globalProjections", 'Main', "runParallel")
-    #runRegression("globalProjections", 'Main', "report")
+    runRegression("globalProjections", 'Main', "runParallel")
+    runRegression("globalProjections", 'Main', "report")
     #runRegression('globalProjections', 'ScanNotProcessed', "")
     #runRegression("Finalists", 'Main', "runParallel")
     #runRegression("Finalists", 'Main', "report")
