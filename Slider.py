@@ -2623,7 +2623,7 @@ class Slider:
                     ########################################## GPC #############################################
                     # Define model
                     if megaCount == 0:
-                        print("Gaussian Process Classification...", outNaming)
+                        print("Gaussian Process Regression...", outNaming)
                         model = GaussianProcessRegressor()
                         if params['Kernel'] == 'Optimize':
                             # define model evaluation method
@@ -2726,7 +2726,7 @@ class Slider:
             df_real_price_class_test_DF = pd.concat(df_real_price_class_test_List, axis=0)
             df_real_price_test_DF = pd.concat(df_real_price_test_List, axis=0)
 
-            dfScore = pd.DataFrame(scoreList, index=df_real_price_test_DF.index)
+            dfScore = pd.DataFrame(scoreList)
 
             return [df_predicted_price_train_DF, df_real_price_class_train_DF, df_real_price_train_DF,
                      df_predicted_price_test_DF, df_real_price_class_test_DF, df_real_price_test_DF, dfScore]

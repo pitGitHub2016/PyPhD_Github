@@ -319,29 +319,12 @@ def Test(mode):
                 "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
                 "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
                 "Scaler": "Standard",  # Standard
-                'Kernel': '2',
-                "LearningMode": 'static',  # 'static', 'online'
-                "modelNum": magicNum
-            }
-
-            out = sl.AI.gClassification(df, params)
-
-        elif magicNum == 3000:
-
-            params = {
-                "model": "GPR",
-                "HistLag": 0,
-                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
-                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
-                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
-                "Mode": "Spacial",
-                "Scaler": "Standard",  # Standard
                 'Kernel': '1',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
 
-            out = sl.AI.gGPRegression(df, params)
+        out = sl.AI.gClassification(df, params)
 
         out[0].to_sql('df_predicted_price_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
         out[1].to_sql('df_real_price_class_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
