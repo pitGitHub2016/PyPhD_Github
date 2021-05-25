@@ -2619,53 +2619,52 @@ class Slider:
                 ################################### Build the Systems #####################################
                 #print("megaCount = ", megaCount)
 
-                if params["model"] == "GPR":
-                    ########################################## GPC #############################################
-                    # Define model
-                    if megaCount == 0:
-                        print("Gaussian Process Regression...", outNaming)
-                        model = GaussianProcessRegressor()
-                        if params['Kernel'] == 'Optimize':
-                            # define model evaluation method
-                            cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-                            # define grid
-                            grid = dict()
-                            grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
-                                              1 * WhiteKernel()]
-                            # define search
-                            search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
-                            # perform the search
-                            results = search.fit(X_train, y_train)
-                            # summarize best
-                            print('Best Mean Accuracy: %.3f' % results.best_score_)
-                            print('Best Config: %s' % results.best_params_)
-                            # summarize all
-                            gpc_means = results.cv_results_['mean_test_score']
-                            gpc_params = results.cv_results_['params']
-                            for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
-                                print(">%.3f with: %r" % (gpc_mean, gpc_param))
-                                print(gpc_param['kernel'])
-                            print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
-                            mainKernel = results.best_params_['kernel']
-                        elif params['Kernel'] == '0':
-                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
-                                                  1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
-                        elif params['Kernel'] == '1':
-                            mainKernel = RBF(length_scale=1)
-                        elif params['Kernel'] == '2':
-                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5)
-                        ##################### Running with Greedy Search Best Model ##################
-                        model = GaussianProcessRegressor(kernel=mainKernel, random_state=0)
-                    # Fitting the GPR Model to the Training set
-                    try:
-                        model.fit(X_train, y_train)
-                    except Exception as e:
-                        print(e)
-                    ###########################################
-                    try:
-                        trainScore = model.score(X_train, y_train)
-                    except:
-                        trainScore = np.nan
+                ########################################## GPR #############################################
+                # Define model
+                if megaCount == 0:
+                    print("Gaussian Process Regression...", outNaming)
+                    model = GaussianProcessRegressor()
+                    if params['Kernel'] == 'Optimize':
+                        # define model evaluation method
+                        cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+                        # define grid
+                        grid = dict()
+                        grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
+                                          1 * WhiteKernel()]
+                        # define search
+                        search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
+                        # perform the search
+                        results = search.fit(X_train, y_train)
+                        # summarize best
+                        print('Best Mean Accuracy: %.3f' % results.best_score_)
+                        print('Best Config: %s' % results.best_params_)
+                        # summarize all
+                        gpc_means = results.cv_results_['mean_test_score']
+                        gpc_params = results.cv_results_['params']
+                        for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
+                            print(">%.3f with: %r" % (gpc_mean, gpc_param))
+                            print(gpc_param['kernel'])
+                        print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
+                        mainKernel = results.best_params_['kernel']
+                    elif params['Kernel'] == '0':
+                        mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
+                                              1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
+                    elif params['Kernel'] == '1':
+                        mainKernel = RBF(length_scale=1)
+                    elif params['Kernel'] == '2':
+                        mainKernel = 1**2 * Matern(length_scale=1, nu=0.5)
+                    ##################### Running with Greedy Search Best Model ##################
+                    model = GaussianProcessRegressor(kernel=mainKernel, random_state=0)
+                # Fitting the GPR Model to the Training set
+                try:
+                    model.fit(X_train, y_train)
+                except Exception as e:
+                    print(e)
+                ###########################################
+                try:
+                    trainScore = model.score(X_train, y_train)
+                except:
+                    trainScore = np.nan
                 #print(trainScore)
                 scoreList.append(trainScore)
                 ############################### TRAIN PREDICT #################################
@@ -2702,6 +2701,200 @@ class Slider:
                     df_predicted_price_proba_test = pd.DataFrame(predicted_price_proba_test, index=subIdx_test,
                                                                   columns=['Predicted_Proba_Test_std'])
                     df_predicted_price_test = pd.concat([df_predicted_price_test, df_predicted_price_proba_test], axis=1)
+                    df_real_price_class_test = pd.DataFrame(y_test, index=subIdx_test,
+                                                           columns=['Real_Test_Class_'+x for x in outNaming])
+                    df_real_price_test = pd.DataFrame(real_y_test, index=subIdx_test,
+                                                           columns=['Real_Test_'+x for x in outNaming])
+
+                df_predicted_price_train_List.append(df_predicted_price_train)
+                df_real_price_class_train_List.append(df_real_price_class_train)
+                df_real_price_train_List.append(df_real_price_train)
+                df_predicted_price_test_List.append(df_predicted_price_test)
+                df_real_price_class_test_List.append(df_real_price_class_test)
+                df_real_price_test_List.append(df_real_price_test)
+
+                megaCount += 1
+
+                if breakFlag:
+                    break
+
+            df_predicted_price_train_DF = pd.concat(df_predicted_price_train_List, axis=0)
+            df_real_price_class_train_DF = pd.concat(df_real_price_class_train_List, axis=0)
+            df_real_price_train_DF = pd.concat(df_real_price_train_List, axis=0)
+            df_predicted_price_test_DF = pd.concat(df_predicted_price_test_List, axis=0)
+            df_real_price_class_test_DF = pd.concat(df_real_price_class_test_List, axis=0)
+            df_real_price_test_DF = pd.concat(df_real_price_test_List, axis=0)
+
+            dfScore = pd.DataFrame(scoreList)
+
+            return [df_predicted_price_train_DF, df_real_price_class_train_DF, df_real_price_train_DF,
+                     df_predicted_price_test_DF, df_real_price_class_test_DF, df_real_price_test_DF, dfScore]
+
+        def gRNN_Regression(dataset_all, params):
+
+            ################################### Very First Data Preprocessing #########################################
+
+            dataVals = dataset_all.values
+            timeVals = np.array(range(len(dataVals)))
+
+            if isinstance(dataset_all, pd.Series): # Single Sample
+                FeatSpaceDims = 1
+                outNaming = [dataset_all.name]
+                print(outNaming)
+            else:
+                FeatSpaceDims = len(dataset_all.columns)
+                outNaming = dataset_all.columns
+
+            #################################### Feature Scaling #####################################################
+            if params['Scaler'] == "Standard":
+                sc_X = StandardScaler()
+            elif params['Scaler'] == 'MinMax':
+                sc_X = MinMaxScaler() #feature_range=(0, 1)
+
+            #################### Creating a data structure with N timesteps and 1 output #############################
+            X = []
+            y = []
+            real_y = []
+            for i in range(params["InputSequenceLength"], len(dataset_all)):
+                X.append(dataVals[i - params["InputSequenceLength"]:i - params["HistLag"]])
+                y.append(dataVals[i])
+                real_y.append(dataVals[i])
+            X, y, real_y = np.array(X), np.array(y), np.array(real_y)
+            idx = dataset_all.iloc[params["InputSequenceLength"]:].index
+            #print("X.shape=", X.shape, ", y.shape=", y.shape,", real_y.shape=", real_y.shape, ", FeatSpaceDims=", FeatSpaceDims,
+            #      ", InputSequenceLength=", params["InputSequenceLength"],
+            #      ", SubHistoryLength=", params["SubHistoryLength"],
+            #      ", SubHistoryTrainingLength=", params["SubHistoryTrainingLength"], ", len(idx) = ", len(idx))
+
+            stepper = params["SubHistoryLength"]-params["SubHistoryTrainingLength"]
+
+            df_predicted_price_train_List = []
+            df_real_price_class_train_List = []
+            df_real_price_train_List = []
+            df_predicted_price_test_List = []
+            df_real_price_class_test_List = []
+            df_real_price_test_List = []
+
+            breakFlag = False
+            megaCount = 0
+            scoreList = []
+            for i in tqdm(range(0, X.shape[0], stepper)):
+                subProcessingHistory_X, subProcessingHistory_y, subProcessingHistory_real_y = X[i:i+params["SubHistoryLength"]], \
+                                                                                              y[i:i+params["SubHistoryLength"]], \
+                                                                                              real_y[i:i+params["SubHistoryLength"]]
+                subIdx = idx[i:i+params["SubHistoryLength"]]
+                if len(subProcessingHistory_X) < params["SubHistoryLength"]:
+                    subProcessingHistory_X, subProcessingHistory_y, subProcessingHistory_real_y = X[i:], y[i:], real_y[i:]
+                    subIdx = idx[i:]
+                    breakFlag = True
+                X_train, y_train, real_y_train = subProcessingHistory_X[:params["SubHistoryTrainingLength"]],\
+                                           subProcessingHistory_y[:params["SubHistoryTrainingLength"]],\
+                                           subProcessingHistory_real_y[:params["SubHistoryTrainingLength"]],
+                subIdx_train = subIdx[:params["SubHistoryTrainingLength"]]
+                X_test, y_test, real_y_test = subProcessingHistory_X[params["SubHistoryTrainingLength"]:], \
+                                              subProcessingHistory_y[params["SubHistoryTrainingLength"]:],\
+                                              subProcessingHistory_real_y[params["SubHistoryTrainingLength"]:]
+                subIdx_test = subIdx[params["SubHistoryTrainingLength"]:]
+
+                # Enable Scaling
+                if params['Scaler'] is not None:
+                    X_train = sc_X.fit_transform(X_train)
+                    try:
+                        X_test = sc_X.transform(X_test)
+                    except Exception as e:
+                        print(e)
+
+                #print("Data subHistories Set : i = ", i, ", len(subProcessingHistory_X) = ", len(subProcessingHistory_X),
+                #      ", len(subProcessingHistory_y) = ", len(subProcessingHistory_y),
+                #      ", X_train.shape = ", X_train.shape, ", y_train = ", y_train.shape, ", X_test.shape = ", X_test.shape,
+                #      ", y_test.shape = ", y_test.shape)
+
+                ####################################### Reshaping ########################################################
+                "Samples : One sequence is one sample. A batch is comprised of one or more samples."
+                "Time Steps : One time step is one point of observation in the sample."
+                "Features : One feature is one observation at a time step."
+
+                ################################### Build the Systems #####################################
+                #print("megaCount = ", megaCount)
+
+                X_train, X_test = Slider.AI.gReshape(X_train, FeatSpaceDims), \
+                                  Slider.AI.gReshape(X_test, FeatSpaceDims)
+                if megaCount == 0:
+                    # print("After Reshaping : X_train.shape = ", X_train.shape,
+                    #      ", y_train = ", y_train.shape, ", X_test.shape = ", X_test.shape,
+                    #      ", y_test.shape = ", y_test.shape)
+
+                    ########################################## RNN #############################################
+                    print("Recurrent Neural Networks Classification...", outNaming)
+                    model = Sequential()
+                    # Adding the first LSTM layer and some Dropout regularisation
+                    for layer in range(len(params["medSpecs"])):
+                        if params["medSpecs"][layer]["units"] == 'xShape1':
+                            unitsIn = X_train.shape[1]
+                            if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                                model.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                               unit_forget_bias=True, bias_initializer='ones',
+                                               input_shape=(X_train.shape[1], FeatSpaceDims)))
+                            elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                                model.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"],
+                                                    unit_forget_bias=True, bias_initializer='ones',
+                                                    input_shape=(X_train.shape[1], FeatSpaceDims)))
+                            model.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                        else:
+                            unitsIn = params["medSpecs"][layer]["units"]
+                            if params["medSpecs"][layer]["LayerType"] == "LSTM":
+                                model.add(LSTM(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                            elif params["medSpecs"][layer]["LayerType"] == "SimpleRNN":
+                                model.add(SimpleRNN(units=unitsIn, return_sequences=params["medSpecs"][layer]["RsF"]))
+                            model.add(Dropout(params["medSpecs"][layer]["Dropout"]))
+                    # Adding the output layer
+                    if len(y_train.shape) == 1:
+                        model.add(Dense(units=1))
+                    else:
+                        model.add(Dense(units=y_train.shape[1]))
+                    ####
+                    my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
+                    model.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
+                # Fitting the RNN Model to the Training set
+                try:
+                    model.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
+                              verbose=0, callbacks=my_callbacks)
+                except Exception as e:
+                    print(e)
+                ############################################
+                try:
+                    trainScore = model.evaluate(X_train, y_train, verbose=0)
+                except Exception as e:
+                    print(e)
+                    trainScore = np.nan
+                #print(trainScore)
+                scoreList.append(trainScore)
+                ############################### TRAIN PREDICT #################################
+                try:
+                    predicted_price_train = model.predict(X_train)
+                except:
+                    predicted_price_train = np.zeros(X_train.shape[0])
+
+                #print("predicted_price_train = ", predicted_price_train, ", predicted_price_proba_train = ", predicted_price_proba_train)
+                #print(predicted_price_train.shape, ", ", (np.zeros(X_train.shape[0])).shape)
+                #print(predicted_price_proba_train.shape, ", ", (np.zeros((X_train.shape[0], len(model.classes_)))).shape)
+
+                df_predicted_price_train = pd.DataFrame(predicted_price_train, index=subIdx_train,
+                                                        columns=['Predicted_Train_'+str(x) for x in outNaming])
+                df_real_price_class_train = pd.DataFrame(y_train, index=subIdx_train,
+                                                   columns=['Real_Train_Class_'+str(x) for x in outNaming])
+                df_real_price_train = pd.DataFrame(real_y_train, index=subIdx_train,
+                                                   columns=['Real_Train_'+str(x) for x in outNaming])
+                ############################### TEST PREDICT ##################################
+                if params["LearningMode"] == 'static':
+                    try:
+                        predicted_price_test = model.predict(X_test)
+                    except:
+                        predicted_price_test = np.zeros(X_test.shape[0])
+
+                    #print("predicted_price_test = ", predicted_price_test, ", y_test = ", y_test)
+                    df_predicted_price_test = pd.DataFrame(predicted_price_test, index=subIdx_test,
+                                                           columns=['Predicted_Test_'+x for x in outNaming])
                     df_real_price_class_test = pd.DataFrame(y_test, index=subIdx_test,
                                                            columns=['Real_Test_Class_'+x for x in outNaming])
                     df_real_price_test = pd.DataFrame(real_y_test, index=subIdx_test,
