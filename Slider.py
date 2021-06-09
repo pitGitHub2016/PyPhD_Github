@@ -2414,37 +2414,12 @@ class Slider:
                     ########################################## GPC #############################################
                     # Define model
                     if megaCount == 0:
-                        print("Gaussian Process Classification...", outNaming)
-                        model = GaussianProcessClassifier()
-                        if params['Kernel'] == 'Optimize':
-                            # define model evaluation method
-                            cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-                            # define grid
-                            grid = dict()
-                            grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
-                                              1 * WhiteKernel()]
-                            # define search
-                            search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
-                            # perform the search
-                            results = search.fit(X_train, y_train)
-                            # summarize best
-                            print('Best Mean Accuracy: %.3f' % results.best_score_)
-                            print('Best Config: %s' % results.best_params_)
-                            # summarize all
-                            gpc_means = results.cv_results_['mean_test_score']
-                            gpc_params = results.cv_results_['params']
-                            for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
-                                print(">%.3f with: %r" % (gpc_mean, gpc_param))
-                                print(gpc_param['kernel'])
-                            print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
-                            mainKernel = results.best_params_['kernel']
-                        elif params['Kernel'] == '0':
-                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
-                                                  1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
+                        print("Gaussian Process Classification...", outNaming, ", Kernel = ", params['Kernel'])
+                        if params['Kernel'] == '0':
+                            mainKernel = Matern(length_scale=1, nu=0.5)
                         elif params['Kernel'] == '1':
-                            mainKernel = RBF(length_scale=1)
-                        elif params['Kernel'] == '2':
-                            mainKernel = 1**2 * Matern(length_scale=1, nu=0.5)
+                            mainKernel = 1 ** 2 * Matern(length_scale=1, nu=0.5) + 1 ** 2 * DotProduct(sigma_0=1) + \
+                                         1 ** 2 * RationalQuadratic(alpha=1, length_scale=1) + 1 ** 2 * ConstantKernel()
                         ##################### Running with Greedy Search Best Model ##################
                         model = GaussianProcessClassifier(kernel=mainKernel, random_state=0)
                     # Fitting the GPC Model to the Training set
@@ -2537,14 +2512,11 @@ class Slider:
             ################################### Very First Data Preprocessing #########################################
 
             dataVals = dataset_all.values
-            timeVals = np.array(range(len(dataVals)))
 
             if isinstance(dataset_all, pd.Series): # Single Sample
-                FeatSpaceDims = 1
                 outNaming = [dataset_all.name]
                 print(outNaming)
             else:
-                FeatSpaceDims = len(dataset_all.columns)
                 outNaming = dataset_all.columns
 
             #################################### Feature Scaling #####################################################
@@ -2580,7 +2552,7 @@ class Slider:
             breakFlag = False
             megaCount = 0
             scoreList = []
-            for i in tqdm(range(0, X.shape[0], stepper)):
+            for i in (range(0, X.shape[0], stepper)):
                 subProcessingHistory_X, subProcessingHistory_y, subProcessingHistory_real_y = X[i:i+params["SubHistoryLength"]], \
                                                                                               y[i:i+params["SubHistoryLength"]], \
                                                                                               real_y[i:i+params["SubHistoryLength"]]
@@ -2622,37 +2594,12 @@ class Slider:
                 ########################################## GPR #############################################
                 # Define model
                 if megaCount == 0:
-                    print("Gaussian Process Regression...", outNaming)
-                    model = GaussianProcessRegressor()
-                    if params['Kernel'] == 'Optimize':
-                        # define model evaluation method
-                        cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-                        # define grid
-                        grid = dict()
-                        grid['kernel'] = [1 * RBF(), 1 * DotProduct(), 1 * Matern(), 1 * RationalQuadratic(),
-                                          1 * WhiteKernel()]
-                        # define search
-                        search = GridSearchCV(model, grid, scoring='accuracy', cv=cv, n_jobs=-1)
-                        # perform the search
-                        results = search.fit(X_train, y_train)
-                        # summarize best
-                        print('Best Mean Accuracy: %.3f' % results.best_score_)
-                        print('Best Config: %s' % results.best_params_)
-                        # summarize all
-                        gpc_means = results.cv_results_['mean_test_score']
-                        gpc_params = results.cv_results_['params']
-                        for gpc_mean, gpc_param in zip(gpc_means, gpc_params):
-                            print(">%.3f with: %r" % (gpc_mean, gpc_param))
-                            print(gpc_param['kernel'])
-                        print("GPC Fitting using Kernel = ", results.best_params_['kernel'])
-                        mainKernel = results.best_params_['kernel']
-                    elif params['Kernel'] == '0':
-                        mainKernel = 1**2 * Matern(length_scale=1, nu=0.5) + 1**2 * DotProduct(sigma_0=1) +\
-                                              1**2 * RationalQuadratic(alpha=1, length_scale=1) + 1**2 * ConstantKernel()
+                    print("Gaussian Process Regression...", outNaming, ", Kernel = ", params['Kernel'])
+                    if params['Kernel'] == '0':
+                        mainKernel = Matern(length_scale=1, nu=0.5)
                     elif params['Kernel'] == '1':
-                        mainKernel = RBF(length_scale=1)
-                    elif params['Kernel'] == '2':
-                        mainKernel = 1**2 * Matern(length_scale=1, nu=0.5)
+                        mainKernel = 1 ** 2 * Matern(length_scale=1, nu=0.5) + 1 ** 2 * DotProduct(sigma_0=1) + \
+                                     1 ** 2 * RationalQuadratic(alpha=1, length_scale=1) + 1 ** 2 * ConstantKernel()
                     ##################### Running with Greedy Search Best Model ##################
                     model = GaussianProcessRegressor(kernel=mainKernel, random_state=0)
                 # Fitting the GPR Model to the Training set
