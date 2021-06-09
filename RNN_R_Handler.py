@@ -27,7 +27,7 @@ twList = [25, 100, 150, 250, 'ExpWindow25']
 calcMode = 'runParallel'
 #calcMode = 'read'
 pnlCalculator = 0
-targetSystems = [1]#[0,1]
+targetSystems = [0, 1, 2, 3, 4]
 
 def RegressionProcess(argList):
     selection = argList[0]
@@ -102,35 +102,34 @@ def runRegression(Portfolios, scanMode, mode):
 
         magicNum = int(magicNum)
 
-        if magicNum == 1:
-
-            paramsSetup = {
-                "model": "GPR",
-                "HistLag": 0,
-                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
-                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
-                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
-                "Mode": "Spacial",
-                "Scaler": "Standard",  # Standard
-                'Kernel': '1',
-                "LearningMode": 'static',  # 'static', 'online'
-                "modelNum": magicNum
-            }
-
+        if magicNum == 0:
+            InputSequenceLength = 1
+        elif magicNum == 1:
+            InputSequenceLength = 3
         elif magicNum == 2:
+            InputSequenceLength = 5
+        elif magicNum == 3:
+            InputSequenceLength = 10
+        elif magicNum == 4:
+            InputSequenceLength = 25
 
-            paramsSetup = {
-                "model": "GPR",
-                "HistLag": 0,
-                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
-                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
-                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
-                "Mode": "Spacial",
-                "Scaler": "Standard",  # Standard
-                'Kernel': '1',
-                "LearningMode": 'static',  # 'static', 'online'
-                "modelNum": magicNum
-            }
+        paramsSetup = {
+            "model": "RNNr",
+            "HistLag": 0,
+            "InputSequenceLength": InputSequenceLength,  # 240
+            "SubHistoryLength": 250,  # 760
+            "SubHistoryTrainingLength": 250 - 1,  # 510
+            "Scaler": "Standard",  # Standard
+            "epochsIn": 100,  # 100
+            "batchSIzeIn": 10,  # 16
+            "EarlyStopping_patience_Epochs": 10,  # 10
+            "LearningMode": 'static',  # 'static', 'online'
+            "medSpecs": [
+                {"LayerType": "LSTM", "units": 25, "RsF": False, "Dropout": 0.25}
+            ],
+            "modelNum": magicNum,
+            "CompilerSettings": ['adam', 'mean_squared_error'],
+        }
 
         return paramsSetup
 
@@ -187,7 +186,7 @@ def runRegression(Portfolios, scanMode, mode):
             shList = []
             notProcessed = []
             for magicNum in targetSystems:
-                Classifier = "GPR"
+                Classifier = "RNNr"
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql(
@@ -221,7 +220,9 @@ def runRegression(Portfolios, scanMode, mode):
                         print(e)
                         notProcessed.append('pnl_'+Classifier+'_' + selection + '_' + str(magicNum))
 
-            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(2)
+            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True)
+            shDF = shDF[["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std", "pnl_ttest_0_pvalue",
+                         "RW_sh", "RW_Mean", "RW_tConf", "RW_Std", "rw_pnl_ttest_0_value", "ttestPair_pvalue", "Classifier"]]
             shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
             print("shDF = ", shDF)
 
@@ -230,7 +231,7 @@ def runRegression(Portfolios, scanMode, mode):
             print("notProcessedDF = ", notProcessedDF)
 
     elif scanMode == 'ScanNotProcessed':
-        systemClass = 'GPR'
+        systemClass = 'RNNr'
         notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_'+systemClass, conn).set_index('index', drop=True)
         print("len(notProcessedDF) = ", len(notProcessedDF))
         notProcessedList = []
@@ -240,6 +241,7 @@ def runRegression(Portfolios, scanMode, mode):
             magicNum = Info[-1]
             params = Architecture(magicNum)
             print("Rerunning NotProcessed : ", selection, ", ", magicNum)
+            #RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
             notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
 
         p = mp.Pool(mp.cpu_count())
@@ -248,7 +250,7 @@ def runRegression(Portfolios, scanMode, mode):
         p.join()
 
 def Test(mode):
-    magicNum = 5000
+    magicNum = "test"
     #selection = 'PCA_ExpWindow25_3_Head'
     #selection = 'LLE_ExpWindow25_3_Head'
     #selection = 'PCA_250_3_Head'
@@ -275,9 +277,9 @@ def Test(mode):
         print("len(df) = ", len(df))
 
         params = {
-            "model": "RNN_R",
+            "model": "RNNr",
             "HistLag": 0,
-            "InputSequenceLength": 25,  # 240
+            "InputSequenceLength": 5,  # 240
             "SubHistoryLength": 250,  # 760
             "SubHistoryTrainingLength": 250 - 1,  # 510
             "Scaler": "Standard",  # Standard
@@ -335,12 +337,12 @@ if __name__ == '__main__':
     #runRegression("ClassicPortfolios", 'Main', "report")
     #runRegression("Projections", 'Main', "runParallel")
     #runRegression("Projections", 'Main', "report")
-    #runRegression('Projections', 'ScanNotProcessed', "")
+    runRegression('Projections', 'ScanNotProcessed', "")
     #runRegression("globalProjections", 'Main', "runParallel")
     #runRegression("globalProjections", 'Main', "report")
     #runRegression('globalProjections', 'ScanNotProcessed', "")
     #runRegression("Finalists", 'Main', "runParallel")
     #runRegression("Finalists", 'Main', "report")
 
-    Test("run")
-    Test("read")
+    #Test("run")
+    #Test("read")
