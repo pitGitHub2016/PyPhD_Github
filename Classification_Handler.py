@@ -9,6 +9,7 @@ from Slider import Slider as sl
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import multiprocessing as mp
+from random import randint
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
@@ -326,13 +327,20 @@ def Test(mode):
 
         out = sl.AI.gClassification(df, params)
 
-        out[0].to_sql('df_predicted_price_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
-        out[1].to_sql('df_real_price_class_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
-        out[2].to_sql('df_real_price_train_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
-        out[3].to_sql('df_predicted_price_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
-        out[4].to_sql('df_real_price_class_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
-        out[5].to_sql('df_real_price_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
-        out[6].to_sql('df_score_test_DF_Test_'+selection+"_"+str(magicNum), conn, if_exists='replace')
+        writeFlag = False
+        while writeFlag == False:
+            try:
+                out[0].to_sql('df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum),conn, if_exists='replace')
+                out[1].to_sql('df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum),conn, if_exists='replace')
+                out[2].to_sql('df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn,if_exists='replace')
+                out[3].to_sql('df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum),conn, if_exists='replace')
+                out[4].to_sql('df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum),conn, if_exists='replace')
+                out[5].to_sql('df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn,if_exists='replace')
+                writeFlag = True
+            except Exception as e:
+                print(e)
+                print("Sleeping for some seconds and retrying ... ")
+                time.sleep(randint(0, 5))
 
     elif mode == 'read':
 
