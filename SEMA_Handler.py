@@ -25,7 +25,7 @@ GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
 twList = [25, 100, 150, 250, 'ExpWindow25']
 lagList = [2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]
-MegaScale = pd.read_sql('SELECT * FROM Edf_classic', conn).set_index('Dates', drop=True).mean().values[0]
+#MegaScale = pd.read_sql('SELECT * FROM Edf_classic', conn).set_index('Dates', drop=True).mean().values[0]
 
 def semaOnProjections(space, mode):
 
@@ -83,8 +83,38 @@ def semaOnProjections(space, mode):
         shSemaDF = pd.concat(shSema).round(2)
         shSemaDF.to_sql('semapnlSharpes_'+space, conn, if_exists='replace')
 
-#####################################################
-semaOnProjections("ClassicPortfolios", "Direct")
-semaOnProjections("Projections", "Direct")
-semaOnProjections("globalProjections", "Direct")
+def TCA():
+    allProjectionsDF = pd.read_csv('allProjectionsDF.csv').set_index('Dates', drop=True)
+    TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+    selection = 'PCA_250_19'
+    #selection = 'PCA_ExpWindow25_19'
 
+    sig = sl.S(sl.sign(sl.ema(allProjectionsDF, nperiods=5)))
+    sema_pnl = (sig * allProjectionsDF).fillna(0) *(-1)
+    strat_pnl = sema_pnl[selection]
+    rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
+    print(rawSharpe)
+
+    prinCompsDF = pd.read_sql('SELECT * FROM '+selection.split('_')[0]+'_principalCompsDf_tw_'+selection.split('_')[1]+'_'+selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+
+    #print(prinCompsDF)
+    trW = prinCompsDF.mul(sig[selection], axis=0)
+    #print(sl.d(trW).tail())
+    delta_pos = sl.d(trW).fillna(0)
+    for scenario in ['Scenario0','Scenario1','Scenario2','Scenario3','Scenario4']:
+        my_tcs = delta_pos.copy()
+        #print(my_tcs.tail())
+        for c in my_tcs.columns:
+            my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index==c, scenario].values[0]
+        #print(my_tcs.tail())
+        #print(sl.rs(my_tcs).tail())
+        #time.sleep(3000)
+        strat_pnl_afterCosts = strat_pnl - sl.rs(my_tcs)
+        after_TCA_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
+        print(after_TCA_Sharpe)
+
+#####################################################
+#semaOnProjections("ClassicPortfolios", "Direct")
+#semaOnProjections("Projections", "Direct")
+#semaOnProjections("globalProjections", "Direct")
+TCA()
