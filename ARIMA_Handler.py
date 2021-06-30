@@ -209,13 +209,18 @@ def Test(mode):
 
 def TCA():
     TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
-    selection = 'PCA_250_19'
-    #selection = 'PCA_ExpWindow25_19'
+    #selection = 'PCA_250_19'; p = 1; co = 'single'
+    #selection = 'PCA_ExpWindow25_19'; p = 1; co = 'single'
+    selection = 'PCA_ExpWindow25_2'; p = 3; co = 'single'
+    #selection = 'LLE_150_1'; p = 2; co = 'single'
+    #selection = 'LLE_ExpWindow25_17'; p = 1; co = 'single'
+    #selection = 'PCA_100_4_Tail'; p = 1; co = 'global_PCA'
+
     localConn = sqlite3.connect('FXeodDataARIMA.db')
 
-    allProjectionsDF = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_testDF_100_250', localConn).set_index('Dates', drop=True)
+    allProjectionsDF = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_testDF_'+str(p)+'00_250', localConn).set_index('Dates', drop=True)
     allProjectionsDF.columns = [selection]
-    arimaSigCore = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_PredictionsDF_100_250', localConn).set_index('Dates', drop=True)
+    arimaSigCore = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_PredictionsDF_'+str(p)+'00_250', localConn).set_index('Dates', drop=True)
     #.iloc[round(0.1*len(allProjectionsDF)):]
     sig = sl.sign(arimaSigCore)
     sig.columns = [selection]
@@ -223,21 +228,31 @@ def TCA():
     rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
     print(rawSharpe)
 
-    prinCompsDF = pd.read_sql(
-        'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
-        selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+    if co == 'single':
+        prinCompsDF = pd.read_sql(
+            'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+            selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+    elif co.split("_")[0] == 'global':
+        prinCompsList = []
+        for pr in range(int(selection.split("_")[2])):
+            prinCompsList.append(pd.read_sql(
+                'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+                str(pr), sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True))
+        prinCompsDF = prinCompsList[0]
+        for l in range(1, len(prinCompsList)):
+            prinCompsDF += prinCompsList[l]
 
     # print(prinCompsDF)
     trW = prinCompsDF.mul(sig[selection], axis=0)
     # print(sl.d(trW).tail())
     delta_pos = sl.d(trW).fillna(0)
-    for scenario in ['Scenario0', 'Scenario1', 'Scenario2', 'Scenario3']:
+    for scenario in ['Scenario1','Scenario2','Scenario3','Scenario4','Scenario5','Scenario6']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
         after_TCA_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
-        print(after_TCA_Sharpe)
+        print(scenario, ", ", after_TCA_Sharpe)
 
 #####################################################
 
