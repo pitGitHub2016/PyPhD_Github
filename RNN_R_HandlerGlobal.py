@@ -18,9 +18,9 @@ mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
 
 try:
-    conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData.db')
+    conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodDataGlobal.db')
 except:
-    conn = sqlite3.connect('Temp.db')
+    conn = sqlite3.connect('TempGlobal.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 #calcMode = 'runSerial'
@@ -241,13 +241,13 @@ def runRegression(Portfolios, scanMode, mode):
             magicNum = Info[-1]
             params = Architecture(magicNum)
             print("Rerunning NotProcessed : ", selection, ", ", magicNum)
-            RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
-            #notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
+            #RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
+            notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
 
-        #p = mp.Pool(mp.cpu_count())
-        #result = p.map(RegressionProcess, tqdm(notProcessedList))
-        #p.close()
-        #p.join()
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(RegressionProcess, tqdm(notProcessedList))
+        p.close()
+        p.join()
 
 def Test(mode):
     magicNum = "test"
@@ -337,10 +337,11 @@ if __name__ == '__main__':
     #runRegression("ClassicPortfolios", 'Main', "report")
     #runRegression("Projections", 'Main', "runParallel")
     #runRegression("Projections", 'Main', "report")
-    runRegression('Projections', 'ScanNotProcessed', "")
+    #runRegression('Projections', 'ScanNotProcessed', "")
+    #runRegression("globalProjections", 'Main', "runSerial")
     #runRegression("globalProjections", 'Main', "runParallel")
     #runRegression("globalProjections", 'Main', "report")
-    #runRegression('globalProjections', 'ScanNotProcessed', "")
+    runRegression('globalProjections', 'ScanNotProcessed', "")
     #runRegression("Finalists", 'Main', "runParallel")
     #runRegression("Finalists", 'Main', "report")
 
