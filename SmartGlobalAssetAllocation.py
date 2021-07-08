@@ -192,12 +192,16 @@ def DataHandler(mode):
                 returnTs = pd.read_sql('SELECT * FROM Rates', conn).set_index('Dates', drop=True)
                 returnTs.index = [x.replace("00:00:00", "").strip() for x in returnTs.index]
                 returnTs_ylabel = '$r_t$'
+                ncolIn = 1
+                legendSize = [17]
             else:
                 df = Prices[[x for x in Prices.columns if x not in BondsTickers]].ffill()
                 ylabel = '$S_t$'
                 returnTs = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
                 returnTs.index = [x.replace("00:00:00", "").strip() for x in returnTs.index]
                 returnTs_ylabel = '$x_t$'
+                ncolIn = 1
+                legendSize = [14]
             # Plot 1
             fig, ax = plt.subplots()
             mpl.pyplot.locator_params(axis='x', nbins=35)
@@ -208,7 +212,7 @@ def DataHandler(mode):
                 label.set_rotation(45)
             ax.set_xlim(xmin=0.0, xmax=len(Prices) + 1)
             mpl.pyplot.ylabel(ylabel, fontsize=32)
-            plt.legend(loc=2, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 17})
+            plt.legend(loc=2, ncol=ncolIn, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': legendSize[0]})
             plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
             plt.margins(0, 0)
             plt.grid()
@@ -224,7 +228,7 @@ def DataHandler(mode):
                 label.set_rotation(45)
             ax.set_xlim(xmin=0.0, xmax=len(Prices) + 1)
             mpl.pyplot.ylabel(returnTs_ylabel, fontsize=32)
-            plt.legend(loc=2, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 17})
+            plt.legend(loc=2, ncol=ncolIn, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': legendSize[0]})
             plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
             plt.margins(0, 0)
             plt.grid()
@@ -232,6 +236,7 @@ def DataHandler(mode):
 
 def LongOnly():
     dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
+    dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
     for subset in subPortfoliosList:
         df = dfAll[subset[0]]
         longOnlySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df), columns=["Sharpe"]).round(4)
@@ -259,6 +264,7 @@ def LongOnly():
 
 def RiskParity():
     dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
+    dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
 
     SRollVol = np.sqrt(252) * sl.S(sl.rollStatistics(dfAll, method='Vol', nIn=250)) * 100
     SRollVolToPlot = SRollVol.copy()
@@ -282,7 +288,9 @@ def RiskParity():
 
 def RollingSharpes(mode):
     if mode == 'Benchmark':
-        dfAll_assets = sl.rollStatistics(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True), 'Sharpe')
+        dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
+        dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
+        dfAll_assets = sl.rollStatistics(dfAll, 'Sharpe')
 
         dfAll_assets.index = [x.replace("00:00:00", "").strip() for x in dfAll_assets.index]
         fig, ax = plt.subplots()
@@ -294,7 +302,7 @@ def RollingSharpes(mode):
             label.set_rotation(45)
         ax.set_xlim(xmin=0.0, xmax=len(dfAll_assets) + 1)
         mpl.pyplot.ylabel("$sh_{A,i,t}$", fontsize=32)
-        plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+        plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 14})
         plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
         plt.margins(0, 0)
         plt.grid()
@@ -328,7 +336,7 @@ def RollingSharpes(mode):
             # ax[c].set_title(titleList[c], y=1.0, pad=-20)
             ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
             #ax[c].legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'weight': 'bold', 'size': 24})
-            ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+            ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 16})
             ax[c].grid()
             c += 1
         plt.subplots_adjust(top=0.95, bottom=0.15, right=0.82, left=0.08, hspace=0.1, wspace=0)
@@ -732,9 +740,9 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
     elif mode == 'trade':
         weightSpace = [1, 1, 1]
-        preCursorParams = [5,1]
+        preCursorParams = [25,1]
 
-        runSet = 'First'  # First, Target, Last
+        runSet = 'Last'  # First, Target, Last
         startDim = 0
         maxDims = 5
         scenario = 1000
@@ -792,40 +800,23 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
         for case in range(10):
             if case == 0:
-                #sig = sl.sign(dmapsCompAssetRetsDF) # MAIN SCENARIO
-                #sig = sl.sign(sl.rs(dmapsCompAssetRetsDF)) #
-                #sig = sl.preCursor(df, dmapsCompAssetRetsDF, nIn=10, mode='exp')[1] #
-                #sig = sl.preCursor(df, sl.rs(dmapsCompAssetRetsDF), nIn=10, mode='exp')[1] #
                 sig = sl.preCursor(df, dmapsCompAssetRetsDF, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                #sig = sl.preCursor(df, sl.rs(dmapsCompAssetRetsDF), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                label = 'A'
+                label = 'A'+'_'+runSet
             elif case == 1:
-                #sig = sl.sign(sl.rs(dmapsCompRatesDF)) # MAIN SCENARIO
-                #sig = sl.preCursor(df, sl.rs(dmapsCompRatesDF), nIn=10, mode='exp')[1] #
                 sig = sl.preCursor(df, sl.rs(dmapsCompRatesDF), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                label = 'B'
+                label = 'B'+'_'+runSet
             elif case == 2:
-                #sig = sl.sign(sigDriverTemporalRegressionAssetsRets) # MAIN SCENARIO
-                #sig = sl.preCursor(df, sigDriverTemporalRegressionAssetsRets, nIn=10, mode='exp')[1] #
                 sig = sl.preCursor(df, sigDriverTemporalRegressionAssetsRets, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                #sig = sl.preCursor(df, sl.rs(sigDriverTemporalRegressionAssetsRets), nIn=10, mode='exp')[1] #
-                #sig = sl.preCursor(df, sl.rs(sigDriverTemporalRegressionAssetsRets), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                label = 'C'
+                label = 'C'+'_'+runSet
             elif case == 3:
-                #sig = sl.sign(sl.rs(sigDriverTemporalRegressionRates)) # MAIN SCENARIO
-                #sig = sl.preCursor(df, sl.rs(sigDriverTemporalRegressionRates), nIn=10, mode='exp')[1]
                 sig = sl.preCursor(df, sl.rs(sigDriverTemporalRegressionRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                label = 'D'
+                label = 'D'+'_'+runSet
             elif case == 4:
-                #sig = sl.sign(sl.rs(sigDriverTemporalAssetsRets)) # MAIN SCENARIO
-                #sig = sl.preCursor(df, sl.rs(sigDriverTemporalAssetsRets), nIn=10, mode='exp')[1]
                 sig = sl.preCursor(df, sl.rs(sigDriverTemporalAssetsRets), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                label = 'E'
+                label = 'E'+'_'+runSet
             elif case == 5:
-                #sig = sl.sign(sl.rs(sigDriverTemporalRates)) # MAIN SCENARIO
-                #sig = sl.preCursor(df, sl.rs(sigDriverTemporalRates), nIn=10, mode='exp')[1]
                 sig = sl.preCursor(df, sl.rs(sigDriverTemporalRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                label = 'F'
+                label = 'F'+'_'+runSet
             else:
                 break
 
@@ -833,6 +824,7 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
             #pnl = df
             pnl = df.mul(sig, axis=0).fillna(0)
+            #pnl = sl.rp(pnl)[0]
 
             #print(sh_predictDF)
             rspredictDF = sl.rs(pnl)
@@ -848,10 +840,9 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
             rspredictDF.to_sql('rspredictDF_'+label, conn, if_exists='replace')
 
         pnlList = []
-        labelList = ['A','B','C','D','E','F']
+        labelList = ['A'+'_'+runSet,'B'+'_'+runSet,'C'+'_'+runSet,'D'+'_'+runSet,'E'+'_'+runSet,'F'+'_'+runSet]
         for label in labelList:
             pnl = pd.read_sql('SELECT * FROM rspredictDF_' + str(label), conn).set_index('Dates', drop=True)
-            #pnl = pd.read_sql('SELECT * FROM pnl_' + str(label), conn).set_index('Dates', drop=True)
             pnl.columns = [label+'_'+x for x in pnl.columns]
             pnlList.append(pnl)
 
@@ -864,34 +855,6 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
         rw_pnl = sl.ExPostOpt(sl.S(sl.sign(pnlDF)) * pnlDF)[0].fillna(0)
         rw_pnl_Sharpe = (np.sqrt(252) * sl.sharpe(rw_pnl))
         print("RW Pnl Sharpe = ", rw_pnl_Sharpe)
-
-#ProductsSearch()
-#DataHandler("run")
-#DataHandler("plot")
-
-#LongOnly()
-#RiskParity()
-
-#RollingSharpes('Benchmark')
-
-#RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
-#RunRollManifold("DMAP_pyDmapsRun", 'Rates')
-#RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
-#RunRollManifold("DMAP_gDmapsRun", 'Rates')
-
-#ProjectionsPlots('DMAP_pyDmapsRun', "AssetsRets")
-#ProjectionsPlots('DMAP_pyDmapsRun', "Rates")
-
-#gDMAP_TES("create", "AssetsRets", "", "")
-#gDMAP_TES("create", "Rates", "", "")
-#gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'LinearRegression')
-#gDMAP_TES("run", "Rates", 'sumKLMedian', 'LinearRegression')
-#gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
-#gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
-
-gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
-
-#getProjections()
 
 pnlCalculator = 0
 
@@ -1032,4 +995,30 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
         stats = stats[(stats['selection'].str.split("_").str[2].astype(float)<5)].set_index("selection", drop=True).round(4)
         stats.to_sql('ARIMA_SpecificStatistics_' + Portfolios, conn, if_exists='replace')
 
+#ProductsSearch()
+#DataHandler("run")
+#DataHandler("plot")
 
+#LongOnly()
+#RiskParity()
+
+#RollingSharpes('Benchmark')
+
+#RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
+#RunRollManifold("DMAP_pyDmapsRun", 'Rates')
+#RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
+#RunRollManifold("DMAP_gDmapsRun", 'Rates')
+
+#ProjectionsPlots('DMAP_pyDmapsRun', "AssetsRets")
+#ProjectionsPlots('DMAP_pyDmapsRun', "Rates")
+
+#gDMAP_TES("create", "AssetsRets", "", "")
+#gDMAP_TES("create", "Rates", "", "")
+#gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'LinearRegression')
+#gDMAP_TES("run", "Rates", 'sumKLMedian', 'LinearRegression')
+#gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
+#gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
+
+gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
+
+#getProjections()
