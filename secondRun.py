@@ -1,6 +1,6 @@
 from Slider import Slider as sl
 from scipy.linalg import svd
-import numpy as np, investpy, json, time, pickle
+import numpy as np, investpy, json, time, pickle, glob
 from tqdm import tqdm
 import pandas as pd
 import warnings, sqlite3, os, tensorflow as tf
@@ -13,6 +13,7 @@ from scipy.spatial.distance import pdist
 from pydiffmap import kernel
 import pyriemann as pr
 from pyriemann.utils import distance as mt
+from scipy import stats as st
 mpl.rcParams['font.family'] = ['serif']
 mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
@@ -28,7 +29,8 @@ pd.set_option('display.max_rows',200)
 conn = sqlite3.connect('SmartGlobalAssetAllocation.db')
 fromDate = '01/02/2005'
 toDate = '01/02/2021'
-twList = [25]#, 250]
+twList = [250]
+spacialND = range(5)
 
 BondsTickers = ["U.S. 10Y", "U.S. 5Y", "U.S. 2Y", "U.S. 1Y", "U.S. 6M",
                 "U.K. 10Y", "U.K. 5Y", "U.K. 2Y", "U.K. 1Y", "U.K. 6M",
@@ -39,11 +41,18 @@ EqsTickers = [["S&P 500", "United States"], ["Nasdaq", "United States"],
               ["DAX", "Germany"], ["CAC 40", "France"], ["FTSE 100", "United Kingdom"],
               ["Shanghai", "China"], ["Nikkei 225", "Japan"]]
 FxTickers = ['EUR/USD', 'GBP/USD', 'USD/CNY', 'USD/JPY']
-CustomTickers = [[8830, 'Gold Futures'], [8827, 'US Dollar Index Futures'],
-                 [8895, 'Euro Bund Futures'], [8880, 'US 10 Year T-Note Futures']]
+CommoditiesTickers = ['Gold', 'Silver', 'Brent Oil', 'Crude Oil WTI', 'Natural Gas']
+CustomTickers = [x for x in glob.glob("Investing_csvData/*.csv")]
+
+subPortfoliosList = [[[x[0] for x in EqsTickers], 'EqsFuts'],
+                   [['Euro SCHATZ Futures', 'Euro Bund Futures', 'Euro BOBL Futures',
+                     'US 2 Year T-Note Futures', 'US 5 Year T-Note Futures', 'US 10 Year T-Note Futures',
+                     'US 30 Year T-Bond Futures', 'UK Gilt Futures', 'Japan Government Bond Futures'], 'BondsFuts'],
+                   [['Euribor Futures', 'Eurodollar Futures'], 'IRsFuts'],
+                   [CommoditiesTickers, 'Commodities'], [['EURUSD', 'GBPUSD', 'CNYUSD', 'JPYUSD','US Dollar Index Futures'], 'FX']]
 
 def ProductsSearch():
-    search_results = investpy.search(text='Emerging Markets Futures', n_results=100)
+    search_results = investpy.search.search_quotes(text='CBOE Volatility Index', n_results=100)
     # 'id_': 44336, 'name': 'CBOE Volatility Index'
     # 'id_': 8859, 'name': 'Nikkei 225 Futures'
     # 'id_': 8984, 'name': 'Hang Seng Futures'
@@ -61,15 +70,16 @@ def ProductsSearch():
     for search_result in search_results:
         jResult = json.loads(str(search_result))
         print(jResult)
-        #print(jResult["id_"])
-        #search_result.retrieve_historical_data(from_date=fromDate, to_date=toDate)
-        #print(search_result.data.head())
-        #break
+        print(jResult["id_"])
+        search_result.retrieve_historical_data(from_date=fromDate, to_date=toDate)
+        print(search_result.retrieve_historical_data(from_date=fromDate, to_date=toDate))
+        print(search_result)
+        break
 
 def DataHandler(mode):
     if mode == 'run':
 
-        dataVec = [1, 1, 1, 1]
+        dataVec = [0, 0, 0, 0, 1]
 
         if dataVec[0] == 1:
 
@@ -121,16 +131,30 @@ def DataHandler(mode):
 
         if dataVec[3] == 1:
 
+            CommoditiesList = []
+            for comdty in CommoditiesTickers:
+                print(comdty)
+                name = comdty.replace('/', '')
+                df = investpy.get_commodity_historical_data(commodity=comdty, from_date=fromDate,
+                                                                 to_date=toDate).reset_index().rename(
+                    columns={"Date": "Dates", "Close": name}).set_index('Dates')[name]
+                CommoditiesList.append(df)
+
+            CommoditiesDF = pd.concat(CommoditiesList, axis=1)
+            CommoditiesDF[CommoditiesDF == 0] = np.nan
+            CommoditiesDF = CommoditiesDF.ffill().sort_index()
+            CommoditiesDF.to_sql('Commodities_Prices', conn, if_exists='replace')
+
+        if dataVec[4] == 1:
+
             CustomList = []
             for customProduct in CustomTickers:
-                print(customProduct[1])
-                search_results = investpy.search(text=customProduct[1], n_results=5)
-                for search_result in search_results:
-                    jResult = json.loads(str(search_result))
-                    if ((jResult["id_"] == customProduct[0]) & (jResult["name"] == customProduct[1])):
-                        df = search_result.retrieve_historical_data(from_date=fromDate, to_date=toDate).reset_index().rename(
-                        columns={"Date": "Dates", "Close": customProduct[1]}).set_index('Dates')[customProduct[1]]
-                        CustomList.append(df)
+                print(customProduct)
+                df = pd.read_csv(customProduct)
+                df['Date'] = pd.to_datetime(df['Date'])
+                CustomName = customProduct.split("/")[1].replace(" Historical Data.csv", "")
+                df = df.rename(columns={"Date": "Dates", "Price": CustomName}).set_index('Dates')[CustomName].sort_index()
+                CustomList.append(df)
 
             CustomDF = pd.concat(CustomList, axis=1)
             CustomDF[CustomDF == 0] = np.nan
@@ -140,7 +164,7 @@ def DataHandler(mode):
     elif mode == 'plot':
 
         dataAll = []
-        for x in ['Bonds_Prices', 'Eqs_Prices', 'Fx_Prices', 'Custom_Prices']:
+        for x in ['Bonds_Prices', 'Eqs_Prices', 'Fx_Prices', 'Commodities_Prices', 'Custom_Prices']:
             df = pd.read_sql('SELECT * FROM '+x, conn)
             if x == 'Bonds_Prices':
                 df = df.rename(columns={"index": "Dates"})
@@ -154,7 +178,8 @@ def DataHandler(mode):
         Rates = sl.d(Prices[BondsTickers]).fillna(0)
         Rates.to_sql('Rates', conn, if_exists='replace')
 
-        rets = sl.dlog(Prices.drop(BondsTickers, axis=1)).fillna(0)
+        PricesTrading = Prices.drop(BondsTickers, axis=1)
+        rets = sl.dlog(PricesTrading).fillna(0)
         rets.to_sql('AssetsRets', conn, if_exists='replace')
 
         # TO PLOT
@@ -168,12 +193,16 @@ def DataHandler(mode):
                 returnTs = pd.read_sql('SELECT * FROM Rates', conn).set_index('Dates', drop=True)
                 returnTs.index = [x.replace("00:00:00", "").strip() for x in returnTs.index]
                 returnTs_ylabel = '$r_t$'
+                ncolIn = 1
+                legendSize = [17]
             else:
                 df = Prices[[x for x in Prices.columns if x not in BondsTickers]].ffill()
                 ylabel = '$S_t$'
                 returnTs = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
                 returnTs.index = [x.replace("00:00:00", "").strip() for x in returnTs.index]
                 returnTs_ylabel = '$x_t$'
+                ncolIn = 1
+                legendSize = [14]
             # Plot 1
             fig, ax = plt.subplots()
             mpl.pyplot.locator_params(axis='x', nbins=35)
@@ -184,7 +213,7 @@ def DataHandler(mode):
                 label.set_rotation(45)
             ax.set_xlim(xmin=0.0, xmax=len(Prices) + 1)
             mpl.pyplot.ylabel(ylabel, fontsize=32)
-            plt.legend(loc=2, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 17})
+            plt.legend(loc=2, ncol=ncolIn, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': legendSize[0]})
             plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
             plt.margins(0, 0)
             plt.grid()
@@ -200,7 +229,7 @@ def DataHandler(mode):
                 label.set_rotation(45)
             ax.set_xlim(xmin=0.0, xmax=len(Prices) + 1)
             mpl.pyplot.ylabel(returnTs_ylabel, fontsize=32)
-            plt.legend(loc=2, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 17})
+            plt.legend(loc=2, ncol=ncolIn, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': legendSize[0]})
             plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
             plt.margins(0, 0)
             plt.grid()
@@ -208,9 +237,8 @@ def DataHandler(mode):
 
 def LongOnly():
     dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
-    for subset in [[["S&P 500", 'Nasdaq', 'DAX', 'CAC 40', 'FTSE 100', 'Shanghai', 'Nikkei 225'], 'EqsFuts'],
-                   [['Euro Bund Futures', 'US 10 Year T-Note Futures'], 'BondsFuts'],
-                   [['Gold Futures'], 'Commodities'], [['EURUSD', 'GBPUSD', 'CNYUSD', 'JPYUSD','US Dollar Index Futures'], 'FX']]:
+    dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
+    for subset in subPortfoliosList:
         df = dfAll[subset[0]]
         longOnlySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df), columns=["Sharpe"]).round(4)
         longOnlySharpes.to_sql('longOnlySharpes_'+subset[1], conn, if_exists='replace')
@@ -219,12 +247,25 @@ def LongOnly():
         print(subset[1], ",", np.sqrt(252) * sl.sharpe(subrsDf))
         subrsDf.to_sql('LongOnlyEWPrsDf_'+subset[1], conn, if_exists='replace')
 
+        randomWalkPnl_subrsDf = sl.S(sl.sign(subrsDf)) * subrsDf
+        print("Random Walk "+subset[1]+" Sharpe : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_subrsDf).round(4))
+
+    rollSharpe_dfAll = sl.rollStatistics(dfAll, 'Sharpe', nIn=250)
+    rollSharpe_dfAll.to_sql('rollSharpe_dfAll', conn, if_exists='replace')
+
+    randomWalkPnl_Df = sl.S(sl.sign(dfAll)) * dfAll
+    print("Random Walk dfAll Sharpe : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_Df).round(4))
+
     rsDf = pd.DataFrame(sl.E(dfAll))
     print("Total LO : ", np.sqrt(252) * sl.sharpe(rsDf))
     rsDf.to_sql('LongOnlyEWPrsDf', conn, if_exists='replace')
 
+    randomWalkPnl_rsDf = sl.S(sl.sign(rsDf)) * rsDf
+    print("Random Walk rsdfAll Sharpe : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_rsDf).round(4))
+
 def RiskParity():
     dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
+    dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
 
     SRollVol = np.sqrt(252) * sl.S(sl.rollStatistics(dfAll, method='Vol', nIn=250)) * 100
     SRollVolToPlot = SRollVol.copy()
@@ -239,14 +280,68 @@ def RiskParity():
     riskParitySharpesAll.to_sql('riskParitySharpeRatiosAll', conn, if_exists='replace')
     print("RiskParityEWPrsDfAll Sharpe = ", (np.sqrt(252) * sl.sharpe(rsDfAll)).round(4))
 
-    for subset in [[["S&P 500", 'Nasdaq', 'DAX', 'CAC 40', 'FTSE 100', 'Shanghai', 'Nikkei 225'], 'EqsFuts'],
-                   [['Euro Bund Futures', 'US 10 Year T-Note Futures'], 'BondsFuts'],
-                   [['Gold Futures'], 'Commodities'],
-                   [['EURUSD', 'GBPUSD', 'CNYUSD', 'JPYUSD', 'US Dollar Index Futures'], 'FX']]:
+    for subset in subPortfoliosList:
         df = dfAll[subset[0]]
         rsDf = pd.DataFrame(sl.rs(df))
+        rsDf.to_sql('riskParityDF_'+subset[1], conn, if_exists='replace')
         riskParitySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(rsDf), columns=["Sharpe"]).round(4)
         riskParitySharpes.to_sql('riskParitySharpeRatios_'+subset[1], conn, if_exists='replace')
+
+def RollingSharpes(mode):
+    if mode == 'Benchmark':
+        dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
+        dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
+        dfAll_assets = sl.rollStatistics(dfAll, 'Sharpe')
+
+        dfAll_assets.index = [x.replace("00:00:00", "").strip() for x in dfAll_assets.index]
+        fig, ax = plt.subplots()
+        mpl.pyplot.locator_params(axis='x', nbins=35)
+        dfAll_assets.plot(ax=ax)
+        for label in ax.get_xticklabels():
+            label.set_fontsize(25)
+            label.set_ha("right")
+            label.set_rotation(45)
+        ax.set_xlim(xmin=0.0, xmax=len(dfAll_assets) + 1)
+        mpl.pyplot.ylabel("$sh_{A,i,t}$", fontsize=32)
+        plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 14})
+        plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
+        plt.margins(0, 0)
+        plt.grid()
+        plt.show()
+
+        LO_List = []
+        for subset in subPortfoliosList:
+            LO_List.append(pd.read_sql('SELECT * FROM LongOnlyEWPrsDf_'+subset[1], conn).set_index('Dates', drop=True))
+        LO_DF = pd.concat(LO_List, axis=1)
+        LO_DF.columns = ["Equities Futures", "Bonds Futures", "Commodities Futures", "Interest Rates Futures", "FX"]
+        RP_List = []
+        for subset in subPortfoliosList:
+            RP_List.append(pd.read_sql('SELECT * FROM riskParityDF_'+subset[1], conn).set_index('Dates', drop=True))
+        RP_DF = pd.concat(RP_List, axis=1)
+        RP_DF.columns = LO_DF.columns
+
+        dfList = [sl.rollStatistics(LO_DF, 'Sharpe'), sl.rollStatistics(RP_DF, 'Sharpe')]
+
+        fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
+        mpl.pyplot.locator_params(axis='x', nbins=35)
+        titleList = ['(a)', '(b)']
+        c = 0
+        for df in dfList:
+            df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+            df.plot(ax=ax[c])
+            for label in ax[c].get_xticklabels():
+                label.set_fontsize(25)
+                label.set_ha("right")
+                label.set_rotation(40)
+            ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
+            # ax[c].set_title(titleList[c], y=1.0, pad=-20)
+            ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
+            #ax[c].legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'weight': 'bold', 'size': 24})
+            ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 16})
+            ax[c].grid()
+            c += 1
+        plt.subplots_adjust(top=0.95, bottom=0.15, right=0.82, left=0.08, hspace=0.1, wspace=0)
+        plt.show()
 
 def RunRollManifold(manifoldIn, universe):
     df = sl.fd(pd.read_sql('SELECT * FROM '+universe, conn).set_index('Dates', drop=True).fillna(0))
@@ -254,45 +349,18 @@ def RunRollManifold(manifoldIn, universe):
     for tw in twList:
         print("tw = ", tw)
 
-        out = sl.AI.gRollingManifold(manifoldIn, df, tw, 5, [0, 1, 2, 3, 4], Scaler='Standard', ProjectionMode='Transpose')
+        out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard', ProjectionMode='Transpose')
 
         out[0].to_sql(manifoldIn + "_" + universe + '_df_tw_' + str(tw), conn, if_exists='replace')
-        principalCompsDfList = out[1]
+        principalCompsDfList_Target = out[1][0]
+        principalCompsDfList_First = out[1][1]
+        principalCompsDfList_Last = out[1][2]
         out[2].to_sql(manifoldIn + "_" + universe + '_lambdasDf_tw_' + str(tw), conn, if_exists='replace')
         out[3].to_sql(manifoldIn + "_" + universe + '_sigmasDf_tw_' + str(tw), conn, if_exists='replace')
-        for k in range(len(principalCompsDfList)):
-            principalCompsDfList[k].to_sql(manifoldIn + "_" + universe + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), conn,
-                                           if_exists='replace')
-
-def ProjectionsPlots(manifoldIn, universe):
-    df = sl.fd(pd.read_sql('SELECT * FROM '+universe, conn).set_index('Dates', drop=True).fillna(0))#.iloc[-300:]
-
-    rsProjectionList = []
-    for tw in twList:
-        print(manifoldIn + " tw = ", tw)
-        rawCompsList = []
-        list = []
-        for c in [0,1,2,3,4]:
-            try:
-                DMAPsW = pd.read_sql('SELECT * FROM ' + manifoldIn + "_" + universe + '_principalCompsDf_tw_'+str(tw) + "_" + str(c), conn).set_index('Dates', drop=True)
-                rawCompsList.append(DMAPsW)
-                DMAPsW = sl.sign(DMAPsW)
-                medDf = df * sl.S(DMAPsW)
-                pr = sl.rs(medDf.fillna(0))
-                list.append(pr)
-            except:
-                pass
-
-        rawCompsDF = pd.concat(rawCompsList, axis=1, ignore_index=True)
-        sl.PaperSinglePlot(rawCompsDF, "yLabelIn")
-
-        exPostProjections = pd.concat(list, axis=1, ignore_index=True)
-        exPostProjections.to_sql(manifoldIn + "_" + universe + '_RsExPostProjections_tw_'+str(tw), conn, if_exists='replace')
-        exPostProjections.index = [x.replace("00:00:00", "").strip() for x in exPostProjections.index]
-
-        rsProjection = sl.cs(sl.rs(exPostProjections))
-        rsProjection.name = '$\Pi Y_{s'+manifoldIn+','+str(tw)+',t}$'
-        rsProjectionList.append(rsProjection)
+        for k in range(len(principalCompsDfList_Target)):
+            principalCompsDfList_Target[k].to_sql(manifoldIn + "_" + universe + '_principalCompsDf_Target_tw_' + str(tw) + "_" + str(k), conn, if_exists='replace')
+            principalCompsDfList_First[k].to_sql(manifoldIn + "_" + universe + '_principalCompsDf_First_tw_' + str(tw) + "_" + str(k), conn, if_exists='replace')
+            principalCompsDfList_Last[k].to_sql(manifoldIn + "_" + universe + '_principalCompsDf_Last_tw_' + str(tw) + "_" + str(k), conn, if_exists='replace')
 
 def getProjections():
     df = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
@@ -317,199 +385,6 @@ def getProjections():
 
     allProjectionsDF = pd.concat(allProjections, axis=1)
     allProjectionsDF.to_sql('allProjectionsDF', conn, if_exists='replace')
-
-def ARIMAlocal(argList):
-    selection = argList[0]
-    df = argList[1]
-    trainLength = argList[2]
-    orderIn = argList[3]
-    print(selection, ",", trainLength, ",", orderIn)
-
-    Arima_Results = sl.ARIMA_Walk(df, trainLength, orderIn)
-
-    Arima_Results[0].to_sql(selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                            if_exists='replace')
-    Arima_Results[1].to_sql(selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                            if_exists='replace')
-
-    sig = sl.sign(Arima_Results[1])
-
-    pnl = sig * Arima_Results[0]
-    pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn, if_exists='replace')
-
-def ARIMAonPortfolios(Portfolios, scanMode, mode):
-    if Portfolios == 'Projections':
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
-    elif Portfolios == 'ClassicPortfolios':
-        allPortfoliosList = []
-        for tw in twList:
-            subDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_'+str(tw), conn).set_index('Dates', drop=True)
-            subDF.columns = ["RP_"+str(tw)]
-            allPortfoliosList.append(subDF)
-        LOportfolio = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
-        LOportfolio.columns = ["LO"]
-        allPortfoliosList.append(LOportfolio)
-        allProjectionsDF = pd.concat(allPortfoliosList, axis=1)
-
-    if scanMode == 'Main':
-
-        if mode == "run":
-            processList = []
-            for OrderP in [1, 3]:
-                orderIn = (OrderP, 0, 0)
-                for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], 0.1, orderIn])
-
-            p = mp.Pool(mp.cpu_count())
-            result = p.map(ARIMAlocal, tqdm(processList))
-            p.close()
-            p.join()
-
-        elif mode == "report":
-            notProcessed = []
-            for OrderP in [1, 3]:
-                orderIn = (OrderP, 0, 0)
-                shList = []
-                for selection in allProjectionsDF.columns:
-                    try:
-                        pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+
-                                          str(orderIn[0])+str(orderIn[1])+str(orderIn[2]), conn).set_index('Dates', drop=True).iloc[round(0.1*len(allProjectionsDF)):]
-                        medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).values[0]
-                        shList.append([selection, medSh])
-                    except Exception as e:
-                        print(e)
-                        notProcessed.append(selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2]))
-                shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True)
-                shDF.to_sql(Portfolios+'_sh_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2]), conn, if_exists='replace')
-                notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
-                notProcessedDF.to_sql(Portfolios+'_notProcessedDF', conn, if_exists='replace')
-
-    elif scanMode == 'ScanNotProcessed':
-        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'notProcessedDF', conn).set_index('index', drop=True)
-        for idx, row in notProcessedDF.iterrows():
-            splitInfo = row['NotProcessedProjection'].split("_ARIMA_pnl_")
-            selection = splitInfo[0]
-            orderStr = str(splitInfo[1])
-            orderIn = (int(orderStr[0]), int(orderStr[1]), int(orderStr[2]))
-            try:
-                print(selection)
-                Arima_Results = sl.ARIMA_Walk(allProjectionsDF[selection], 0.3, orderIn)
-
-                Arima_Results[0].to_sql(
-                    selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                    if_exists='replace')
-                Arima_Results[1].to_sql(
-                    selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                    if_exists='replace')
-
-                sig = sl.sign(Arima_Results[1])
-
-                pnl = sig * Arima_Results[0]
-                pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                           if_exists='replace')
-
-                print("ARIMA (" + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + ") Sharpe = ",
-                      np.sqrt(252) * sl.sharpe(pnl))
-            except Exception as e:
-                print("selection = ", selection, ", error : ", e)
-
-def BetaRegressions(mode):
-    rets = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
-    Rates = pd.read_sql('SELECT * FROM Rates', conn).set_index('Dates', drop=True)
-    PcaDF_AssetsRets = pd.read_sql('SELECT * FROM PCA_AssetsRets_RsExPostProjections', conn).set_index('Dates', drop=True)
-    DmapDF_AssetsRets = pd.read_sql('SELECT * FROM DMAP_AssetsRets_RsExPostProjections', conn).set_index('Dates', drop=True)
-    allProjectionsDF_AssetsRets = pd.concat([sl.rs(PcaDF_AssetsRets), sl.rs(DmapDF_AssetsRets)], axis=1)
-    allProjectionsDF_AssetsRets.columns = ["PcaDF_AssetsRets", "DmapDF_AssetsRets"]
-    PcaDF_Rates = pd.read_sql('SELECT * FROM PCA_AssetsRets_RsExPostProjections', conn).set_index('Dates', drop=True)
-    DmapDF_Rates = pd.read_sql('SELECT * FROM DMAP_AssetsRets_RsExPostProjections', conn).set_index('Dates', drop=True)
-    allProjectionsDF_Rates = pd.concat([sl.rs(PcaDF_Rates), sl.rs(DmapDF_Rates)], axis=1)
-    allProjectionsDF_Rates.columns = ["PcaDF_Rates", "DmapDF_Rates"]
-
-    if mode == 'rets':
-        BetaScan = rets
-        regressX = rets.columns
-    elif mode == 'Rates':
-        BetaScan = pd.concat([rets, Rates], axis=1)
-        regressX = Rates.columns
-    elif mode == 'PcaDF_AssetsRets':
-        BetaScan = pd.concat([rets, PcaDF_AssetsRets], axis=1)
-        regressX = PcaDF_AssetsRets.columns
-    elif mode == 'DmapDF_AssetsRets':
-        BetaScan = pd.concat([rets, DmapDF_AssetsRets], axis=1)
-        regressX = DmapDF_AssetsRets.columns
-    elif mode == 'allProjectionsDF_AssetsRets':
-        BetaScan = pd.concat([rets, allProjectionsDF_AssetsRets], axis=1)
-        regressX = allProjectionsDF_AssetsRets.columns
-    elif mode == 'PcaDF_Rates':
-        BetaScan = pd.concat([rets, PcaDF_Rates], axis=1)
-        regressX = PcaDF_Rates.columns
-    elif mode == 'DmapDF_Rates':
-        BetaScan = pd.concat([rets, DmapDF_Rates], axis=1)
-        regressX = DmapDF_Rates.columns
-    elif mode == 'allProjectionsDF_Rates':
-        BetaScan = pd.concat([rets, allProjectionsDF_Rates], axis=1)
-        regressX = allProjectionsDF_Rates.columns
-
-    BetaRegPnLlist = []
-    for asset in rets:
-        print(asset)
-        betaReg = sl.BetaRegression(BetaScan, asset)
-        regRHS = sl.rs(BetaScan[regressX].mul(betaReg[0][regressX]).fillna(0))
-        medPnL = BetaScan[asset].mul(sl.S(sl.sign(regRHS)))
-        medPnL.name = asset
-        BetaRegPnLlist.append(medPnL)
-
-    BetaRegPnLDF = pd.concat(BetaRegPnLlist, axis=1)
-    BetaRegPnLSh = (np.sqrt(252) * sl.sharpe(BetaRegPnLDF)).round(4)
-    print(BetaRegPnLSh)
-    BetaRegPnLSh.to_sql("BetaReg_" + mode + '_sh', conn, if_exists='replace')
-
-    sl.ecs(BetaRegPnLDF).plot()
-    # fig, ax = plt.subplots(nrows=3, ncols=1)
-    # betasDF.plot(ax=ax[0], title="Betas")
-    # betaReg[1].plot(ax=ax[1], title="RollVols")
-    # sl.ecs(BetaRegPnL).plot(ax=ax[1], title="Regress")
-    # sl.ecs(sl.rs(BetaRegPnL)).plot(ax=ax[2], title="Regress")
-    plt.show()
-
-def ReturnsComparison(mode):
-    if mode == 'singleAsset':
-        prices = pd.read_sql('SELECT * FROM Prices', conn).set_index('Dates', drop=True)[['DAX']]
-
-        print("First Value = ", prices.iloc[0].values[0], ", Last Value = ", prices.iloc[-1].values[0])
-        print("Real Return = ", 100 * ((prices.iloc[-1]-prices.iloc[0])/prices.iloc[0]).values[0], " (%)")
-
-        cs_dlogPrices = sl.ecs(sl.dlog(prices))
-        cs_classic_dlogPrices = sl.cs(sl.dlog(prices))
-        cs_pctChangePrices = sl.cs(sl.r(prices, calcMethod='Discrete'))
-
-        print("Last cs_dlogPrices = ", cs_dlogPrices.iloc[-1] * 100)
-        print("Last cs_classic_dlogPrices = ", cs_classic_dlogPrices.iloc[-1] * 100)
-        print("Last cs_pctChangePrices = ", cs_pctChangePrices.iloc[-1] * 100)
-
-        fig, ax = plt.subplots(nrows=4, ncols=1)
-        prices.plot(ax=ax[0])
-        cs_dlogPrices.plot(ax=ax[1])
-        cs_classic_dlogPrices.plot(ax=ax[2])
-        cs_pctChangePrices.plot(ax=ax[3])
-        plt.show()
-
-    elif mode == 'portfolio':
-        prices = pd.read_sql('SELECT * FROM Prices', conn).set_index('Dates', drop=True)[['DAX', "S&P 500"]]
-        dlogPrices = sl.dlog(prices)
-        portfolio = dlogPrices.copy()
-        cs_dlogPortfolio = sl.ecs(portfolio)
-        cs_dlogPortfolio['I_CASH'] = 100
-        cs_dlogPortfolio['I_CASH_DAX'] = cs_dlogPortfolio['I_CASH'] * 0.8
-        cs_dlogPortfolio['I_CASH_S&P 500'] = cs_dlogPortfolio['I_CASH'] * 0.2
-        cs_dlogPortfolio['CASH_DAX'] = (cs_dlogPortfolio['DAX'])*cs_dlogPortfolio['I_CASH_DAX']
-        cs_dlogPortfolio['CASH_S&P 500'] = (cs_dlogPortfolio['S&P 500'])*cs_dlogPortfolio['I_CASH_S&P 500']
-        cs_dlogPortfolio['CASH_DAX_S&P 500'] = cs_dlogPortfolio['CASH_DAX'] + cs_dlogPortfolio['CASH_S&P 500']
-        cs_dlogPortfolio['Actual_csPortRet'] = cs_dlogPortfolio['CASH_DAX_S&P 500'] / cs_dlogPortfolio['I_CASH']
-        cs_dlogPortfolio['Actual_dPortRet'] = sl.d(cs_dlogPortfolio['Actual_csPortRet'])
-        cs_dlogPortfolio['Port_Ret_f_csDlog'] = cs_dlogPortfolio['DAX']*0.8 + cs_dlogPortfolio['S&P 500']*0.2
-        print(portfolio.tail())
-        print(cs_dlogPortfolio.tail())
 
 def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
@@ -625,139 +500,182 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
                     c += 1
 
-    elif mode == "plotMetrics":
-
-        resDF = sl.fd(pd.read_sql('SELECT * FROM ' +'gDMAP_TES_'+universe+"_"+str(alphaChoice), conn).set_index('Dates', drop=True)).fillna(0)
-        print(resDF.max())
-        resDF.plot()
-        plt.show()
-
     elif mode == 'trade':
         weightSpace = [1, 1, 1]
-        if weightSpace[0] == 1:
-            ################### SPACIAL WEIGHTS #################
-            tw = 25
-            dmapsCompAssetRetsDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True)
-            dmapsCompRatesDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_tw_'+ str(tw) + '_0', conn).set_index('Dates', drop=True)
+        preCursorParams = [25,1]
 
-            for pr in range(1,5):
-                dmapsCompAssetRetsDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_tw_'+str(tw)+'_'+str(pr), conn).set_index('Dates', drop=True)
-                dmapsCompRatesDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True)
+        startDim = 0
+        maxDims = 5
+        scenario = 0
+        pnlList = []
+        for runSet in ['First', 'Last']:  # First, Target, Last
+            # Scenario 1000 ---> Test
+            #First, 0, 5 --> Scenario 0 (DONE) |
+            #Target, 0, 5 --> Scenario 1 (DONE) |
+            #Last, 0, 5 --> Scenario 2 (DONE) |
+            #First, 0, 0 --> Scenario 3 (DONE) | First, 1, 0 --> Scenario 4 (DONE) |
+            #First, 2, 0 --> Scenario 5 (DONE) | First, 3, 0 --> Scenario 6 (DONE) | First, 4, 0 --> Scenario 7 (DONE) |
+            #Target, 0, 0 --> Scenario 8 (DONE) | Target, 1, 0 --> Scenario 9 (DONE) |
+            #Target, 2, 0 --> Scenario 10 (DONE) | Target, 3, 0 --> Scenario 11 (DONE) | Target, 4, 0 --> Scenario 12 (DONE) |
+            #Last, 0, 0 --> Scenario 13 (DONE) | Last, 1, 0 --> Scenario 14 (DONE) |
+            #Last, 2, 0 --> Scenario 15 (DONE) | Last, 3, 0 --> Scenario 16 (DONE) | Last, 4, 0 --> Scenario 17 (DONE) |
+            #First, 0, 2 --> Scenario 18 (DONE) | Target, 0, 2 --> Scenario 19 (DONE) | Last, 0, 2 --> Scenario 20 (DONE) |
+            #First, 0, 3 --> Scenario 21 (DONE) | Target, 0, 3 --> Scenario 22 (DONE) | Last, 0, 3 --> Scenario 23 (DONE) |
+            #First, 0, 4 --> Scenario 24 (DONE) | Target, 0, 4 --> Scenario 25 (DONE) | Last, 0, 4 --> Scenario 26  |
 
-        if weightSpace[1] == 1:
-            ###################### TEMPORAL WEIGHTS LINEAR REGRESSION #######################
-            sigDriverTemporalRegressionAssetsRets = sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_0", conn).set_index('Dates', drop=True)).fillna(0)
-            sigDriverTemporalRegressionRates = sl.rs(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_0", conn).set_index('Dates', drop=True))).fillna(0)
+            #First, 0, 5, preCursorParams = [25,1] --> good C,D
+            #First, 0, 5, preCursorParams = [5,1] --> good A(>0.7),C
 
-            for pr in range(1,5):
-                sigDriverTemporalRegressionAssetsRets += sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True))).fillna(0)
-                sigDriverTemporalRegressionRates += sl.rs(sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True))).fillna(0))
+            if weightSpace[0] == 1:
+                ################### SPACIAL EMBEDDING #################
+                lambdasFlag = 0
+                tw = twList[0]
+                if lambdasFlag == 0:
+                    dmapsCompAssetRetsDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
+                    dmapsCompRatesDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_'+ str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
 
-        if weightSpace[2] == 1:
-            ###################### TEMPORAL WEIGHTS CLEAN #######################
-            sigDriverTemporalAssetsRets = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
-            sigDriverTemporalRates = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
+                    for pr in range(1,maxDims):
+                        dmapsCompAssetRetsDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_'+str(tw)+'_'+str(pr), conn).set_index('Dates', drop=True)
+                        dmapsCompRatesDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True)
+                else:
+                    dmapsCompAssetRetsDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
+                    dmapsCompRatesDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
 
-        ####################################################################
+                    for pr in range(1, maxDims):
+                        dmapsCompAssetRetsDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis=0)
+                        dmapsCompRatesDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_tw_' + str(tw) + '_' + str(pr),  conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis = 0)
 
-        for case in range(10):
-            if case == 0:
-                sig = sl.sign(dmapsCompAssetRetsDF); label = 'A'
-            elif case == 1:
-                sig = sl.sign(sl.rs(dmapsCompRatesDF)); label = 'B'
-            elif case == 2:
-                sig = sigDriverTemporalRegressionAssetsRets; label = 'C'
-            elif case == 3:
-                sig = sigDriverTemporalRegressionRates; label = 'D'
-            elif case == 4:
-                sig = sl.rs(sigDriverTemporalAssetsRets); label = 'E'
-            elif case == 5:
-                sig = sl.rs(sigDriverTemporalRates); label = 'F'
-            else:
-                break
+            if weightSpace[1] == 1:
+                ###################### TEMPORAL WEIGHTS LINEAR REGRESSION #######################
+                sigDriverTemporalRegressionAssetsRets = sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_"+str(startDim), conn).set_index('Dates', drop=True)).fillna(0)
+                sigDriverTemporalRegressionRates = sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_"+str(startDim), conn).set_index('Dates', drop=True)).fillna(0)
 
-            sig = sl.S(sig)
+                for pr in range(1,maxDims):
+                    sigDriverTemporalRegressionAssetsRets += sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True))).fillna(0)
+                    sigDriverTemporalRegressionRates += sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True)).fillna(0))
 
-            #pnl = df
-            pnl = df.mul(sig, axis=0).fillna(0)
+            if weightSpace[2] == 1:
+                ###################### TEMPORAL WEIGHTS CLEAN #######################
+                sigDriverTemporalAssetsRets = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
+                sigDriverTemporalRates = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
 
-            sh_predictDF = np.sqrt(252) * sl.sharpe(pnl)
-            print(sh_predictDF.abs())
-            rspredictDF = sl.rs(pnl)
-            sh_rspredictDF = np.sqrt(252) * sl.sharpe(rspredictDF)
-            print(sh_rspredictDF)
+            ####################################################################
 
-            # Write Projected Time Series
-            rspredictDF.to_sql('rspredictDF_'+label, conn, if_exists='replace')
+            for case in range(10):
+                if case == 0:
+                    sig = dmapsCompAssetRetsDF.copy()
+                    label = 'A'+'_'+runSet
+                elif case == 1:
+                    sig = sl.preCursor(df, dmapsCompAssetRetsDF, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'B'+'_'+runSet
+                elif case == 2:
+                    sig = sl.rs(dmapsCompRatesDF).copy()
+                    label = 'C'+'_'+runSet
+                elif case == 3:
+                    sig = sl.preCursor(df, sl.rs(dmapsCompRatesDF), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'D'+'_'+runSet
+                elif case == 4:
+                    sig = sl.preCursor(df, sigDriverTemporalRegressionAssetsRets, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'E'+'_'+runSet
+                elif case == 5:
+                    sig = sl.preCursor(df, sl.rs(sigDriverTemporalRegressionRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'F'+'_'+runSet
+                elif case == 6:
+                    sig = sl.preCursor(df, sl.rs(sigDriverTemporalAssetsRets), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'G'+'_'+runSet
+                elif case == 7:
+                    sig = sl.preCursor(df, sl.rs(sigDriverTemporalRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'H'+'_'+runSet
+                else:
+                    break
 
-        #fig, ax = plt.subplots(sharex=True, nrows=2, ncols=1)
-        #sig.plot(ax=ax[0], legend=None, title='sig')
-        #sl.cs(rspredictDF).plot(ax=ax[1], legend=None)
-        #fig0, ax0 = plt.subplots()
-        #sl.cs(pnl).plot(ax=ax0)
-        #plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
-        #plt.subplots_adjust(top=0.95, bottom=0.2, right=0.75, left=0.08, hspace=0, wspace=0)
-        #plt.show()
+                sig = sl.S(sig)
 
-        #predictDF = df.copy()
+                pnl = df.mul(sig, axis=0).fillna(0)
 
-        #shList = []
-        #for c1 in dmapsCompAssetRetsDF.columns:
-        #    for c2 in dmapsCompRatesDF.columns:
-        #        kernelDFc1 = sl.rs(pd.DataFrame(dmapsCompAssetRetsDF[c1]))
-        #        projDFc1 = predictDF.mul(sl.S(kernelDFc1), axis=0)
-        #        shList.append([str(c1), np.sqrt(252) * sl.sharpe(sl.rs(projDFc1))])
-        #        kernelDFc2 = sl.rs(pd.DataFrame(dmapsCompRatesDF[c2]))
-        #        projDFc2 = predictDF.mul(sl.S(kernelDFc2), axis=0)
-        #        shList.append([str(c2), np.sqrt(252) * sl.sharpe(sl.rs(projDFc2))])
-        #        kernelDF = sl.rs(pd.DataFrame(dmapsCompAssetRetsDF[c1])) + sl.rs(pd.DataFrame(dmapsCompRatesDF[c2]))
-        #        projDF = predictDF.mul(sl.S(kernelDF), axis=0)
-        #        shList.append([str(c1)+","+str(c2), np.sqrt(252) * sl.sharpe(sl.rs(projDF))])
+                #fig, ax = plt.subplots(sharex=True, nrows=3, ncols=1)
+                #sl.cs(df).plot(ax=ax[0])
+                #dmapsCompAssetRetsDF.plot(ax=ax[1])
+                #sl.cs(pnl).plot(ax=ax[2])
+                #plt.show()
+                #time.sleep(3000)
 
-        #shDF = pd.DataFrame(shList, columns=['name', 'sharpe']).set_index('name', drop=True).abs()
-        #print(shDF.max())
-        #shDF.plot(kind='bar')
-        #plt.show()
+                rspredictDF = sl.rs(pnl)
+                sh_rspredictDF = (np.sqrt(252) * sl.sharpe(rspredictDF)).round(2)
+                print(label, ", ", sh_rspredictDF)
+
+                sh_predictDF = np.sqrt(252) * sl.sharpe(pnl)
+                sh_predictDF.to_sql('sh_predictDF_' + label, conn, if_exists='replace')
+
+                sig.to_sql('sig_' + label, conn, if_exists='replace')
+                pnl.to_sql('pnl_'+label, conn, if_exists='replace')
+                rspredictDF.to_sql('rspredictDF_'+label, conn, if_exists='replace')
+
+            labelList = ['A'+'_'+runSet,'B'+'_'+runSet,'C'+'_'+runSet,'D'+'_'+runSet,'E'+'_'+runSet,'F'+'_'+runSet]
+            for label in labelList:
+                pnl = pd.read_sql('SELECT * FROM rspredictDF_' + str(label), conn).set_index('Dates', drop=True)
+                pnl.columns = [label+'_'+x for x in pnl.columns]
+                pnlList.append(pnl)
+
+        pnlDF = pd.concat(pnlList, axis=1)
+        pnlDF = pnlDF.loc["2006-01-06 00:00:00":,:]
+
+        pnlDF.to_sql('pnlDF_Scenario_'+str(scenario), conn, if_exists='replace')
+        rspnlDF = pd.DataFrame(sl.rs(pnlDF))
+        # SEMA pnls
+        rw_pnl = sl.ExPostOpt(sl.S(sl.sign(pnlDF)) * pnlDF)[0].fillna(0)
+        rw_pnl_Sharpe = (np.sqrt(252) * sl.sharpe(rw_pnl))
+        print("RW Pnl Sharpe = ", rw_pnl_Sharpe)
+
+pnlCalculator = 0
+
+calcMode = 'runSerial'
+#calcMode = 'read'
+pnlCalculator = 0
+probThr = 0.5
+targetSystems = [2] #[0,1]
 
 def ARIMAlocal(argList):
     selection = argList[0]
     df = argList[1]
     trainLength = argList[2]
     orderIn = argList[3]
-    print(selection, ",", trainLength, ",", orderIn)
+    rw = argList[4]
+    print(selection, ",", trainLength, ",", orderIn, ", ", rw)
 
-    Arima_Results = sl.ARIMA_Walk(df, trainLength, orderIn)
+    Arima_Results = sl.ARIMA_Walk(df, trainLength, orderIn, rw)
 
-    Arima_Results[0].to_sql(selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
+    Arima_Results[0].to_sql(selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn,
                             if_exists='replace')
-    Arima_Results[1].to_sql(selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
+    Arima_Results[1].to_sql(selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn,
                             if_exists='replace')
 
-    pickle.dump(Arima_Results[2], open(selection + '_ARIMA_arparamList_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2])+".p", "wb"))
+    pickle.dump(Arima_Results[2], open(selection + '_ARIMA_arparamList_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw) +".p", "wb"))
 
-    sig = sl.sign(Arima_Results[1])
+    if pnlCalculator == 0:
+        sig = sl.sign(Arima_Results[1])
+        pnl = sig * Arima_Results[0]
 
-    pnl = sig * Arima_Results[0]
-    pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn, if_exists='replace')
+    pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + '_' + str(rw), conn, if_exists='replace')
+    print(selection, ",", trainLength, ",", orderIn, ", Sharpe = ", np.sqrt(252) * sl.sharpe(pnl))
 
 def ARIMAonPortfolios(Portfolios, scanMode, mode):
-    if Portfolios == 'rspredictDF':
-        allProjections = []
-        labelList = ['A', 'B', 'C', 'D', 'E', 'F']
-        for label in labelList:
-            allProjections.append(pd.read_sql('SELECT * FROM rspredictDF_'+str(label), conn).set_index('Dates', drop=True))
-        allProjectionsDF = pd.concat(allProjections, axis=1)
-        allProjectionsDF.columns = labelList
 
-    orderList = [1,3]
+    if Portfolios == 'Labels':
+
+        allProjectionsDF = pd.read_sql('SELECT * FROM pnlDF_Scenario_0', conn).set_index('Dates', drop=True)
+        print(allProjectionsDF)
+
+        orderList = [(1,0,0),(2,0,0),(3,0,0)]
+
     if scanMode == 'Main':
 
         if mode == "run":
             processList = []
-            for OrderP in orderList:
-                orderIn = (OrderP, 0, 0)
+            rw = 250
+            for orderIn in orderList:
                 for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], 0.3, orderIn])
+                    processList.append([selection, allProjectionsDF[selection], 0.1, orderIn, rw])
 
             p = mp.Pool(mp.cpu_count())
             result = p.map(ARIMAlocal, tqdm(processList))
@@ -766,78 +684,287 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
 
         elif mode == "report":
             notProcessed = []
-            for OrderP in orderList:
-                orderIn = (OrderP, 0, 0)
-                shList = []
+            rw = 250
+            shList = []
+            for orderIn in orderList:
                 for selection in allProjectionsDF.columns:
                     try:
-                        pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2]), conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
-                        medSh = (np.sqrt(252) * sl.sharpe(pnl)).round(4).values[0]
-                        shList.append([selection, medSh])
+                        pnl = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw),
+                                          conn).set_index('Dates', drop=True).iloc[round(0.3*len(allProjectionsDF)):]
+                        pnl.columns = [selection]
+                        pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
+
+                        sh = (np.sqrt(252) * sl.sharpe(pnl)).round(2)
+                        MEANs = (252 * pnl.mean() * 100).round(2)
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252*100).set_index("index", drop=True).round(2)
+                        STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
+
+                        ttestPair = st.ttest_ind(pnl[selection].values, pnl['RW'].values, equal_var=False)
+                        statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
+
+                        stats = pd.concat([statsMat.iloc[0,:], statsMat.iloc[1,:]], axis=0)
+                        stats.index = ["ARIMA_sh", "ARIMA_Mean", "ARIMA_tConf", "ARIMA_Std", "RW_sh", "RW_Mean", "RW_tConf", "RW_Std"]
+                        stats[["ARIMA_tConf", "RW_tConf"]] = stats[["ARIMA_tConf", "RW_tConf"]].astype(str)
+                        stats["selection"] = selection
+                        stats["ttestPair_statistic"] = np.round(ttestPair.statistic,2)
+                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue,2)
+                        stats["order"] = str(orderIn[0])
+
+                        shList.append(stats)
                     except Exception as e:
                         print(e)
-                        notProcessed.append(selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2]))
-                shDF = pd.DataFrame(shList, columns=['selection', 'sharpe']).set_index("selection", drop=True)
-                shDF.to_sql(Portfolios+'_sh_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2]), conn, if_exists='replace')
-                notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
-                notProcessedDF.to_sql(Portfolios+'_notProcessedDF', conn, if_exists='replace')
+                        notProcessed.append(selection + '_ARIMA_pnl_'+str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw))
+            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(2)
+            shDF.to_sql(Portfolios+'_sh_ARIMA_pnl_' + str(rw), conn, if_exists='replace')
+            shDF_Filtered = shDF[shDF["ttestPair_pvalue"] < 0.05]
+
+            shDF_Filtered.to_sql(Portfolios+'_sh_ARIMA_pnl_tFiltered_' + str(rw), conn, if_exists='replace')
+
+            notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
+            notProcessedDF.to_sql(Portfolios+'_notProcessedDF'+ '_' + str(rw), conn, if_exists='replace')
 
     elif scanMode == 'ScanNotProcessed':
-        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'notProcessedDF', conn).set_index('index', drop=True)
+        processList = []
+        rw = 250
+        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF'+ '_' + str(rw), conn).set_index('index', drop=True)
+
         for idx, row in notProcessedDF.iterrows():
             splitInfo = row['NotProcessedProjection'].split("_ARIMA_pnl_")
             selection = splitInfo[0]
-            orderStr = str(splitInfo[1])
-            orderIn = (int(orderStr[0]), int(orderStr[1]), int(orderStr[2]))
-            try:
-                print(selection)
-                Arima_Results = sl.ARIMA_Walk(allProjectionsDF[selection], 0.3, orderIn)
+            if 1==1:
+            #if float(selection.split("_")[2]) <= 5:
+                orderStr = str(splitInfo[1])
+                orderIn = (int(orderStr[0]), int(orderStr[1]), int(orderStr[2]))
+                processList.append([selection, allProjectionsDF[selection], 0.3, orderIn, rw])
 
-                Arima_Results[0].to_sql(
-                    selection + '_ARIMA_testDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                    if_exists='replace')
-                Arima_Results[1].to_sql(
-                    selection + '_ARIMA_PredictionsDF_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                    if_exists='replace')
+        print("#ARIMA Processes = ", len(processList))
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(ARIMAlocal, tqdm(processList))
+        p.close()
+        p.join()
 
-                sig = sl.sign(Arima_Results[1])
+def ClassificationProcess(argList):
+    selection = argList[0]
+    df = argList[1]
+    params = argList[2]
+    magicNum = argList[3]
 
-                pnl = sig * Arima_Results[0]
-                pnl.to_sql(selection + '_ARIMA_pnl_' + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]), conn,
-                           if_exists='replace')
+    if calcMode in ['runSerial', 'runParallel']:
+        print("Running gClassification")
+        out = sl.AI.gClassification(df, params)
 
-                print("ARIMA (" + str(orderIn[0]) + str(orderIn[1]) + str(orderIn[2]) + ") Sharpe = ",
-                      np.sqrt(252) * sl.sharpe(pnl))
-            except Exception as e:
-                print("selection = ", selection, ", error : ", e)
+        out[0].to_sql('df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[1].to_sql('df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[2].to_sql('df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[3].to_sql('df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[4].to_sql('df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+        out[5].to_sql('df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
 
-#ProductsSearch()
-#DataHandler("run")
-#DataHandler("plot")
+    elif calcMode == 'read':
+        print(selection)
+        out = [
+            pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+        ]
 
-#LongOnly()
-#RiskParity()
+    sig = out[3] # Predicted Price
+    df_real_price_class_DF = out[4]
+    df_real_price_test_DF = out[5]
 
-#RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
-#RunRollManifold("DMAP_pyDmapsRun", 'Rates')
-RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
-RunRollManifold("DMAP_gDmapsRun", 'Rates')
-#ProjectionsPlots('DMAP_pyDmapsRun', "AssetsRets")
-#ProjectionsPlots('DMAP_pyDmapsRun', "Rates")
+    sigDF = sig.copy()
+    if pnlCalculator == 0:
+        probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
+        probDF[probDF < probThr] = 0
+        #sigDF['ProbFilter'] = sl.rs(probDF)
+        sigDF['ProbFilter'] = sl.sign(sl.rs(probDF)-probThr)
+        sigDF.loc[sigDF["ProbFilter"] < 0, "ProbFilter"] = np.nan
+        sigDF.loc[sigDF["Predicted_Test_" + selection] > 1, "Predicted_Test_" + selection] = 0
+        sigDF[selection] = sigDF["Predicted_Test_" + selection] * sigDF['ProbFilter']
 
-#gDMAP_TES("create", "AssetsRets", "")
-#gDMAP_TES("create", "Rates", "")
-#gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'LinearRegression')
-#gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
-#gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
-#gDMAP_TES("plotMetrics", "AssetsRets", 'sumKLMedian')
-#gDMAP_TES("plotMetrics", "Rates", 'sumKLMedian')
+    dfPnl = pd.concat([df_real_price_test_DF, sigDF[selection]], axis=1)
+    dfPnl.columns = ["Real_Price", "Sig"]
 
-#gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
-#gDMAP_TES("trade", "Rates", 'sumKLMedian', '')
+    pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
+    print("PriorLength = ", len(pnl))
+    pnl = pnl.dropna()
+    print("PostLength = ", len(pnl))
+    sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
+    print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
 
-#getProjections()
+    pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
 
-#ARIMAonPortfolios("rspredictDF", 'Main', "run")
-#ARIMAonPortfolios("rspredictDF", 'Main', "report")
+def runClassification(Portfolios, scanMode, mode):
+    def Architecture(magicNum):
 
+        magicNum = int(magicNum)
+
+        if magicNum == 1:
+
+            paramsSetup = {
+                "model": "RNN",
+                "HistLag": 0,
+                "InputSequenceLength": 25,  # 240
+                "SubHistoryLength": 250,  # 760
+                "SubHistoryTrainingLength": 250-1,  # 510
+                "Scaler": "Standard",  # Standard
+                "epochsIn": 100,  # 100
+                "batchSIzeIn": 10,  # 16
+                "EarlyStopping_patience_Epochs": 10,  # 10
+                "LearningMode": 'static',  # 'static', 'online'
+                "medSpecs": [
+                    {"LayerType": "LSTM", "units": 25, "RsF": False, "Dropout": 0.25}
+                ],
+                "modelNum": magicNum,
+                "CompilerSettings": ['adam', 'mean_squared_error'],
+            }
+
+        elif magicNum == 2:
+
+            paramsSetup = {
+                "model": "GPC",
+                "HistLag": 0,
+                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
+                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
+                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
+                "Scaler": "Standard",  # Standard
+                'Kernel': '1',
+                "LearningMode": 'static',  # 'static', 'online'
+                "modelNum": magicNum
+            }
+
+        return paramsSetup
+
+    if Portfolios == 'Labels':
+        allProjectionsDF = pd.read_sql('SELECT * FROM pnlDF_Scenario_0', conn).set_index('Dates', drop=True)
+        print(allProjectionsDF)
+
+    if scanMode == 'Main':
+
+        if mode == "runSerial":
+            for magicNum in targetSystems:
+                params = Architecture(magicNum)
+                for selection in allProjectionsDF.columns:
+                    try:
+                        ClassificationProcess([selection, allProjectionsDF[selection], params, magicNum])
+                    except Exception as e:
+                        print(e)
+
+        elif mode == "runParallel":
+            processList = []
+            for magicNum in targetSystems:
+                params = Architecture(magicNum)
+                for selection in allProjectionsDF.columns:
+                    processList.append([selection, allProjectionsDF[selection], params, magicNum])
+
+            if calcMode == 'read':
+                p = mp.Pool(2)
+            else:
+                p = mp.Pool(mp.cpu_count())
+                #p = mp.Pool(len(processList))
+            #result = p.map(ClassificationProcess, tqdm(processList))
+            result = p.map(ClassificationProcess, processList)
+            p.close()
+            p.join()
+
+        elif mode == "report":
+            shList = []
+            notProcessed = []
+            for magicNum in targetSystems:
+                if magicNum in [1]:
+                    Classifier = "RNN"
+                elif magicNum in [2]:
+                    Classifier = "GPC"
+                for selection in allProjectionsDF.columns:
+                    try:
+                        pnl = pd.read_sql(
+                        'SELECT * FROM pnl_'+Classifier+'_' + selection + '_' + str(magicNum), conn).set_index('Dates', drop=True).dropna()
+
+                        pnl.columns = [selection]
+                        pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
+
+                        sh = np.sqrt(252) * sl.sharpe(pnl)
+                        MEANs = (252 * pnl.mean() * 100).round(2)
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252 * 100).set_index("index",drop=True).round(2)
+                        STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
+
+                        ttestPair = st.ttest_ind(pnl[selection].values, pnl['RW'].values, equal_var=False)
+                        pnl_ttest_0 = st.ttest_1samp(pnl[selection].values, 0)
+                        rw_pnl_ttest_0 = st.ttest_1samp(pnl['RW'].values, 0)
+                        statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
+
+                        stats = pd.concat([statsMat.iloc[0, :], statsMat.iloc[1, :]], axis=0)
+                        stats.index = ["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std", "RW_sh", "RW_Mean",
+                                       "RW_tConf", "RW_Std"]
+                        stats[["Classifier_tConf", "RW_tConf"]] = stats[["Classifier_tConf", "RW_tConf"]].astype(str)
+                        stats["selection"] = selection
+                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue,2)
+                        stats["pnl_ttest_0_pvalue"] = np.round(pnl_ttest_0.pvalue, 2)
+                        stats["rw_pnl_ttest_0_value"] = np.round(rw_pnl_ttest_0.pvalue, 2)
+                        stats["Classifier"] = Classifier+str(magicNum)
+
+                        shList.append(stats)
+                    except Exception as e:
+                        print(e)
+                        notProcessed.append('pnl_'+Classifier+'_' + selection + '_' + str(magicNum))
+
+            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(2)
+            shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
+            print("shDF = ", shDF)
+
+            notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
+            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_'+Classifier, conn, if_exists='replace')
+            print("notProcessedDF = ", notProcessedDF)
+
+    elif scanMode == 'ScanNotProcessed':
+        systemClass = 'GPC'
+        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_'+systemClass, conn).set_index('index', drop=True)
+        print("len(notProcessedDF) = ", len(notProcessedDF))
+        notProcessedList = []
+        for idx, row in notProcessedDF.iterrows():
+            Info = row['NotProcessedProjection'].replace("pnl_"+systemClass+"_", "")
+            selection = Info[:-2]
+            magicNum = Info[-1]
+            params = Architecture(magicNum)
+            print("Rerunning NotProcessed : ", selection, ", ", magicNum)
+            notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
+
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(ClassificationProcess, tqdm(notProcessedList))
+        p.close()
+        p.join()
+
+if __name__ == '__main__':
+    #ProductsSearch()
+    #DataHandler("run")
+    #DataHandler("plot")
+
+    #LongOnly()
+    #RiskParity()
+
+    #RollingSharpes('Benchmark')
+
+    #RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
+    #RunRollManifold("DMAP_pyDmapsRun", 'Rates')
+    #RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
+    #RunRollManifold("DMAP_gDmapsRun", 'Rates')
+
+    #gDMAP_TES("create", "AssetsRets", "", "")
+    #gDMAP_TES("create", "Rates", "", "")
+    #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'LinearRegression')
+    #gDMAP_TES("run", "Rates", 'sumKLMedian', 'LinearRegression')
+    #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
+    #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
+
+    #gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
+
+    #getProjections()
+
+    #ARIMAonPortfolios('Labels', 'Main', 'run')
+    #ARIMAonPortfolios('Labels', 'Main', 'report')
+
+    runClassification("Labels", 'Main', "runSerial")
+    #runClassification("Labels", 'Main', "report")
