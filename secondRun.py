@@ -349,7 +349,10 @@ def RunRollManifold(manifoldIn, universe):
     for tw in twList:
         print("tw = ", tw)
 
-        out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard', ProjectionMode='Transpose')
+        if manifoldIn == "DMAP_gDmapsRun":
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard')
+        else:
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard', ProjectionMode='Transpose')
 
         out[0].to_sql(manifoldIn + "_" + universe + '_df_tw_' + str(tw), conn, if_exists='replace')
         principalCompsDfList_Target = out[1][0]
@@ -501,12 +504,13 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
                     c += 1
 
     elif mode == 'trade':
-        weightSpace = [1, 1, 1]
+        weightSpace = [1, 1, 1, 1]
         preCursorParams = [25,1]
 
         startDim = 0
         maxDims = 5
-        scenario = 0
+        scenario = 0 # raw
+        #scenario = 1 # binary
         pnlList = []
         for runSet in ['First', 'Last']:  # First, Target, Last
             # Scenario 1000 ---> Test
@@ -559,9 +563,28 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
                 sigDriverTemporalAssetsRets = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
                 sigDriverTemporalRates = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
 
+            if weightSpace[3] == 1:
+                ################### SPACIAL EMBEDDING 'KAPPA' GLA #################
+                lambdasFlag = 0
+                tw = twList[0]
+                if lambdasFlag == 0:
+                    dmapsCompAssetRetsDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
+                    dmapsCompRatesDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_'+ str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
+
+                    for pr in range(1,maxDims):
+                        dmapsCompAssetRetsDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_'+str(tw)+'_'+str(pr), conn).set_index('Dates', drop=True)
+                        dmapsCompRatesDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True)
+                else:
+                    dmapsCompAssetRetsDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
+                    dmapsCompRatesDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
+
+                    for pr in range(1, maxDims):
+                        dmapsCompAssetRetsDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis=0)
+                        dmapsCompRatesDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_tw_' + str(tw) + '_' + str(pr),  conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis = 0)
+
             ####################################################################
 
-            for case in range(10):
+            for case in range(20):
                 if case == 0:
                     sig = dmapsCompAssetRetsDF.copy()
                     label = 'A'+'_'+runSet
@@ -586,32 +609,49 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
                 elif case == 7:
                     sig = sl.preCursor(df, sl.rs(sigDriverTemporalRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
                     label = 'H'+'_'+runSet
+                elif case == 8:
+                    sig = dmapsCompAssetRetsDF_gla.copy()
+                    label = 'I'+'_'+runSet
+                elif case == 9:
+                    sig = sl.rs(dmapsCompRatesDF_gla).copy()
+                    label = 'J'+'_'+runSet
+                elif case == 10:
+                    sig = sl.preCursor(df, dmapsCompAssetRetsDF_gla, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'K'+'_'+runSet
+                elif case == 11:
+                    sig = sl.preCursor(df, sl.rs(dmapsCompRatesDF_gla), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                    label = 'L'+'_'+runSet
                 else:
                     break
 
-                sig = sl.S(sig)
+                if scenario == 0:
+                    sig = sl.S(sig)
+                elif scenario == 1:
+                    sig = sl.S(sl.sign(sig))
 
                 pnl = df.mul(sig, axis=0).fillna(0)
 
+                #if case == 8:
                 #fig, ax = plt.subplots(sharex=True, nrows=3, ncols=1)
                 #sl.cs(df).plot(ax=ax[0])
-                #dmapsCompAssetRetsDF.plot(ax=ax[1])
+                #dmapsCompAssetRetsDF_gla.plot(ax=ax[1])
                 #sl.cs(pnl).plot(ax=ax[2])
                 #plt.show()
                 #time.sleep(3000)
 
-                rspredictDF = sl.rs(pnl)
-                sh_rspredictDF = (np.sqrt(252) * sl.sharpe(rspredictDF)).round(2)
+                rspredictDF = pd.DataFrame(sl.rs(pnl), columns=['rsPnL'])
+                sh_rspredictDF = (np.sqrt(252) * sl.sharpe(rspredictDF, mode='processNA')).round(2)
                 print(label, ", ", sh_rspredictDF)
 
-                sh_predictDF = np.sqrt(252) * sl.sharpe(pnl)
+                sh_predictDF = np.sqrt(252) * sl.sharpe(pnl, mode='processNA')
                 sh_predictDF.to_sql('sh_predictDF_' + label, conn, if_exists='replace')
 
                 sig.to_sql('sig_' + label, conn, if_exists='replace')
                 pnl.to_sql('pnl_'+label, conn, if_exists='replace')
                 rspredictDF.to_sql('rspredictDF_'+label, conn, if_exists='replace')
 
-            labelList = ['A'+'_'+runSet,'B'+'_'+runSet,'C'+'_'+runSet,'D'+'_'+runSet,'E'+'_'+runSet,'F'+'_'+runSet]
+            labelList = ['A'+'_'+runSet,'B'+'_'+runSet,'C'+'_'+runSet,'D'+'_'+runSet,'E'+'_'+runSet,'F'+'_'+runSet,
+                         'G'+'_'+runSet,'H'+'_'+runSet,'I'+'_'+runSet,'J'+'_'+runSet,'K'+'_'+runSet,'L'+'_'+runSet]
             for label in labelList:
                 pnl = pd.read_sql('SELECT * FROM rspredictDF_' + str(label), conn).set_index('Dates', drop=True)
                 pnl.columns = [label+'_'+x for x in pnl.columns]
@@ -623,8 +663,8 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
         pnlDF.to_sql('pnlDF_Scenario_'+str(scenario), conn, if_exists='replace')
         rspnlDF = pd.DataFrame(sl.rs(pnlDF))
         # SEMA pnls
-        rw_pnl = sl.ExPostOpt(sl.S(sl.sign(pnlDF)) * pnlDF)[0].fillna(0)
-        rw_pnl_Sharpe = (np.sqrt(252) * sl.sharpe(rw_pnl))
+        rw_pnl = sl.ExPostOpt(sl.S(sl.sign(pnlDF)) * pnlDF)[0]
+        rw_pnl_Sharpe = (np.sqrt(252) * sl.sharpe(rw_pnl, mode='processNA'))
         print("RW Pnl Sharpe = ", rw_pnl_Sharpe)
 
 pnlCalculator = 0
@@ -637,7 +677,7 @@ targetSystems = [2] #[0,1]
 
 def ARIMAlocal(argList):
     selection = argList[0]
-    df = argList[1]
+    df = argList[1].dropna()
     trainLength = argList[2]
     orderIn = argList[3]
     rw = argList[4]
@@ -959,12 +999,12 @@ if __name__ == '__main__':
     #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
     #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    #gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
+    gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
 
     #getProjections()
 
     #ARIMAonPortfolios('Labels', 'Main', 'run')
     #ARIMAonPortfolios('Labels', 'Main', 'report')
 
-    runClassification("Labels", 'Main', "runSerial")
+    #runClassification("Labels", 'Main', "runSerial")
     #runClassification("Labels", 'Main', "report")

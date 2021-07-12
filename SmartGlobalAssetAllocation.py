@@ -349,7 +349,10 @@ def RunRollManifold(manifoldIn, universe):
     for tw in twList:
         print("tw = ", tw)
 
-        out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard', ProjectionMode='Transpose')
+        if manifoldIn == "DMAP_gDmapsRun":
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard')
+        else:
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard', ProjectionMode='Transpose')
 
         out[0].to_sql(manifoldIn + "_" + universe + '_df_tw_' + str(tw), conn, if_exists='replace')
         principalCompsDfList_Target = out[1][0]
@@ -501,131 +504,203 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
                     c += 1
 
     elif mode == 'trade':
-        weightSpace = [1, 1, 1]
+        weightSpace = [1, 1, 1, 1]
         preCursorParams = [25,1]
 
-        startDim = 0
-        maxDims = 5
-        scenario = 0
         pnlList = []
-        for runSet in ['First', 'Last']:  # First, Target, Last
-            # Scenario 1000 ---> Test
-            #First, 0, 5 --> Scenario 0 (DONE) |
-            #Target, 0, 5 --> Scenario 1 (DONE) |
-            #Last, 0, 5 --> Scenario 2 (DONE) |
-            #First, 0, 0 --> Scenario 3 (DONE) | First, 1, 0 --> Scenario 4 (DONE) |
-            #First, 2, 0 --> Scenario 5 (DONE) | First, 3, 0 --> Scenario 6 (DONE) | First, 4, 0 --> Scenario 7 (DONE) |
-            #Target, 0, 0 --> Scenario 8 (DONE) | Target, 1, 0 --> Scenario 9 (DONE) |
-            #Target, 2, 0 --> Scenario 10 (DONE) | Target, 3, 0 --> Scenario 11 (DONE) | Target, 4, 0 --> Scenario 12 (DONE) |
-            #Last, 0, 0 --> Scenario 13 (DONE) | Last, 1, 0 --> Scenario 14 (DONE) |
-            #Last, 2, 0 --> Scenario 15 (DONE) | Last, 3, 0 --> Scenario 16 (DONE) | Last, 4, 0 --> Scenario 17 (DONE) |
-            #First, 0, 2 --> Scenario 18 (DONE) | Target, 0, 2 --> Scenario 19 (DONE) | Last, 0, 2 --> Scenario 20 (DONE) |
-            #First, 0, 3 --> Scenario 21 (DONE) | Target, 0, 3 --> Scenario 22 (DONE) | Last, 0, 3 --> Scenario 23 (DONE) |
-            #First, 0, 4 --> Scenario 24 (DONE) | Target, 0, 4 --> Scenario 25 (DONE) | Last, 0, 4 --> Scenario 26  |
+        pnlrpList = []
+        startDim = 0
+        for maxDims in [0,1,2,3,4,5]:
+            lambdasFlag = 0
+            scenario = maxDims
+            for runSet in ['First', 'Last']:  # First, Target, Last
+                # Scenario 1000 ---> Test
+                #First, 0, 5 --> Scenario 0 (DONE) |
+                #Target, 0, 5 --> Scenario 1 (DONE) |
+                #Last, 0, 5 --> Scenario 2 (DONE) |
+                #First, 0, 0 --> Scenario 3 (DONE) | First, 1, 0 --> Scenario 4 (DONE) |
+                #First, 2, 0 --> Scenario 5 (DONE) | First, 3, 0 --> Scenario 6 (DONE) | First, 4, 0 --> Scenario 7 (DONE) |
+                #Target, 0, 0 --> Scenario 8 (DONE) | Target, 1, 0 --> Scenario 9 (DONE) |
+                #Target, 2, 0 --> Scenario 10 (DONE) | Target, 3, 0 --> Scenario 11 (DONE) | Target, 4, 0 --> Scenario 12 (DONE) |
+                #Last, 0, 0 --> Scenario 13 (DONE) | Last, 1, 0 --> Scenario 14 (DONE) |
+                #Last, 2, 0 --> Scenario 15 (DONE) | Last, 3, 0 --> Scenario 16 (DONE) | Last, 4, 0 --> Scenario 17 (DONE) |
+                #First, 0, 2 --> Scenario 18 (DONE) | Target, 0, 2 --> Scenario 19 (DONE) | Last, 0, 2 --> Scenario 20 (DONE) |
+                #First, 0, 3 --> Scenario 21 (DONE) | Target, 0, 3 --> Scenario 22 (DONE) | Last, 0, 3 --> Scenario 23 (DONE) |
+                #First, 0, 4 --> Scenario 24 (DONE) | Target, 0, 4 --> Scenario 25 (DONE) | Last, 0, 4 --> Scenario 26  |
 
-            #First, 0, 5, preCursorParams = [25,1] --> good C,D
-            #First, 0, 5, preCursorParams = [5,1] --> good A(>0.7),C
+                #First, 0, 5, preCursorParams = [25,1] --> good C,D
+                #First, 0, 5, preCursorParams = [5,1] --> good A(>0.7),C
 
-            if weightSpace[0] == 1:
-                ################### SPACIAL EMBEDDING #################
-                lambdasFlag = 0
-                tw = twList[0]
-                if lambdasFlag == 0:
-                    dmapsCompAssetRetsDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
-                    dmapsCompRatesDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_'+ str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
+                if weightSpace[0] == 1:
+                    ################### SPACIAL EMBEDDING #################
+                    tw = twList[0]
+                    if lambdasFlag == 0:
+                        dmapsCompAssetRetsDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
+                        dmapsCompRatesDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_'+ str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
+
+                        for pr in range(1,maxDims):
+                            dmapsCompAssetRetsDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_'+str(tw)+'_'+str(pr), conn).set_index('Dates', drop=True)
+                            dmapsCompRatesDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True)
+                    else:
+                        dmapsCompAssetRetsDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
+                        dmapsCompRatesDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
+
+                        for pr in range(1, maxDims):
+                            dmapsCompAssetRetsDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis=0)
+                            dmapsCompRatesDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_tw_' + str(tw) + '_' + str(pr),  conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis = 0)
+
+                if weightSpace[1] == 1:
+                    ###################### TEMPORAL WEIGHTS LINEAR REGRESSION #######################
+                    sigDriverTemporalRegressionAssetsRets = sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_"+str(startDim), conn).set_index('Dates', drop=True)).fillna(0)
+                    sigDriverTemporalRegressionRates = sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_"+str(startDim), conn).set_index('Dates', drop=True)).fillna(0)
 
                     for pr in range(1,maxDims):
-                        dmapsCompAssetRetsDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_'+str(tw)+'_'+str(pr), conn).set_index('Dates', drop=True)
-                        dmapsCompRatesDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True)
-                else:
-                    dmapsCompAssetRetsDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
-                    dmapsCompRatesDF = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
+                        sigDriverTemporalRegressionAssetsRets += sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True))).fillna(0)
+                        sigDriverTemporalRegressionRates += sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True)).fillna(0))
 
-                    for pr in range(1, maxDims):
-                        dmapsCompAssetRetsDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis=0)
-                        dmapsCompRatesDF += pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_tw_' + str(tw) + '_' + str(pr),  conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis = 0)
+                if weightSpace[2] == 1:
+                    ###################### TEMPORAL WEIGHTS CLEAN #######################
+                    sigDriverTemporalAssetsRets = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
+                    sigDriverTemporalRates = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
 
-            if weightSpace[1] == 1:
-                ###################### TEMPORAL WEIGHTS LINEAR REGRESSION #######################
-                sigDriverTemporalRegressionAssetsRets = sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_"+str(startDim), conn).set_index('Dates', drop=True)).fillna(0)
-                sigDriverTemporalRegressionRates = sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_"+str(startDim), conn).set_index('Dates', drop=True)).fillna(0)
+                if weightSpace[3] == 1:
+                    ################### SPACIAL EMBEDDING 'KAPPA' GLA #################
+                    tw = twList[0]
+                    if lambdasFlag == 0:
+                        dmapsCompAssetRetsDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
+                        dmapsCompRatesDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_'+ str(tw) + '_'+str(startDim), conn).set_index('Dates', drop=True)
 
-                for pr in range(1,maxDims):
-                    sigDriverTemporalRegressionAssetsRets += sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True))).fillna(0)
-                    sigDriverTemporalRegressionRates += sl.S(sl.fd(pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_LinearRegression_" + str(pr), conn).set_index('Dates', drop=True)).fillna(0))
+                        for pr in range(1,maxDims):
+                            dmapsCompAssetRetsDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_'+str(tw)+'_'+str(pr), conn).set_index('Dates', drop=True)
+                            dmapsCompRatesDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True)
+                    else:
+                        dmapsCompAssetRetsDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
+                        dmapsCompRatesDF_gla = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_Target_tw_' + str(tw) + '_0', conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,0], axis=0)
 
-            if weightSpace[2] == 1:
-                ###################### TEMPORAL WEIGHTS CLEAN #######################
-                sigDriverTemporalAssetsRets = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
-                sigDriverTemporalRates = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_' + str(alphaChoice) + "_Temporal", conn).set_index('Dates', drop=True)
+                        for pr in range(1, maxDims):
+                            dmapsCompAssetRetsDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_tw_' + str(tw) + '_' + str(pr), conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis=0)
+                            dmapsCompRatesDF_gla += pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_tw_' + str(tw) + '_' + str(pr),  conn).set_index('Dates', drop=True).mul(pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_lambdasDf_tw_' + str(tw), conn).set_index('Dates', drop=True).iloc[:,pr], axis = 0)
 
-            ####################################################################
+                ####################################################################
 
-            for case in range(10):
-                if case == 0:
-                    sig = dmapsCompAssetRetsDF.copy()
-                    label = 'A'+'_'+runSet
-                elif case == 1:
-                    sig = sl.preCursor(df, dmapsCompAssetRetsDF, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                    label = 'B'+'_'+runSet
-                elif case == 2:
-                    sig = sl.rs(dmapsCompRatesDF).copy()
-                    label = 'C'+'_'+runSet
-                elif case == 3:
-                    sig = sl.preCursor(df, sl.rs(dmapsCompRatesDF), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                    label = 'D'+'_'+runSet
-                elif case == 4:
-                    sig = sl.preCursor(df, sigDriverTemporalRegressionAssetsRets, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                    label = 'E'+'_'+runSet
-                elif case == 5:
-                    sig = sl.preCursor(df, sl.rs(sigDriverTemporalRegressionRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                    label = 'F'+'_'+runSet
-                elif case == 6:
-                    sig = sl.preCursor(df, sl.rs(sigDriverTemporalAssetsRets), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                    label = 'G'+'_'+runSet
-                elif case == 7:
-                    sig = sl.preCursor(df, sl.rs(sigDriverTemporalRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
-                    label = 'H'+'_'+runSet
-                else:
-                    break
+                for case in range(20):
+                    if case == 0:
+                        sig = dmapsCompAssetRetsDF.copy()
+                        label = 'A'+'_'+runSet
+                    elif case == 1:
+                        sig = sl.preCursor(df, dmapsCompAssetRetsDF, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'B'+'_'+runSet
+                    elif case == 2:
+                        sig = sl.rs(dmapsCompRatesDF).copy()
+                        label = 'C'+'_'+runSet
+                    elif case == 3:
+                        sig = sl.preCursor(df, sl.rs(dmapsCompRatesDF), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'D'+'_'+runSet
+                    elif case == 4:
+                        sig = sl.preCursor(df, sigDriverTemporalRegressionAssetsRets, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'E'+'_'+runSet
+                    elif case == 5:
+                        sig = sl.preCursor(df, sl.rs(sigDriverTemporalRegressionRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'F'+'_'+runSet
+                    elif case == 6:
+                        sig = sl.preCursor(df, sl.rs(sigDriverTemporalAssetsRets), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'G'+'_'+runSet
+                    elif case == 7:
+                        sig = sl.preCursor(df, sl.rs(sigDriverTemporalRates), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'H'+'_'+runSet
+                    elif case == 8:
+                        sig = dmapsCompAssetRetsDF_gla.copy()
+                        label = 'I'+'_'+runSet
+                    elif case == 9:
+                        sig = sl.rs(dmapsCompRatesDF_gla).copy()
+                        label = 'J'+'_'+runSet
+                    elif case == 10:
+                        sig = sl.preCursor(df, dmapsCompAssetRetsDF_gla, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'K'+'_'+runSet
+                    elif case == 11:
+                        sig = sl.preCursor(df, sl.rs(dmapsCompRatesDF_gla), nIn=preCursorParams[0], multiplier=preCursorParams[1], mode='roll')[1]
+                        label = 'L'+'_'+runSet
+                    else:
+                        break
 
-                sig = sl.S(sig)
+                    if scenario == 0:
+                        sig = sl.S(sig)
+                    elif scenario == 1:
+                        sig = sl.S(sl.sign(sig))
 
-                pnl = df.mul(sig, axis=0).fillna(0)
+                    "Projected data"
+                    pnl = df.mul(sig, axis=0).fillna(0)
+                    pnl[pnl == 0] = np.nan
 
-                #fig, ax = plt.subplots(sharex=True, nrows=3, ncols=1)
-                #sl.cs(df).plot(ax=ax[0])
-                #dmapsCompAssetRetsDF.plot(ax=ax[1])
-                #sl.cs(pnl).plot(ax=ax[2])
-                #plt.show()
-                #time.sleep(3000)
+                    "Risk Parity on projected data"
+                    pnl_rp = sl.rp(pnl)
 
-                rspredictDF = sl.rs(pnl)
-                sh_rspredictDF = (np.sqrt(252) * sl.sharpe(rspredictDF)).round(2)
-                print(label, ", ", sh_rspredictDF)
+                    # Resetting zeros on NaNs
+                    pnl = pnl.fillna(0)
 
-                sh_predictDF = np.sqrt(252) * sl.sharpe(pnl)
-                sh_predictDF.to_sql('sh_predictDF_' + label, conn, if_exists='replace')
+                    #if case == 8:
+                    #fig, ax = plt.subplots(sharex=True, nrows=3, ncols=1)
+                    #sl.cs(df).plot(ax=ax[0])
+                    #dmapsCompAssetRetsDF_gla.plot(ax=ax[1])
+                    #sl.cs(pnl).plot(ax=ax[2])
+                    #plt.show()
+                    #time.sleep(3000)
 
-                sig.to_sql('sig_' + label, conn, if_exists='replace')
-                pnl.to_sql('pnl_'+label, conn, if_exists='replace')
-                rspredictDF.to_sql('rspredictDF_'+label, conn, if_exists='replace')
+                    rspredictDF = pd.DataFrame(sl.rs(pnl), columns=['rspredictDF'])
+                    rspredictDF[rspredictDF==0] = np.nan
+                    sh_rspredictDF = (np.sqrt(252) * sl.sharpe(rspredictDF, mode='processNA')).round(2)
 
-            labelList = ['A'+'_'+runSet,'B'+'_'+runSet,'C'+'_'+runSet,'D'+'_'+runSet,'E'+'_'+runSet,'F'+'_'+runSet]
-            for label in labelList:
-                pnl = pd.read_sql('SELECT * FROM rspredictDF_' + str(label), conn).set_index('Dates', drop=True)
-                pnl.columns = [label+'_'+x for x in pnl.columns]
-                pnlList.append(pnl)
+                    rs_rpDF = pd.DataFrame(sl.rs(pnl_rp), columns=['rs_rpDF'])
+                    rs_rpDF[rs_rpDF==0] = np.nan
+                    sh_rs_rpDF = (np.sqrt(252) * sl.sharpe(rs_rpDF, mode='processNA')).round(2)
+
+                    rspredictDF_rp = sl.rp(rspredictDF)
+                    rspredictDF_rp[rspredictDF_rp == 0] = np.nan
+                    sh_rspredictDF_rp = (np.sqrt(252) * sl.sharpe(rspredictDF_rp, mode='processNA')).round(2)
+                    print(label,
+                          ", rawSharpe = ", sh_rspredictDF, ", len(rspredictDF) = ", len(rspredictDF.dropna()),
+                          ", rpSharpe = ", sh_rs_rpDF,", len(rs_rpDF) = ", len(rs_rpDF.dropna()),
+                          ", rs_rpSharpe = ", sh_rspredictDF_rp, ", len(rspredictDF_rp) = ", len(rspredictDF_rp.dropna()))
+
+                    sh_predictDF = np.sqrt(252) * sl.sharpe(pnl, mode='processNA')
+                    sh_predictDF.to_sql('sh_predictDF_' + label, conn, if_exists='replace')
+                    sh_rs_rpDF = np.sqrt(252) * sl.sharpe(pnl_rp, mode='processNA')
+                    sh_rs_rpDF.to_sql('sh_rs_rpDF_' + label, conn, if_exists='replace')
+
+                    sig.to_sql('sig_' + label, conn, if_exists='replace')
+                    pnl.to_sql('pnl_'+label, conn, if_exists='replace')
+                    pnl_rp.to_sql('pnl_rp_'+label, conn, if_exists='replace')
+                    rspredictDF.to_sql('rspredictDF_'+label, conn, if_exists='replace')
+                    rs_rpDF.to_sql('rs_rpDF_'+label, conn, if_exists='replace')
+                    rspredictDF_rp.to_sql('rspredictDF_rp_'+label, conn, if_exists='replace')
+
+                labelList = ['A'+'_'+runSet,'B'+'_'+runSet,'C'+'_'+runSet,'D'+'_'+runSet,'E'+'_'+runSet,'F'+'_'+runSet,
+                             'G'+'_'+runSet,'H'+'_'+runSet,'I'+'_'+runSet,'J'+'_'+runSet,'K'+'_'+runSet,'L'+'_'+runSet]
+                for label in labelList:
+                    sub_pnl = pd.read_sql('SELECT * FROM rspredictDF_' + str(label), conn).set_index('Dates', drop=True)
+                    sub_pnl.columns = [label+'_'+x for x in sub_pnl.columns]
+                    pnlList.append(sub_pnl)
+                    #########################
+                    sub_pnl_rp = pd.read_sql('SELECT * FROM rs_rpDF_' + str(label), conn).set_index('Dates', drop=True)
+                    sub_pnl_rp.columns = [label+'_'+x for x in sub_pnl_rp.columns]
+                    pnlrpList.append(sub_pnl_rp)
 
         pnlDF = pd.concat(pnlList, axis=1)
         pnlDF = pnlDF.loc["2006-01-06 00:00:00":,:]
 
+        pnlrpDF = pd.concat(pnlrpList, axis=1)
+        pnlrpDF = pnlrpDF.loc["2006-01-06 00:00:00":,:]
+
         pnlDF.to_sql('pnlDF_Scenario_'+str(scenario), conn, if_exists='replace')
-        rspnlDF = pd.DataFrame(sl.rs(pnlDF))
+        pnlrpDF.to_sql('pnlrpDF_Scenario_'+str(scenario), conn, if_exists='replace')
         # SEMA pnls
-        rw_pnl = sl.ExPostOpt(sl.S(sl.sign(pnlDF)) * pnlDF)[0].fillna(0)
-        rw_pnl_Sharpe = (np.sqrt(252) * sl.sharpe(rw_pnl))
+        rw_pnl = sl.S(sl.sign(pnlDF)) * pnlDF
+        rw_pnl_Sharpe = (np.sqrt(252) * sl.sharpe(rw_pnl, mode='processNA'))
         print("RW Pnl Sharpe = ", rw_pnl_Sharpe)
+
+        rw_pnl_rp = sl.S(sl.sign(pnlrpDF)) * pnlrpDF
+        rw_pnl_rp_Sharpe = (np.sqrt(252) * sl.sharpe(rw_pnl_rp, mode='processNA'))
+        print("RW Pnl RP Sharpe = ", rw_pnl_rp_Sharpe)
 
 pnlCalculator = 0
 
@@ -637,7 +712,7 @@ targetSystems = [2] #[0,1]
 
 def ARIMAlocal(argList):
     selection = argList[0]
-    df = argList[1]
+    df = argList[1].dropna()
     trainLength = argList[2]
     orderIn = argList[3]
     rw = argList[4]
@@ -959,11 +1034,11 @@ if __name__ == '__main__':
     #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
     #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    #gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
+    gDMAP_TES("trade", "AssetsRets", 'sumKLMedian', '')
 
     #getProjections()
 
-    ARIMAonPortfolios('Labels', 'Main', 'run')
+    #ARIMAonPortfolios('Labels', 'Main', 'run')
     #ARIMAonPortfolios('Labels', 'Main', 'report')
 
     #runClassification("Labels", 'Main', "runSerial")

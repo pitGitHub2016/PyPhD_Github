@@ -349,7 +349,10 @@ def RunRollManifold(manifoldIn, universe):
     for tw in twList:
         print("tw = ", tw)
 
-        out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard', ProjectionMode='Transpose')
+        if manifoldIn == "DMAP_gDmapsRun":
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard')
+        else:
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, len(spacialND), spacialND, Scaler='Standard', ProjectionMode='Transpose')
 
         out[0].to_sql(manifoldIn + "_" + universe + '_df_tw_' + str(tw), conn, if_exists='replace')
         principalCompsDfList_Target = out[1][0]
@@ -949,8 +952,8 @@ if __name__ == '__main__':
 
     #RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
     #RunRollManifold("DMAP_pyDmapsRun", 'Rates')
-    #RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
-    #RunRollManifold("DMAP_gDmapsRun", 'Rates')
+    RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
+    RunRollManifold("DMAP_gDmapsRun", 'Rates')
 
     #gDMAP_TES("create", "AssetsRets", "", "")
     #gDMAP_TES("create", "Rates", "", "")
@@ -966,5 +969,5 @@ if __name__ == '__main__':
     #ARIMAonPortfolios('Labels', 'Main', 'run')
     #ARIMAonPortfolios('Labels', 'Main', 'report')
 
-    runClassification("Labels", 'Main', "runSerial")
+    #runClassification("Labels", 'Main', "runSerial")
     #runClassification("Labels", 'Main', "report")
