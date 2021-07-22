@@ -235,6 +235,36 @@ def DataHandler(mode):
             plt.grid()
             plt.show()
 
+def SharpeRatioSimulations():
+    shList = []
+    for asset in ["S&P 500", "FTSE 100", "GBPUSD", "JPYUSD"]:
+        dataSP = pd.DataFrame(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)[asset].values, columns=['asset'])
+        dataSP = pd.DataFrame(dataSP[dataSP != 0].dropna()['asset'].values)
+        medshList = []
+        for addN in range(1,2000):
+            addData = pd.DataFrame(np.zeros((addN,1)))
+            medData = pd.concat([dataSP.copy(), addData], ignore_index=True)
+            medSh = np.sqrt(252) * sl.sharpe(medData).values[0]
+            medshList.append([addN, medSh])
+        medshDF = pd.DataFrame(medshList, columns=['n', asset]).set_index('n', drop=True)
+        shList.append(medshDF)
+    shDF = pd.concat(shList, axis=1)
+    # PLOT #
+    fig, ax = plt.subplots()
+    mpl.pyplot.locator_params(axis='x', nbins=35)
+    shDF.plot(ax=ax)
+    for label in ax.get_xticklabels():
+        label.set_fontsize(25)
+        label.set_ha("right")
+        label.set_rotation(45)
+    ax.set_xlim(xmin=0.0, xmax=len(shDF) + 1)
+    mpl.pyplot.ylabel("$sh(i,n)$", fontsize=32)
+    plt.legend(loc=2, ncol=1, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 15})
+    plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
+    plt.margins(0, 0)
+    plt.grid()
+    plt.show()
+
 def LongOnly():
     dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
     dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
@@ -242,6 +272,12 @@ def LongOnly():
         df = dfAll[subset[0]]
         longOnlySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df), columns=["Sharpe"]).round(4)
         longOnlySharpes.to_sql('longOnlySharpes_'+subset[1], conn, if_exists='replace')
+
+        longOnlySharpes_TAP = pd.DataFrame(sl.sharpe(df, mode='processNA'))
+        longOnlySharpes_TAP[["rawSharpe", "finalSharpe"]] *= np.sqrt(252)
+        print(longOnlySharpes_TAP)
+        time.sleep(3000)
+        longOnlySharpes_TAP.to_sql('longOnlySharpes_TAP_'+subset[1], conn, if_exists='replace')
 
         subrsDf = pd.DataFrame(sl.E(df))
         print(subset[1], ",", np.sqrt(252) * sl.sharpe(subrsDf))
@@ -891,12 +927,14 @@ pnlCalculator = 0
 calcMode = 'runSerial'
 #calcMode = 'read'
 pnlCalculator = 0
-probThr = 0.5
+#probThr = 0.5
+probThr = 0
 targetSystems = [2] #[0,1]
 
 def ARIMAlocal(argList):
     selection = argList[0]
-    df = argList[1].dropna()
+    df = argList[1]
+    df = df[df!=0]
     trainLength = argList[2]
     orderIn = argList[3]
     rw = argList[4]
@@ -921,7 +959,6 @@ def ARIMAlocal(argList):
 def ARIMAonPortfolios(Portfolios, scanMode, mode):
 
     if Portfolios == 'Assets':
-
         allProjectionsDF = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
 
     orderList = [(1,0,0),(2,0,0)]
@@ -1005,6 +1042,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
 def ClassificationProcess(argList):
     selection = argList[0]
     df = argList[1]
+    df = df[df != 0]
     params = argList[2]
     magicNum = argList[3]
 
@@ -1022,12 +1060,12 @@ def ClassificationProcess(argList):
     elif calcMode == 'read':
         print(selection)
         out = [
-            pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM "df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM "df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM "df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM "df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM "df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM "df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
         ]
 
     sig = out[3] # Predicted Price
@@ -1036,7 +1074,10 @@ def ClassificationProcess(argList):
 
     sigDF = sig.copy()
     if pnlCalculator == 0:
-        probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
+        try:
+            probDF = sigDF[["Predicted_Proba_Test_0.0", "Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
+        except:
+            probDF = sigDF[["Predicted_Proba_Test_1.0", "Predicted_Proba_Test_2.0"]]
         probDF[probDF < probThr] = 0
         #sigDF['ProbFilter'] = sl.rs(probDF)
         sigDF['ProbFilter'] = sl.sign(sl.rs(probDF)-probThr)
@@ -1086,20 +1127,19 @@ def runClassification(Portfolios, scanMode, mode):
             paramsSetup = {
                 "model": "GPC",
                 "HistLag": 0,
-                "InputSequenceLength": 25,  # 240 (main) || 25 (Siettos) ||
-                "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
-                "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
+                "InputSequenceLength": 25,
+                "SubHistoryLength": 250,
+                "SubHistoryTrainingLength": 250 - 1,
                 "Scaler": "Standard",  # Standard
-                'Kernel': '1',
+                'Kernel': '0',
                 "LearningMode": 'static',  # 'static', 'online'
                 "modelNum": magicNum
             }
 
         return paramsSetup
 
-    if Portfolios == 'Labels':
-        allProjectionsDF = pd.read_sql('SELECT * FROM pnlDF_Scenario_0', conn).set_index('Dates', drop=True)
-        print(allProjectionsDF)
+    if Portfolios == 'Assets':
+        allProjectionsDF = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
 
     if scanMode == 'Main':
 
@@ -1140,7 +1180,7 @@ def runClassification(Portfolios, scanMode, mode):
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql(
-                        'SELECT * FROM pnl_'+Classifier+'_' + selection + '_' + str(magicNum), conn).set_index('Dates', drop=True).dropna()
+                        'SELECT * FROM "pnl_'+Classifier+'_' + selection + '_' + str(magicNum)+'"', conn).set_index('Dates', drop=True).dropna()
 
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
@@ -1189,12 +1229,199 @@ def runClassification(Portfolios, scanMode, mode):
             magicNum = Info[-1]
             params = Architecture(magicNum)
             print("Rerunning NotProcessed : ", selection, ", ", magicNum)
-            notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
+            ClassificationProcess([selection, allProjectionsDF[selection], params, magicNum])
+            #notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
 
-        p = mp.Pool(mp.cpu_count())
-        result = p.map(ClassificationProcess, tqdm(notProcessedList))
-        p.close()
-        p.join()
+        #p = mp.Pool(mp.cpu_count())
+        #result = p.map(ClassificationProcess, tqdm(notProcessedList))
+        #p.close()
+        #p.join()
+
+def RegressionProcess(argList):
+    selection = argList[0]
+    df = argList[1]
+    df = df[df != 0]
+    params = argList[2]
+    magicNum = argList[3]
+
+    if calcMode in ['runSerial', 'runParallel']:
+        print("Running gGPRegression")
+        out = sl.AI.gGPRegression(df, params)
+
+        writeFlag = False
+        while writeFlag == False:
+            try:
+                out[0].to_sql('df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                out[1].to_sql('df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                out[2].to_sql('df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                out[3].to_sql('df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                out[4].to_sql('df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                out[5].to_sql('df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                writeFlag = True
+            except Exception as e:
+                print(e)
+                print("Sleeping for some seconds and retrying ... ")
+                time.sleep(1)
+
+    elif calcMode == 'read':
+        print(selection)
+        out = [
+            pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+        ]
+
+    sig = out[3] # Predicted Price
+    df_real_price_class_DF = out[4]
+    df_real_price_test_DF = out[5]
+
+    sigDF = sig.copy()
+    if pnlCalculator == 0:
+        sigDF = sigDF["Predicted_Test_" + selection]
+        sigDF = sl.sign(sigDF)
+
+    sigDF.columns = ["ScaledSignal"]
+
+    dfPnl = pd.concat([df_real_price_test_DF, sigDF], axis=1)
+    dfPnl.columns = ["Real_Price", "Sig"]
+    #dfPnl["Sig"].plot()
+    #plt.show()
+    #time.sleep(3000)
+
+    pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
+    pnl = pnl.dropna()
+    sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
+    print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
+
+    pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+
+def runRegression(Portfolios, scanMode, mode):
+    def Architecture(magicNum):
+
+        magicNum = int(magicNum)
+
+        if magicNum == 0:
+            InputSequenceLength = 1
+        elif magicNum == 1:
+            InputSequenceLength = 3
+        elif magicNum == 2:
+            InputSequenceLength = 5
+        elif magicNum == 3:
+            InputSequenceLength = 10
+        elif magicNum == 4:
+            InputSequenceLength = 25
+
+        paramsSetup = {
+            "model": "GPR",
+            "HistLag": 0,
+            "InputSequenceLength": InputSequenceLength,  # 240 (main) || 25 (Siettos) ||
+            "SubHistoryLength": 250,  # 760 (main) || 250 (Siettos) ||
+            "SubHistoryTrainingLength": 250 - 1,  # 510 (main) || 250-1 (Siettos) ||
+            "Scaler": "Standard",  # Standard
+            'Kernel': '0',
+            "LearningMode": 'static',  # 'static', 'online'
+            "modelNum": magicNum
+        }
+
+        return paramsSetup
+
+    if Portfolios == 'Assets':
+        allProjectionsDF = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
+
+    if scanMode == 'Main':
+
+        if mode == "runSerial":
+            for magicNum in targetSystems:
+                params = Architecture(magicNum)
+                for selection in allProjectionsDF.columns:
+                    RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
+
+        elif mode == "runParallel":
+            processList = []
+            for magicNum in targetSystems:
+                params = Architecture(magicNum)
+                for selection in allProjectionsDF.columns:
+                    processList.append([selection, allProjectionsDF[selection], params, magicNum])
+
+            if calcMode == 'read':
+                p = mp.Pool(2)
+            else:
+                p = mp.Pool(mp.cpu_count())
+                #p = mp.Pool(len(processList))
+            result = p.map(RegressionProcess, tqdm(processList))
+            #result = p.map(RegressionProcess, processList)
+            p.close()
+            p.join()
+
+        elif mode == "report":
+            shList = []
+            notProcessed = []
+            for magicNum in targetSystems:
+                Classifier = "GPR"
+                for selection in allProjectionsDF.columns:
+                    try:
+                        pnl = pd.read_sql(
+                        'SELECT * FROM "pnl_'+Classifier+'_' + selection + '_' + str(magicNum)+'"', conn).set_index('Dates', drop=True).dropna()
+
+                        pnl.columns = [selection]
+                        pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
+
+                        sh = np.sqrt(252) * sl.sharpe(pnl)
+                        MEANs = (252 * pnl.mean() * 100).round(2)
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252 * 100).set_index("index",drop=True).round(2)
+                        STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
+
+                        ttestPair = st.ttest_ind(pnl[selection].values, pnl['RW'].values, equal_var=False)
+                        pnl_ttest_0 = st.ttest_1samp(pnl[selection].values, 0)
+                        rw_pnl_ttest_0 = st.ttest_1samp(pnl['RW'].values, 0)
+                        statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
+
+                        stats = pd.concat([statsMat.iloc[0, :], statsMat.iloc[1, :]], axis=0)
+                        stats.index = ["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std", "RW_sh", "RW_Mean",
+                                       "RW_tConf", "RW_Std"]
+                        stats[["Classifier_tConf", "RW_tConf"]] = stats[["Classifier_tConf", "RW_tConf"]].astype(str)
+                        stats["selection"] = selection
+                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue,2)
+                        stats["pnl_ttest_0_pvalue"] = np.round(pnl_ttest_0.pvalue, 2)
+                        stats["rw_pnl_ttest_0_value"] = np.round(rw_pnl_ttest_0.pvalue, 2)
+                        stats["Classifier"] = Classifier+str(magicNum)
+
+                        shList.append(stats)
+                    except Exception as e:
+                        print(e)
+                        notProcessed.append('pnl_'+Classifier+'_' + selection + '_' + str(magicNum))
+
+            shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True)
+            shDF = shDF[["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std", "pnl_ttest_0_pvalue",
+                         "RW_sh", "RW_Mean", "RW_tConf", "RW_Std", "rw_pnl_ttest_0_value", "ttestPair_pvalue", "Classifier"]]
+            shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
+            print("shDF = ", shDF)
+
+            notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
+            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_'+Classifier, conn, if_exists='replace')
+            print("notProcessedDF = ", notProcessedDF)
+
+    elif scanMode == 'ScanNotProcessed':
+        systemClass = 'GPR'
+        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_'+systemClass, conn).set_index('index', drop=True)
+        print("len(notProcessedDF) = ", len(notProcessedDF))
+        notProcessedList = []
+        for idx, row in tqdm(notProcessedDF.iterrows()):
+            Info = row['NotProcessedProjection'].replace("pnl_"+systemClass+"_", "")
+            selection = Info[:-2]
+            magicNum = Info[-1]
+            params = Architecture(magicNum)
+            print("Rerunning NotProcessed : ", selection, ", ", magicNum)
+            RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
+            #notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
+
+        #p = mp.Pool(mp.cpu_count())
+        #result = p.map(RegressionProcess, tqdm(notProcessedList))
+        #p.close()
+        #p.join()
 
 def DB_Handler():
     From_conn = sqlite3.connect('SmartGlobalAssetAllocation.db')
@@ -1213,7 +1440,9 @@ if __name__ == '__main__':
     #DataHandler("run")
     #DataHandler("plot")
 
-    #LongOnly()
+    #SharpeRatioSimulations()
+
+    LongOnly()
     #RiskParity()
 
     #RollingSharpes('Benchmark')
@@ -1230,13 +1459,18 @@ if __name__ == '__main__':
     #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
     #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    gDMAP_TES("TradeProjections", "AssetsRets", 'sumKLMedian', '')
+    #gDMAP_TES("TradeProjections", "AssetsRets", 'sumKLMedian', '')
 
     #ARIMAonPortfolios('Assets', 'Main', 'run')
     #ARIMAonPortfolios('Assets', 'Main', 'report')
     #ARIMAonPortfolios('Assets', 'ScanNotProcessed', '')
 
-    #runClassification("Labels", 'Main', "runSerial")
-    #runClassification("Labels", 'Main', "report")
+    #runClassification("Assets", 'Main', "runSerial")
+    #runClassification("Assets", 'Main', "report")
+    #runClassification('Assets', 'ScanNotProcessed', '')
+
+    #runRegression("Assets", 'Main', "runSerial")
+    #runRegression("Assets", 'Main', "report")
+    #runRegression("Assets", 'ScanNotProcessed', "")
 
     #DB_Handler()
