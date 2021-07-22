@@ -593,7 +593,7 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
                     c += 1
 
-def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
+def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams):
 
     df = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
     df.drop(['CBOE Volatility Index'], axis=1, inplace=True)
@@ -788,8 +788,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 7:
 
-                preCursorParams = [25, 1, 'roll']
-                #preCursorParams = [25, 1, 'exp']
                 AssetsRets_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
@@ -823,8 +821,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 8:
 
-                preCursorParams = [25, 1, 'roll']
-                #preCursorParams = [25, 1, 'exp']
                 AssetsRets_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
@@ -861,8 +857,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 9:
 
-                preCursorParams = [25, 1, 'roll']
-                #preCursorParams = [25, 1, 'exp']
                 AssetsRets_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_0',conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
@@ -898,8 +892,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 10:
 
-                preCursorParams = [25, 1, 'roll']
-                #preCursorParams = [25, 1, 'exp']
                 Rates_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     medSig = sl.rowStoch(Rates_Sig, mode='abs')
@@ -931,8 +923,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 11:
 
-                #preCursorParams = [25, 1, 'roll']
-                preCursorParams = [25, 1, 'exp']
                 Rates_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     medSig = sl.rowStoch(Rates_Sig, mode='abs')
@@ -964,8 +954,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 12:
 
-                preCursorParams = [25, 1, 'roll']
-                #preCursorParams = [25, 1, 'exp']
                 Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_LinearRegression_0', conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     medSig = sl.rowStoch(Rates_Sig, mode='abs')
@@ -996,8 +984,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 13:
 
-                #preCursorParams = [25, 1, 'roll']
-                preCursorParams = [25, 1, 'exp']
                 Assets_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_Temporal',conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     Assets_MedSig = sl.rowStoch(Assets_Sig, mode='abs')
@@ -1022,8 +1008,6 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
 
             elif scenario == 14:
 
-                #preCursorParams = [25, 1, 'roll']
-                preCursorParams = [25, 1, 'exp']
                 Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_Temporal',conn).set_index('Dates', drop=True)
                 if metadataMode == "rowStochastic":
                     Rates_MedSig = sl.rowStoch(Rates_Sig, mode='abs')
@@ -1048,7 +1032,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
     print("Calculating PnLs ... " + metadataMode + "_" + tradingAssetsMode)
     ###########################################################################################################
 
-    pickle.dump(sigList, open("sigList"+metadataMode+"_"+tradingAssetsMode+".p", "wb" ) )
+    pickle.dump(sigList, open("sigList"+metadataMode+"_"+tradingAssetsMode+"_"+str(preCursorParams[0])+"_"+str(preCursorParams[1])+".p", "wb" ) )
 
     shList = []
     for sigDF in tqdm(sigList):
@@ -1064,7 +1048,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode):
         shList.append(sh_rs_pnl)
 
     shDF = pd.concat(shList).set_index("StrategyName", drop=True)
-    shDF.to_sql('shDF_'+metadataMode+"_"+tradingAssetsMode, conn, if_exists='replace')
+    shDF.to_sql('shDF_'+metadataMode+"_"+tradingAssetsMode+"_"+str(preCursorParams[0])+"_"+str(preCursorParams[1]), conn, if_exists='replace')
 
 pnlCalculator = 0
 
@@ -1602,14 +1586,15 @@ if __name__ == '__main__':
     #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
     #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    gDMAP_TES_TradeProjections("Raw", 'Assets')
-    gDMAP_TES_TradeProjections("Raw", 'RiskParity')
-    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_100')
-    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_200')
-    gDMAP_TES_TradeProjections("rowStochastic", 'Assets')
-    gDMAP_TES_TradeProjections("rowStochastic", 'RiskParity')
-    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100')
-    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200')
+    time_configuration = 'roll' # 'roll', 'exp'
+    gDMAP_TES_TradeProjections("Raw", 'Assets', [25, 1, time_configuration])
+    gDMAP_TES_TradeProjections("Raw", 'RiskParity', [25, 1, time_configuration])
+    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_100', [25, 1, time_configuration])
+    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_200', [25, 1, time_configuration])
+    gDMAP_TES_TradeProjections("rowStochastic", 'Assets', [25, 1, time_configuration])
+    gDMAP_TES_TradeProjections("rowStochastic", 'RiskParity', [25, 1, time_configuration])
+    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100', [25, 1, time_configuration])
+    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200', [25, 1, time_configuration])
 
     #ARIMAonPortfolios('Assets', 'Main', 'run')
     #ARIMAonPortfolios('Assets', 'Main', 'report')
