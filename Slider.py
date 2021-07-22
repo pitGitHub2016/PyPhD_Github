@@ -606,11 +606,11 @@ class Slider:
                 initial_lenDF = len(subTS)
                 rawSh = subTS.mean() / subTS.std()
                 subTS = subTS[subTS!=0].dropna()
-                lenDF = len(subTS)
+                tap_lenDF = len(subTS)
                 medSh = subTS.mean() / subTS.std()
-                shList.append([initial_lenDF, rawSh, lenDF, medSh])
+                shList.append([initial_lenDF, rawSh, tap_lenDF, medSh])
 
-            out = pd.DataFrame(shList, columns=["initial_lenDF", "rawSharpe", "lengthDF", "finalSharpe"], index=df.columns)
+            out = pd.DataFrame(shList, columns=["initial_lenDF", "rawSharpe", "tap_lenDF", "finalSharpe"], index=df.columns)
 
         return out
 
