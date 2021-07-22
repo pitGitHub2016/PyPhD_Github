@@ -1,6 +1,6 @@
 from Slider import Slider as sl
 from scipy.linalg import svd
-import numpy as np, investpy, json, time, pickle, glob, gc
+import numpy as np, investpy, json, time, pickle, glob, copy
 from tqdm import tqdm
 import pandas as pd
 import warnings, sqlite3, os, tensorflow as tf
@@ -616,6 +616,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 if metadataMode == "rowStochastic":
                     sig = sl.rowStoch(sig, mode='abs')
                 sig.name = "runSet_"+runSet+"_scenario_"+str(scenario)+"_"+"0"
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]: #None, 1,2,3,4
@@ -625,9 +626,11 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         if metadataMode == "rowStochastic":
                             sub_sig = sl.rowStoch(sub_sig, mode='abs')
                         sub_sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + str(pr)
+                        sub_sig._metadata += ['name']
                         sigList.append(sub_sig.copy())
                         sig += sub_sig
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_0to" + str(pr)
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                     except Exception as e:
@@ -638,6 +641,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 if metadataMode == "rowStochastic":
                     sig = sl.rowStoch(sig, mode='abs')
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0"
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]: #None, 1,2,3,4
@@ -647,9 +651,11 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         if metadataMode == "rowStochastic":
                             sub_sig = sl.rowStoch(sub_sig, mode='abs')
                         sub_sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + str(pr)
+                        sub_sig._metadata += ['name']
                         sigList.append(sub_sig.copy())
                         sig += sub_sig
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_0to" + str(pr)
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                     except Exception as e:
@@ -661,6 +667,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 if metadataMode == "rowStochastic":
                     sig = sl.rowStoch(sig, mode='abs')
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0"
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]:  # 1,2,3,4
@@ -669,9 +676,11 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         if metadataMode == "rowStochastic":
                             sub_sig = sl.rowStoch(sub_sig, mode='abs')
                         sub_sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + str(pr)
+                        sub_sig._metadata += ['name']
                         sigList.append(sub_sig.copy())
                         sig += sub_sig
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_0to" + str(pr)
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                     except Exception as e:
@@ -687,6 +696,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                     medSig = Temporal_sig.copy()
                 sig = medSig.iloc[:, 0]
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0"
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]: #None, 1,2,3,4
@@ -694,9 +704,11 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                     try:
                         sub_sig = medSig.iloc[:,pr]
                         sub_sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + str(pr)
+                        sub_sig._metadata += ['name']
                         sigList.append(sub_sig.copy())
                         sig += sub_sig
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_0to" + str(pr)
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                     except Exception as e:
@@ -714,6 +726,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 for ratesKernel in ['U.S.','Germany','U.K.','China','Japan']:
                     sig = sl.rs(medSig.loc[:,[x for x in medSig.columns if ratesKernel in x]])
                     sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                    sig._metadata += ['name']
                     sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]: #None, 1,2,3,4
@@ -726,6 +739,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
                             sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                             sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                            sig._metadata += ['name']
                             sigList.append(sig.copy())
 
                     except Exception as e:
@@ -741,6 +755,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
                     sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                     sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                    sig._metadata += ['name']
                     sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]: #None, 1,2,3,4
@@ -753,6 +768,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
                             sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                             sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                            sig._metadata += ['name']
                             sigList.append(sig.copy())
 
                     except Exception as e:
@@ -768,6 +784,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
                     sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                     sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                    sig._metadata += ['name']
                     sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]:  # None, 1,2,3,4
@@ -780,6 +797,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
                             sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                             sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                            sig._metadata += ['name']
                             sigList.append(sig.copy())
 
                     except Exception as e:
@@ -794,10 +812,12 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
 
                 sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0"
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
                 for c in sig.columns:
                     subSubSig = sig[c]
                     subSubSig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
+                    subSubSig._metadata += ['name']
                     sigList.append(subSubSig.copy())
 
                 for pr in [1,2,3,4]:  # None, 1,2,3,4
@@ -808,11 +828,13 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         medSig += sub_sig
                         sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr)
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                         for c in sig.columns:
                             subSubSig = sig[c]
                             subSubSig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
+                            subSubSig._metadata += ['name']
                             sigList.append(subSubSig.copy())
 
                     except Exception as e:
@@ -830,10 +852,12 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],
                                    mode=preCursorParams[2])[1]
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0"
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
                 for c in sig.columns:
                     subSubSig = sig[c]
                     subSubSig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
+                    subSubSig._metadata += ['name']
                     sigList.append(subSubSig.copy())
 
                 for pr in [1, 2, 3, 4]:  # None, 1,2,3,4
@@ -844,11 +868,13 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         medSig += sub_sig
                         sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr)
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                         for c in sig.columns:
                             subSubSig = sig[c]
                             subSubSig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
+                            subSubSig._metadata += ['name']
                             sigList.append(subSubSig.copy())
 
                     except Exception as e:
@@ -865,10 +891,12 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
 
                 sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0"
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
                 for c in sig.columns:
                     subSubSig = sig[c]
                     subSubSig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
+                    subSubSig._metadata += ['name']
                     sigList.append(subSubSig.copy())
 
                 for pr in [1, 2, 3, 4]:  # None, 1,2,3,4
@@ -879,11 +907,13 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         medSig += sub_sig
                         sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr)
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                         for c in sig.columns:
                             subSubSig = sig[c]
                             subSubSig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
+                            subSubSig._metadata += ['name']
                             sigList.append(subSubSig.copy())
 
                     except Exception as e:
@@ -902,6 +932,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                     sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                     sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                     sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                    sig._metadata += ['name']
                     sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]:  # None, 1,2,3,4
@@ -915,6 +946,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                             sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                             sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                             sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                            sig._metadata += ['name']
                             sigList.append(sig.copy())
 
                     except Exception as e:
@@ -933,6 +965,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                     sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                     sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                     sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                    sig._metadata += ['name']
                     sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]:  # None, 1,2,3,4
@@ -946,6 +979,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                             sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                             sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                             sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                            sig._metadata += ['name']
                             sigList.append(sig.copy())
 
                     except Exception as e:
@@ -964,6 +998,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                     sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                     sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                     sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                    sig._metadata += ['name']
                     sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]:  # None, 1,2,3,4
@@ -976,6 +1011,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                             sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
                             sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                             sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                            sig._metadata += ['name']
                             sigList.append(sig.copy())
 
                     except Exception as e:
@@ -993,6 +1029,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
 
                 sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]:  # None, 1,2,3,4
@@ -1000,6 +1037,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         medSig += Assets_MedSig.iloc[:, pr]
                         sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                     except Exception as e:
@@ -1016,6 +1054,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                 medSig = Rates_MedSig.iloc[:, 0]
                 sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                 sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                sig._metadata += ['name']
                 sigList.append(sig.copy())
 
                 for pr in [1,2,3,4]:  # None, 1,2,3,4
@@ -1023,6 +1062,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
                         medSig += Rates_MedSig.iloc[:, pr]
                         sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                         sig.name = "runSet_"+runSet+"_scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                        sig._metadata += ['name']
                         sigList.append(sig.copy())
 
                     except Exception as e:
