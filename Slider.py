@@ -41,6 +41,7 @@ from scipy import sparse
 from scipy.linalg import svd
 import warnings, os, tensorflow as tf
 import math
+from tqdm import tqdm
 from sklearn.metrics import mean_squared_error
 try:
     from pydiffmap import kernel
@@ -48,7 +49,6 @@ try:
     import arviz as az
     from hurst import compute_Hc
     import theano.tensor as tt
-    from tqdm import tqdm
     import pydiffmap
 except:
     pass
@@ -120,8 +120,16 @@ class Slider:
         out = df.mean(axis=1)
         return out
 
-    def rs(df):
-        out = df.sum(axis=1)
+    def rs(df, **kwargs):
+        if 'formatOut' in kwargs:
+            formatOut = kwargs['formatOut']
+        else:
+            formatOut = 'SeriesOut'
+
+        if formatOut == 'SeriesOut':
+            out = df.sum(axis=1)
+        elif formatOut == 'DataFrameOut':
+            out = pd.DataFrame(df.sum(axis=1), columns=['rs'])
         return out
 
     def ew(df):
@@ -159,7 +167,7 @@ class Slider:
         return out
 
     def fd(df):
-        out = df.replace([np.inf, -np.inf], 0)
+        out = df.replace([np.inf, -np.inf], np.nan)
         return out
 
     def svd_flip(u, v, u_based_decision=True):
@@ -220,10 +228,17 @@ class Slider:
         else:
             nIn = 250
 
-        SRollVol = np.sqrt(252) * Slider.S(Slider.rollStatistics(df, method='Vol', nIn=nIn)) * 100
-        out = (df / SRollVol).replace([np.inf, -np.inf], 0).fillna(0)
+        out = df.copy()
+        rpList = []
+        for c in out.columns:
+            out[c][out[c] == 0] = np.nan
+            subTS = out[c].dropna()
+            SRollVol = np.sqrt(252) * Slider.S(Slider.rollStatistics(subTS, method='Vol', nIn=nIn)) * 100
+            subTS = (subTS / SRollVol).replace([np.inf, -np.inf], np.nan)
+            rpList.append(subTS)
+        rpDF = pd.concat(rpList, axis=1)
 
-        return [out, SRollVol]
+        return rpDF
 
     def preCursor(df, preCursorDF, **kwargs):
 
@@ -587,11 +602,15 @@ class Slider:
         elif mode == 'processNA':
             shList = []
             for c in df.columns:
-                df[c] = df[c].dropna()
-                medSh = df[c].mean() / df[c].std()
-                shList.append(medSh)
+                subTS = df[c]
+                initial_lenDF = len(subTS)
+                rawSh = subTS.mean() / subTS.std()
+                subTS = subTS[subTS!=0].dropna()
+                lenDF = len(subTS)
+                medSh = subTS.mean() / subTS.std()
+                shList.append([initial_lenDF, rawSh, lenDF, medSh])
 
-            out = pd.Series(shList, index=df.columns)
+            out = pd.DataFrame(shList, columns=["initial_lenDF", "rawSharpe", "lengthDF", "finalSharpe"], index=df.columns)
 
         return out
 
@@ -1773,39 +1792,48 @@ class Slider:
                 psi[col] = U[col] / U.iloc[:, 0]
                 phi[col] = VT[col] * VT.iloc[:, 0]
 
-            eigOut = psi.fillna(0)
-            # eigOut = psi.iloc[:, 1:nD + 1].fillna(0)
-            # eigOut = phi.iloc[:, 1:nD + 1].fillna(0)
-            eigOut.columns = [str(x) for x in range(nD)]
+            #eigOut = psi.fillna(0)
+            eigOut = psi.iloc[:, 1:nD + 1]#.fillna(0)
+            #eigOut = phi.iloc[:, 1:nD + 1].fillna(0)
+            #eigOut.columns = [str(x) for x in range(nD)]
             eigOut.index = df.index
 
-            # print(df)
-            # print(eigOut)
-            # time.sleep(300)
+            #print(df)
+            #print(eigOut)
+            #time.sleep(300)
 
             'Building Contractive Observer Data'
             aMat = []
-            for z in df.index:
+            for z in df.columns:
                 aSubMat = []
                 for eig in eigOut:
-                    ajl = df.loc[z] * eigOut[eig]
+                    ajl = df.loc[:,z].mul(eigOut[eig], axis=0)
+                    #print("z = ")
+                    #print(z)
+                    #print("df.loc[z] = ")
+                    #print(df.loc[:,z])
+                    #print("eigOut[eig] = ")
+                    #print(eigOut[eig])
+                    #print("ajl = ")
+                    #print(ajl)
+                    #time.sleep(3000)
                     aSubMat.append(ajl.sum())
                 aMat.append(aSubMat)
 
             aMatDF = pd.DataFrame(aMat)
-            # print("aMatDF = ", aMatDF)
+            #print("aMatDF = ", aMatDF)
             a_inv = pd.DataFrame(np.linalg.pinv(aMatDF.values))
-            # print("a_inv = ", a_inv)
+            #print("a_inv = ", a_inv)
             lMat = pd.DataFrame(np.diag(s[:nD]))
             glA = gammaCO * pd.DataFrame(np.dot(a_inv.T, lMat))
-            glA.index = df.index
+            glA.index = df.columns
             # for c in glA.columns:
             #    glA[c] /= glA[c].abs().sum()
             # print("df = ", df)
 
-            # print("lMat = ", lMat)
-            # print("glA = ", glA)
-            # time.sleep(3000)
+            #print("lMat = ", lMat)
+            #print("glA = ", glA)
+            #time.sleep(3000)
             """
             runCO = 0
             if runCO == 1:
@@ -2552,7 +2580,7 @@ class Slider:
             breakFlag = False
             megaCount = 0
             scoreList = []
-            for i in (range(0, X.shape[0], stepper)):
+            for i in tqdm(range(0, X.shape[0], stepper)):
                 subProcessingHistory_X, subProcessingHistory_y, subProcessingHistory_real_y = X[i:i+params["SubHistoryLength"]], \
                                                                                               y[i:i+params["SubHistoryLength"]], \
                                                                                               real_y[i:i+params["SubHistoryLength"]]
