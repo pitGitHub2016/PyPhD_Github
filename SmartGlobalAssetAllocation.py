@@ -597,7 +597,7 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
         sigList = []
         for metadataMode in ["Raw", "rowStochastic"]:
-            for tradingAssetsMode in ['Assets', 'RiskParity', 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200']:
+            for tradingAssetsMode in ['Assets', 'RiskParity']: #, 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200'
                 if tradingAssetsMode == 'RiskParity':
                     df = sl.rp(df)
                 elif tradingAssetsMode == 'ARIMA_Raw_Assets_100':
@@ -620,9 +620,9 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
                                 try:
                                     sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
-                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
                                     if metadataMode == "rowStochastic":
                                         sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
                                     sigList.append(sub_sig)
                                     sig += sub_sig
                                     sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
@@ -642,9 +642,9 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
                                 try:
                                     sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
-                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
                                     if metadataMode == "rowStochastic":
                                         sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
                                     sigList.append(sub_sig)
                                     sig += sub_sig
                                     sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
@@ -664,9 +664,9 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
                             for pr in [1,2,3,4]:  # 1,2,3,4
                                 try:
                                     sub_sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_'+str(pr), conn).set_index('Dates', drop=True)
-                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
                                     if metadataMode == "rowStochastic":
                                         sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
                                     sigList.append(sub_sig)
                                     sig += sub_sig
                                     sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
@@ -1043,15 +1043,21 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
                                     pass
                                     #print(e)
 
-                print("Calculating PnLs ... ")
+                print("Calculating PnLs ... " + tradingAssetsMode)
                 ###########################################################################################################
+
+                pickle.dump(sigList, open("sigList"+metadataMode+"_"+tradingAssetsMode+".p", "wb" ) )
 
                 shList = []
                 for sigDF in tqdm(sigList):
                     pnl = df.mul(sl.S(sigDF), axis=0).fillna(0)
                     rs_pnl = sl.rs(pnl, formatOut="DataFrameOut")
                     sh_rs_pnl = sl.sharpe(rs_pnl, mode='processNA')
-                    sh_rs_pnl['StrategyName'] = sigDF.name
+                    try:
+                        sh_rs_pnl['StrategyName'] = sigDF.name
+                    except Exception as e:
+                        sh_rs_pnl['StrategyName'] = "unknown_"+metadataMode+"_"+tradingAssetsMode
+                        print(e)
                     sh_rs_pnl[["rawSharpe", "finalSharpe"]] *= np.sqrt(252)
                     shList.append(sh_rs_pnl)
 
