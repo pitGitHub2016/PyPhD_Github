@@ -1602,7 +1602,14 @@ if __name__ == '__main__':
     #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
     #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    gDMAP_TES_TradeProjections("Raw", 'Assets') # metadataMode = "Raw", "rowStochastic" | tradingAssetsMode = 'Assets', 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200'
+    gDMAP_TES_TradeProjections("Raw", 'Assets')
+    gDMAP_TES_TradeProjections("Raw", 'RiskParity')
+    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_100')
+    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_200')
+    gDMAP_TES_TradeProjections("rowStochastic", 'Assets')
+    gDMAP_TES_TradeProjections("rowStochastic", 'RiskParity')
+    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100')
+    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200')
 
     #ARIMAonPortfolios('Assets', 'Main', 'run')
     #ARIMAonPortfolios('Assets', 'Main', 'report')
