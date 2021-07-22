@@ -268,36 +268,78 @@ def SharpeRatioSimulations():
 def LongOnly():
     dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
     dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
+    all_rs_sh_List = []
+    all_randomWalkPnl_rs_sh_List = []
     for subset in subPortfoliosList:
         df = dfAll[subset[0]]
-        longOnlySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df), columns=["Sharpe"]).round(4)
+
+        longOnlySharpes = pd.DataFrame(sl.sharpe(df, mode='processNA', annualiseFlag='yes'))
         longOnlySharpes.to_sql('longOnlySharpes_'+subset[1], conn, if_exists='replace')
 
-        longOnlySharpes_TAP = pd.DataFrame(sl.sharpe(df, mode='processNA'))
-        longOnlySharpes_TAP[["rawSharpe", "finalSharpe"]] *= np.sqrt(252)
-        print(longOnlySharpes_TAP)
-        time.sleep(3000)
-        longOnlySharpes_TAP.to_sql('longOnlySharpes_TAP_'+subset[1], conn, if_exists='replace')
-
         subrsDf = pd.DataFrame(sl.E(df))
-        print(subset[1], ",", np.sqrt(252) * sl.sharpe(subrsDf))
-        subrsDf.to_sql('LongOnlyEWPrsDf_'+subset[1], conn, if_exists='replace')
+        subrsDf.to_sql('subrsDf_' + subset[1], conn, if_exists='replace')
+        subrsDf_sh = sl.sharpe(subrsDf, mode='processNA', annualiseFlag='yes')
+        subrsDf_sh['Subset'] = subset[1]
+        all_rs_sh_List.append(subrsDf_sh)
 
+        subrsDf = subrsDf[subrsDf != 0].dropna()
         randomWalkPnl_subrsDf = sl.S(sl.sign(subrsDf)) * subrsDf
-        print("Random Walk "+subset[1]+" Sharpe : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_subrsDf).round(4))
+        randomWalkPnl_subrsDf_sh = sl.sharpe(randomWalkPnl_subrsDf, mode='processNA', annualiseFlag='yes')
+        randomWalkPnl_subrsDf_sh['Subset'] = subset[1]
+        all_randomWalkPnl_rs_sh_List.append(randomWalkPnl_subrsDf_sh)
+
+    all_rs_sh_DF = pd.concat(all_rs_sh_List).set_index("Subset", drop=True)
+    all_rs_sh_DF.to_sql('all_rs_sh_DF', conn, if_exists='replace')
+    randomWalkPnl_subrsDf_sh_DF = pd.concat(all_randomWalkPnl_rs_sh_List).set_index("Subset", drop=True)
+    randomWalkPnl_subrsDf_sh_DF.to_sql('randomWalkPnl_subrsDf_sh_DF', conn, if_exists='replace')
 
     rollSharpe_dfAll = sl.rollStatistics(dfAll, 'Sharpe', nIn=250)
     rollSharpe_dfAll.to_sql('rollSharpe_dfAll', conn, if_exists='replace')
 
+    fig, ax = plt.subplots()
+    rollSharpe_dfAll.index = [x.replace("00:00:00", "").strip() for x in rollSharpe_dfAll.index]
+    mpl.pyplot.locator_params(axis='x', nbins=35)
+    rollSharpe_dfAll.plot(ax=ax)
+    for label in ax.get_xticklabels():
+        label.set_fontsize(25)
+        label.set_ha("right")
+        label.set_rotation(45)
+    ax.set_xlim(xmin=0.0, xmax=len(rollSharpe_dfAll) + 1)
+    mpl.pyplot.ylabel("$\\tilde{sh}_{A,i,t}$", fontsize=32)
+    plt.legend(loc=2, ncol=1, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 15})
+    plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
+    plt.margins(0, 0)
+    plt.grid()
+    plt.show()
+
     randomWalkPnl_Df = sl.S(sl.sign(dfAll)) * dfAll
-    print("Random Walk dfAll Sharpe : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_Df).round(4))
+    randomWalkPnl_Df_sh = sl.sharpe(randomWalkPnl_Df, mode='processNA', annualiseFlag='yes')
+    randomWalkPnl_Df_sh.to_sql('randomWalkPnl_Df_sh', conn, if_exists='replace')
 
     rsDf = pd.DataFrame(sl.E(dfAll))
-    print("Total LO : ", np.sqrt(252) * sl.sharpe(rsDf))
-    rsDf.to_sql('LongOnlyEWPrsDf', conn, if_exists='replace')
+    print("Total LO : ", sl.sharpe(rsDf, mode='processNA', annualiseFlag='yes'))
+    rsDf.to_sql('rsDf', conn, if_exists='replace')
 
+    fig, ax = plt.subplots()
+    rsDf.index = [x.replace("00:00:00", "").strip() for x in rsDf.index]
+    mpl.pyplot.locator_params(axis='x', nbins=35)
+    sl.cs(rsDf).plot(ax=ax, legend=None)
+    for label in ax.get_xticklabels():
+        label.set_fontsize(25)
+        label.set_ha("right")
+        label.set_rotation(45)
+    ax.set_xlim(xmin=0.0, xmax=len(rsDf) + 1)
+    mpl.pyplot.ylabel("$\sum_{t=0}^{N-1} y_{LO, t+1}$", fontsize=32)
+    #plt.legend(loc=2, ncol=1, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 15})
+    plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.12, hspace=0, wspace=0)
+    plt.margins(0, 0)
+    plt.grid()
+    plt.show()
+
+    rsDf = rsDf[rsDf != 0].dropna()
     randomWalkPnl_rsDf = sl.S(sl.sign(rsDf)) * rsDf
-    print("Random Walk rsdfAll Sharpe : ", np.sqrt(252) * sl.sharpe(randomWalkPnl_rsDf).round(4))
+    randomWalkPnl_rsDf.to_sql('randomWalkPnl_rsDf', conn, if_exists='replace')
+    print("Random Walk rsdfAll Sharpe : ", sl.sharpe(randomWalkPnl_rsDf, mode='processNA', annualiseFlag='yes'))
 
 def RiskParity():
     dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
@@ -307,77 +349,112 @@ def RiskParity():
     SRollVolToPlot = SRollVol.copy()
     SRollVolToPlot.index = [x.replace("00:00:00", "").strip() for x in SRollVolToPlot.index]
     SRollVol.to_sql('SRollVol', conn, if_exists='replace')
+
     dfAll = (dfAll / SRollVol).replace([np.inf, -np.inf], 0).fillna(0)
     dfAll.loc["2006-01-06 00:00:00", "S&P 500"] = 0
     dfAll.to_sql('riskParityDF', conn, if_exists='replace')
 
-    riskParitySharpesAll = pd.DataFrame(np.sqrt(252) * sl.sharpe(dfAll), columns=["Sharpe"]).round(4)
-    rsDfAll = pd.DataFrame(sl.rs(dfAll))
-    riskParitySharpesAll.to_sql('riskParitySharpeRatiosAll', conn, if_exists='replace')
-    print("RiskParityEWPrsDfAll Sharpe = ", (np.sqrt(252) * sl.sharpe(rsDfAll)).round(4))
+    fig, ax = plt.subplots()
+    SRollVol.index = [x.replace("00:00:00", "").strip() for x in SRollVol.index]
+    mpl.pyplot.locator_params(axis='x', nbins=35)
+    SRollVol.plot(ax=ax, legend=None)
+    for label in ax.get_xticklabels():
+        label.set_fontsize(25)
+        label.set_ha("right")
+        label.set_rotation(45)
+    ax.set_xlim(xmin=0.0, xmax=len(SRollVol) + 1)
+    mpl.pyplot.ylabel("$\hat{\sigma}_{i,t}$", fontsize=32)
+    # plt.legend(loc=2, ncol=1, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 15})
+    plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.12, hspace=0, wspace=0)
+    plt.margins(0, 0)
+    plt.grid()
+    plt.show()
 
+    riskParitySharpesAll = sl.sharpe(dfAll, mode='processNA', annualiseFlag='yes')
+    riskParitySharpesAll.to_sql('riskParitySharpeRatiosAll', conn, if_exists='replace')
+
+    riskParity_rsDf = pd.DataFrame(sl.rs(dfAll))
+    print("Total RP : ", sl.sharpe(riskParity_rsDf, mode='processNA', annualiseFlag='yes'))
+    riskParity_rsDf.to_sql('riskParity_rsDf', conn, if_exists='replace')
+
+    riskParity_rsDf = riskParity_rsDf[riskParity_rsDf != 0].dropna()
+    randomWalkPnl_riskParity_rsDf = sl.S(sl.sign(riskParity_rsDf)) * riskParity_rsDf
+    randomWalkPnl_riskParity_rsDf.to_sql('randomWalkPnl_riskParity_rsDf', conn, if_exists='replace')
+    print("Random Walk Risk Parity rsdfAll Sharpe : ", sl.sharpe(randomWalkPnl_riskParity_rsDf, mode='processNA', annualiseFlag='yes'))
+
+    fig, ax = plt.subplots()
+    riskParity_rsDf.index = [x.replace("00:00:00", "").strip() for x in riskParity_rsDf.index]
+    mpl.pyplot.locator_params(axis='x', nbins=35)
+    sl.cs(riskParity_rsDf).plot(ax=ax, legend=None)
+    for label in ax.get_xticklabels():
+        label.set_fontsize(25)
+        label.set_ha("right")
+        label.set_rotation(45)
+    ax.set_xlim(xmin=0.0, xmax=len(riskParity_rsDf) + 1)
+    mpl.pyplot.ylabel("$\sum_{t=0}^{N-1} y_{RP, t+1}$", fontsize=32)
+    # plt.legend(loc=2, ncol=1, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 15})
+    plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.12, hspace=0, wspace=0)
+    plt.margins(0, 0)
+    plt.grid()
+    plt.show()
+
+    sub_riskParitySharpes_List = []
+    sub_riskParitySharpes_RW_List = []
     for subset in subPortfoliosList:
         df = dfAll[subset[0]]
-        rsDf = pd.DataFrame(sl.rs(df))
-        rsDf.to_sql('riskParityDF_'+subset[1], conn, if_exists='replace')
-        riskParitySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(rsDf), columns=["Sharpe"]).round(4)
-        riskParitySharpes.to_sql('riskParitySharpeRatios_'+subset[1], conn, if_exists='replace')
+        sub_riskParity_rsDf = pd.DataFrame(sl.rs(df))
+        sub_riskParity_rsDf.to_sql('sub_riskParity_rsDf_'+subset[1], conn, if_exists='replace')
+        sub_riskParitySharpes = sl.sharpe(sub_riskParity_rsDf, mode='processNA', annualiseFlag='yes')
+        sub_riskParitySharpes['Subset'] = subset[1]
+        sub_riskParitySharpes_List.append(sub_riskParitySharpes)
 
-def RollingSharpes(mode):
-    if mode == 'Benchmark':
-        dfAll = pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)
-        dfAll.drop(['CBOE Volatility Index'], axis=1, inplace=True)
-        dfAll_assets = sl.rollStatistics(dfAll, 'Sharpe')
+        sub_riskParity_rsDf = sub_riskParity_rsDf[sub_riskParity_rsDf != 0].dropna()
+        sub_riskParity_randomWalkPnl_rsDf = sl.S(sl.sign(sub_riskParity_rsDf)) * sub_riskParity_rsDf
+        sub_riskParity_randomWalkPnl_Sharpes = sl.sharpe(sub_riskParity_randomWalkPnl_rsDf, mode='processNA', annualiseFlag='yes')
+        sub_riskParity_randomWalkPnl_Sharpes['Subset'] = subset[1]
+        sub_riskParitySharpes_RW_List.append(sub_riskParity_randomWalkPnl_Sharpes)
 
-        dfAll_assets.index = [x.replace("00:00:00", "").strip() for x in dfAll_assets.index]
-        fig, ax = plt.subplots()
-        mpl.pyplot.locator_params(axis='x', nbins=35)
-        dfAll_assets.plot(ax=ax)
-        for label in ax.get_xticklabels():
+    sub_riskParitySharpes_DF = pd.concat(sub_riskParitySharpes_List).set_index("Subset", drop=True)
+    sub_riskParitySharpes_DF.to_sql('sub_riskParitySharpes_DF', conn, if_exists='replace')
+
+    sub_riskParitySharpes_RW_DF = pd.concat(sub_riskParitySharpes_RW_List).set_index("Subset", drop=True)
+    sub_riskParitySharpes_RW_DF.to_sql('sub_riskParitySharpes_RW_DF', conn, if_exists='replace')
+
+def BenchmarkPortfolios_RollingSharpes():
+
+    LO_List = []
+    for subset in subPortfoliosList:
+        LO_List.append(pd.read_sql('SELECT * FROM subrsDf_'+subset[1], conn).set_index('Dates', drop=True))
+    LO_DF = pd.concat(LO_List, axis=1)
+    LO_DF.columns = ["Equities Futures", "Bonds Futures", "Commodities Futures", "Interest Rates Futures", "FX"]
+    RP_List = []
+    for subset in subPortfoliosList:
+        RP_List.append(pd.read_sql('SELECT * FROM sub_riskParity_rsDf_'+subset[1], conn).set_index('Dates', drop=True))
+    RP_DF = pd.concat(RP_List, axis=1)
+    RP_DF.columns = LO_DF.columns
+
+    dfList = [sl.rollStatistics(LO_DF, 'Sharpe'), sl.rollStatistics(RP_DF, 'Sharpe')]
+
+    fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
+    mpl.pyplot.locator_params(axis='x', nbins=35)
+    titleList = ['(a)', '(b)']
+    c = 0
+    for df in dfList:
+        df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+        df.plot(ax=ax[c])
+        for label in ax[c].get_xticklabels():
             label.set_fontsize(25)
             label.set_ha("right")
-            label.set_rotation(45)
-        ax.set_xlim(xmin=0.0, xmax=len(dfAll_assets) + 1)
-        mpl.pyplot.ylabel("$sh_{A,i,t}$", fontsize=32)
-        plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 14})
-        plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0, wspace=0)
-        plt.margins(0, 0)
-        plt.grid()
-        plt.show()
-
-        LO_List = []
-        for subset in subPortfoliosList:
-            LO_List.append(pd.read_sql('SELECT * FROM LongOnlyEWPrsDf_'+subset[1], conn).set_index('Dates', drop=True))
-        LO_DF = pd.concat(LO_List, axis=1)
-        LO_DF.columns = ["Equities Futures", "Bonds Futures", "Commodities Futures", "Interest Rates Futures", "FX"]
-        RP_List = []
-        for subset in subPortfoliosList:
-            RP_List.append(pd.read_sql('SELECT * FROM riskParityDF_'+subset[1], conn).set_index('Dates', drop=True))
-        RP_DF = pd.concat(RP_List, axis=1)
-        RP_DF.columns = LO_DF.columns
-
-        dfList = [sl.rollStatistics(LO_DF, 'Sharpe'), sl.rollStatistics(RP_DF, 'Sharpe')]
-
-        fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
-        mpl.pyplot.locator_params(axis='x', nbins=35)
-        titleList = ['(a)', '(b)']
-        c = 0
-        for df in dfList:
-            df.index = [x.replace("00:00:00", "").strip() for x in df.index]
-            df.plot(ax=ax[c])
-            for label in ax[c].get_xticklabels():
-                label.set_fontsize(25)
-                label.set_ha("right")
-                label.set_rotation(40)
-            ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
-            # ax[c].set_title(titleList[c], y=1.0, pad=-20)
-            ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
-            #ax[c].legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'weight': 'bold', 'size': 24})
-            ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 16})
-            ax[c].grid()
-            c += 1
-        plt.subplots_adjust(top=0.95, bottom=0.15, right=0.82, left=0.08, hspace=0.1, wspace=0)
-        plt.show()
+            label.set_rotation(40)
+        ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
+        # ax[c].set_title(titleList[c], y=1.0, pad=-20)
+        ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
+        #ax[c].legend(loc=2, fancybox=True, frameon=True, shadow=True, prop={'weight': 'bold', 'size': 24})
+        ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 16})
+        ax[c].grid()
+        c += 1
+    plt.subplots_adjust(top=0.95, bottom=0.15, right=0.82, left=0.08, hspace=0.1, wspace=0)
+    plt.show()
 
 def RunRollManifold(manifoldIn, universe):
     df = sl.fd(pd.read_sql('SELECT * FROM '+universe, conn).set_index('Dates', drop=True).fillna(0))
@@ -519,408 +596,467 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
     elif mode == 'TradeProjections':
 
         sigList = []
-        for tradingAssetsMode in ['Assets', 'RiskParity', 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200']:
-            if tradingAssetsMode == 'RiskParity':
-                df = sl.rp(df)
-            elif tradingAssetsMode == 'ARIMA_Raw_Assets_100':
-                df = pd.read_sql('SELECT * FROM Assets_arimaPnLDF_100_250', conn).set_index('Dates', drop=True).fillna(0)
-            elif tradingAssetsMode == 'ARIMA_Raw_Assets_200':
-                df = pd.read_sql('SELECT * FROM Assets_arimaPnLDF_200_250', conn).set_index('Dates', drop=True).fillna(0)
+        for metadataMode in ["Raw", "rowStochastic"]:
+            for tradingAssetsMode in ['Assets', 'RiskParity', 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200']:
+                if tradingAssetsMode == 'RiskParity':
+                    df = sl.rp(df)
+                elif tradingAssetsMode == 'ARIMA_Raw_Assets_100':
+                    df = pd.read_sql('SELECT * FROM Assets_arimaPnLDF_100_250', conn).set_index('index', drop=True).fillna(0)
+                elif tradingAssetsMode == 'ARIMA_Raw_Assets_200':
+                    df = pd.read_sql('SELECT * FROM Assets_arimaPnLDF_200_250', conn).set_index('index', drop=True).fillna(0)
 
-            ###########################################################################################################
-            for runSet in ['First', 'Last']:
-                for scenario in tqdm(range(12)):
+                ###########################################################################################################
+                for runSet in ['First', 'Last']:
+                    for scenario in tqdm(range(20)):
 
-                    if scenario == 0:
-                        sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
-                        sig = sl.rowStoch(sig, mode='abs')
-                        sig.name = "scenario_"+str(scenario)+"_"+"0"
-                        sigList.append(sig)
+                        if scenario == 0:
+                            sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                sig = sl.rowStoch(sig, mode='abs')
+                            sig.name = "scenario_"+str(scenario)+"_"+"0"
+                            sigList.append(sig)
 
-                        for pr in [1,2,3,4]: #None, 1,2,3,4
+                            for pr in [1,2,3,4]: #None, 1,2,3,4
 
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
-                                sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
-                                sigList.append(sub_sig)
-                                #sig += sub_sig
-                                sig += sl.rowStoch(sub_sig, mode='abs')
-                                sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
+                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    sigList.append(sub_sig)
+                                    sig += sub_sig
+                                    sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                                    sigList.append(sig)
+
+                                except Exception as e:
+                                    print(e)
+
+                        elif scenario == 1:
+                            sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                sig = sl.rowStoch(sig, mode='abs')
+                            sig.name = "scenario_" + str(scenario) + "_" + "0"
+                            sigList.append(sig)
+
+                            for pr in [1,2,3,4]: #None, 1,2,3,4
+
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
+                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    sigList.append(sub_sig)
+                                    sig += sub_sig
+                                    sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                                    sigList.append(sig)
+
+                                except Exception as e:
+                                    pass
+                                    #print(e)
+
+                        elif scenario == 2:
+                            sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_0', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                sig = sl.rowStoch(sig, mode='abs')
+                            sig.name = "scenario_" + str(scenario) + "_" + "0"
+                            sigList.append(sig)
+
+                            for pr in [1,2,3,4]:  # 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_'+str(pr), conn).set_index('Dates', drop=True)
+                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    sigList.append(sub_sig)
+                                    sig += sub_sig
+                                    sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                                    sigList.append(sig)
+
+                                except Exception as e:
+                                    pass
+                                    #print(e)
+
+                        elif scenario == 3:
+
+                            Temporal_sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_Temporal', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(Temporal_sig, mode='abs')
+                            else:
+                                medSig = Temporal_sig.copy()
+                            sig = medSig.iloc[:, 0]
+                            sig.name = "scenario_" + str(scenario) + "_" + "0"
+                            sigList.append(sig)
+
+                            for pr in [1,2,3,4]: #None, 1,2,3,4
+
+                                try:
+                                    sub_sig = medSig.iloc[:,pr]
+                                    sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
+                                    sigList.append(sub_sig)
+                                    sig += sub_sig
+                                    sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                                    sigList.append(sig)
+
+                                except Exception as e:
+                                    pass
+                                    #print(e)
+
+                        elif scenario == 4:
+
+                            Rates_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(Rates_Sig, mode='abs')
+                            else:
+                                medSig = Rates_Sig.copy()
+
+                            for ratesKernel in ['U.S.','Germany','U.K.','China','Japan']:
+                                sig = sl.rs(medSig.loc[:,[x for x in medSig.columns if ratesKernel in x]])
+                                sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
                                 sigList.append(sig)
 
-                            except Exception as e:
-                                print(e)
+                            for pr in [1,2,3,4]: #None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
 
-                    elif scenario == 1:
-                        sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
-                        sig = sl.rowStoch(sig, mode='abs')
-                        sig.name = "scenario_" + str(scenario) + "_" + "0"
-                        sigList.append(sig)
+                                    for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                        sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                        sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                                        sigList.append(sig)
 
-                        for pr in [1,2,3,4]: #None, 1,2,3,4
+                                except Exception as e:
+                                    pass
+                                    #print(e)
 
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
-                                sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
-                                sigList.append(sub_sig)
-                                sig += sl.rowStoch(sub_sig, mode='abs')
-                                sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                        elif scenario == 5:
+
+                            Rates_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(Rates_Sig, mode='abs')
+
+                            for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
                                 sigList.append(sig)
 
-                            except Exception as e:
-                                pass
-                                #print(e)
+                            for pr in [1,2,3,4]: #None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
 
-                    elif scenario == 2:
-                        sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_0', conn).set_index('Dates', drop=True)
-                        sig = sl.rowStoch(sig, mode='abs')
-                        sig.name = "scenario_" + str(scenario) + "_" + "0"
-                        sigList.append(sig)
+                                    for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                        sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                        sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                                        sigList.append(sig)
 
-                        for pr in [1,2,3,4]:  # 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_'+str(pr), conn).set_index('Dates', drop=True)
-                                sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
-                                sigList.append(sub_sig)
-                                sig += sl.rowStoch(sub_sig, mode='abs')
-                                sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                                except Exception as e:
+                                    pass
+                                    #print(e)
+
+                        elif scenario == 6:
+
+                            Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_LinearRegression_0', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(Rates_Sig, mode='abs')
+
+                            for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
                                 sigList.append(sig)
 
-                            except Exception as e:
-                                pass
-                                #print(e)
+                            for pr in [1,2,3,4]:  # None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
 
-                    elif scenario == 3:
+                                    for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                        sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                        sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                                        sigList.append(sig)
 
-                        Temporal_sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_Temporal', conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(Temporal_sig, mode='abs')
-                        sig = medSig.iloc[:, 0]
-                        sig.name = "scenario_" + str(scenario) + "_" + "0"
-                        sigList.append(sig)
+                                except Exception as e:
+                                    pass
+                                    #print(e)
 
-                        for pr in [1,2,3,4]: #None, 1,2,3,4
+                        elif scenario == 7:
 
-                            try:
-                                sub_sig = medSig.iloc[:,pr]
-                                sub_sig.name = "scenario_" + str(scenario) + "_" + str(pr)
-                                sigList.append(sub_sig)
-                                sig += sub_sig
-                                sig.name = "scenario_" + str(scenario) + "_0to" + str(pr)
+                            preCursorParams = [25, 1, 'roll']
+                            #preCursorParams = [25, 1, 'exp']
+                            AssetsRets_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
+
+                            sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
+                            sig.name = "scenario_" + str(scenario) + "_" + "0"
+                            sigList.append(sig)
+                            for c in sig.columns:
+                                subSubSig = sig[c]
+                                subSubSig.name = "scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
+                                sigList.append(subSubSig)
+
+                            for pr in [1,2,3,4]:  # None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
+                                    sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
+                                    sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr)
+                                    sigList.append(sig)
+
+                                    for c in sig.columns:
+                                        subSubSig = sig[c]
+                                        subSubSig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
+                                        sigList.append(subSubSig)
+
+                                except Exception as e:
+                                    pass
+                                    #print(e)
+
+                        elif scenario == 8:
+
+                            preCursorParams = [25, 1, 'roll']
+                            #preCursorParams = [25, 1, 'exp']
+                            AssetsRets_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
+                            else:
+                                medSig = AssetsRets_Sig.copy()
+
+                            sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],
+                                               mode=preCursorParams[2])[1]
+                            sig.name = "scenario_" + str(scenario) + "_" + "0"
+                            sigList.append(sig)
+                            for c in sig.columns:
+                                subSubSig = sig[c]
+                                subSubSig.name = "scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
+                                sigList.append(subSubSig)
+
+                            for pr in [1, 2, 3, 4]:  # None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_' + str(pr), conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
+                                    sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
+                                    sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr)
+                                    sigList.append(sig)
+
+                                    for c in sig.columns:
+                                        subSubSig = sig[c]
+                                        subSubSig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
+                                        sigList.append(subSubSig)
+
+                                except Exception as e:
+                                    pass
+                                    # print(e)
+
+                        elif scenario == 9:
+
+                            preCursorParams = [25, 1, 'roll']
+                            #preCursorParams = [25, 1, 'exp']
+                            AssetsRets_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_0',conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
+                            else:
+                                medSig = AssetsRets_Sig.copy()
+
+                            sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
+                            sig.name = "scenario_" + str(scenario) + "_" + "0"
+                            sigList.append(sig)
+                            for c in sig.columns:
+                                subSubSig = sig[c]
+                                subSubSig.name = "scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
+                                sigList.append(subSubSig)
+
+                            for pr in [1, 2, 3, 4]:  # None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_' + str(pr), conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
+                                    sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
+                                    sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr)
+                                    sigList.append(sig)
+
+                                    for c in sig.columns:
+                                        subSubSig = sig[c]
+                                        subSubSig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
+                                        sigList.append(subSubSig)
+
+                                except Exception as e:
+                                    pass
+                                    # print(e)
+
+                        elif scenario == 10:
+
+                            preCursorParams = [25, 1, 'roll']
+                            #preCursorParams = [25, 1, 'exp']
+                            Rates_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(Rates_Sig, mode='abs')
+                            else:
+                                medSig = Rates_Sig.copy()
+
+                            for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
+                                sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
                                 sigList.append(sig)
 
-                            except Exception as e:
-                                pass
-                                #print(e)
+                            for pr in [1,2,3,4]:  # None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
 
-                    elif scenario == 4:
+                                    for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                        sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                        sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
+                                        sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                                        sigList.append(sig)
 
-                        Rates_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(Rates_Sig, mode='abs')
+                                except Exception as e:
+                                    pass
+                                    #print(e)
 
-                        for ratesKernel in ['U.S.','Germany','U.K.','China','Japan']:
-                            sig = sl.rs(medSig.loc[:,[x for x in medSig.columns if ratesKernel in x]])
+                        elif scenario == 11:
+
+                            #preCursorParams = [25, 1, 'roll']
+                            preCursorParams = [25, 1, 'exp']
+                            Rates_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(Rates_Sig, mode='abs')
+                            else:
+                                medSig = Rates_Sig.copy()
+
+                            for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
+                                sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                                sigList.append(sig)
+
+                            for pr in [1,2,3,4]:  # None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
+
+                                    for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                        sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                        sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
+                                        sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                                        sigList.append(sig)
+
+                                except Exception as e:
+                                    pass
+                                    #print(e)
+
+                        elif scenario == 12:
+
+                            preCursorParams = [25, 1, 'roll']
+                            #preCursorParams = [25, 1, 'exp']
+                            Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_LinearRegression_0', conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                medSig = sl.rowStoch(Rates_Sig, mode='abs')
+                            else:
+                                medSig = Rates_Sig.copy()
+
+                            for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
+                                sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
+                                sigList.append(sig)
+
+                            for pr in [1,2,3,4]:  # None, 1,2,3,4
+                                try:
+                                    sub_sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_LinearRegression_' + str(pr),conn).set_index('Dates', drop=True)
+                                    if metadataMode == "rowStochastic":
+                                        sub_sig = sl.rowStoch(sub_sig, mode='abs')
+                                    medSig += sub_sig
+                                    for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
+                                        sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                                        sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
+                                        sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
+                                        sigList.append(sig)
+
+                                except Exception as e:
+                                    pass
+                                    #print(e)
+
+                        elif scenario == 13:
+
+                            #preCursorParams = [25, 1, 'roll']
+                            preCursorParams = [25, 1, 'exp']
+                            Assets_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_Temporal',conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                Assets_MedSig = sl.rowStoch(Assets_Sig, mode='abs')
+                            else:
+                                Assets_MedSig = Assets_Sig.copy()
+                            medSig = Assets_MedSig.iloc[:, 0]
+
+                            sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                             sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
                             sigList.append(sig)
 
-                        for pr in [1,2,3,4]: #None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-
-                                for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                                    sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                            for pr in [1,2,3,4]:  # None, 1,2,3,4
+                                try:
+                                    medSig += Assets_MedSig.iloc[:, pr]
+                                    sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                                     sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
                                     sigList.append(sig)
 
-                            except Exception as e:
-                                pass
-                                #print(e)
+                                except Exception as e:
+                                    pass
+                                    #print(e)
 
-                    elif scenario == 5:
+                        elif scenario == 14:
 
-                        Rates_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_0', conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(Rates_Sig, mode='abs')
-
-                        for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                            sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                            #preCursorParams = [25, 1, 'roll']
+                            preCursorParams = [25, 1, 'exp']
+                            Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_Temporal',conn).set_index('Dates', drop=True)
+                            if metadataMode == "rowStochastic":
+                                Rates_MedSig = sl.rowStoch(Rates_Sig, mode='abs')
+                            else:
+                                Rates_MedSig = Rates_Sig.copy()
+                            medSig = Rates_MedSig.iloc[:, 0]
+                            sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
                             sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
                             sigList.append(sig)
 
-                        for pr in [1,2,3,4]: #None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_'+runSet+'_tw_250_'+str(pr), conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-
-                                for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                                    sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
+                            for pr in [1,2,3,4]:  # None, 1,2,3,4
+                                try:
+                                    medSig += Rates_MedSig.iloc[:, pr]
+                                    sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
                                     sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
                                     sigList.append(sig)
 
-                            except Exception as e:
-                                pass
-                                #print(e)
+                                except Exception as e:
+                                    pass
+                                    #print(e)
 
-                    elif scenario == 6:
+                print("Calculating PnLs ... ")
+                ###########################################################################################################
 
-                        Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_LinearRegression_0', conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(Rates_Sig, mode='abs')
+                shList = []
+                for sigDF in tqdm(sigList):
+                    pnl = df.mul(sl.S(sigDF), axis=0).fillna(0)
+                    rs_pnl = sl.rs(pnl, formatOut="DataFrameOut")
+                    sh_rs_pnl = sl.sharpe(rs_pnl, mode='processNA')
+                    sh_rs_pnl['StrategyName'] = sigDF.name
+                    sh_rs_pnl[["rawSharpe", "finalSharpe"]] *= np.sqrt(252)
+                    shList.append(sh_rs_pnl)
 
-                        for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                            sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                            sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
-                            sigList.append(sig)
-
-                        for pr in [1,2,3,4]:  # None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-
-                                for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                                    sig = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                                    sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
-                                    sigList.append(sig)
-
-                            except Exception as e:
-                                pass
-                                #print(e)
-
-                    elif scenario == 7:
-
-                        preCursorParams = [25, 1, 'roll']
-                        #preCursorParams = [25, 1, 'exp']
-                        AssetsRets_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
-
-                        sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                        sig.name = "scenario_" + str(scenario) + "_" + "0"
-                        sigList.append(sig)
-                        for c in sig.columns:
-                            subSubSig = sig[c]
-                            subSubSig.name = "scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
-                            sigList.append(subSubSig)
-
-                        for pr in [1,2,3,4]:  # None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-                                sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
-                                sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr)
-                                sigList.append(sig)
-
-                                for c in sig.columns:
-                                    subSubSig = sig[c]
-                                    subSubSig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
-                                    sigList.append(subSubSig)
-
-                            except Exception as e:
-                                pass
-                                #print(e)
-
-                    elif scenario == 8:
-
-                        preCursorParams = [25, 1, 'roll']
-                        #preCursorParams = [25, 1, 'exp']
-                        AssetsRets_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
-
-                        sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],
-                                           mode=preCursorParams[2])[1]
-                        sig.name = "scenario_" + str(scenario) + "_" + "0"
-                        sigList.append(sig)
-                        for c in sig.columns:
-                            subSubSig = sig[c]
-                            subSubSig.name = "scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
-                            sigList.append(subSubSig)
-
-                        for pr in [1, 2, 3, 4]:  # None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_AssetsRets_principalCompsDf_' + runSet + '_tw_250_' + str(pr), conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-                                sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                                sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr)
-                                sigList.append(sig)
-
-                                for c in sig.columns:
-                                    subSubSig = sig[c]
-                                    subSubSig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
-                                    sigList.append(subSubSig)
-
-                            except Exception as e:
-                                pass
-                                # print(e)
-
-                    elif scenario == 9:
-
-                        preCursorParams = [25, 1, 'roll']
-                        #preCursorParams = [25, 1, 'exp']
-                        AssetsRets_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_0',conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(AssetsRets_Sig, mode='abs')
-
-                        sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
-                        sig.name = "scenario_" + str(scenario) + "_" + "0"
-                        sigList.append(sig)
-                        for c in sig.columns:
-                            subSubSig = sig[c]
-                            subSubSig.name = "scenario_" + str(scenario) + "_" + "0" + "_" + str(c)
-                            sigList.append(subSubSig)
-
-                        for pr in [1, 2, 3, 4]:  # None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_LinearRegression_' + str(pr), conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-                                sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                                sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr)
-                                sigList.append(sig)
-
-                                for c in sig.columns:
-                                    subSubSig = sig[c]
-                                    subSubSig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + str(c)
-                                    sigList.append(subSubSig)
-
-                            except Exception as e:
-                                pass
-                                # print(e)
-
-                    elif scenario == 10:
-
-                        preCursorParams = [25, 1, 'roll']
-                        #preCursorParams = [25, 1, 'exp']
-                        Rates_Sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(Rates_Sig, mode='abs')
-                        for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                            sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                            sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                            sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
-                            sigList.append(sig)
-
-                        for pr in [1,2,3,4]:  # None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_pyDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-                                for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                                    sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                                    sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
-                                    sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
-                                    sigList.append(sig)
-
-                            except Exception as e:
-                                pass
-                                #print(e)
-
-                    elif scenario == 11:
-
-                        #preCursorParams = [25, 1, 'roll']
-                        preCursorParams = [25, 1, 'exp']
-                        Rates_Sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_0',conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(Rates_Sig, mode='abs')
-
-                        for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                            sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                            sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                            sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
-                            sigList.append(sig)
-
-                        for pr in [1,2,3,4]:  # None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM DMAP_gDmapsRun_Rates_principalCompsDf_' + runSet + '_tw_250_' + str(pr),conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-
-                                for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                                    sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                                    sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
-                                    sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
-                                    sigList.append(sig)
-
-                            except Exception as e:
-                                pass
-                                #print(e)
-
-                    elif scenario == 12:
-
-                        preCursorParams = [25, 1, 'roll']
-                        #preCursorParams = [25, 1, 'exp']
-                        Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_LinearRegression_0', conn).set_index('Dates', drop=True)
-                        medSig = sl.rowStoch(Rates_Sig, mode='abs')
-
-                        for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                            sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                            sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                            sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
-                            sigList.append(sig)
-
-                        for pr in [1,2,3,4]:  # None, 1,2,3,4
-                            try:
-                                sub_sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_LinearRegression_' + str(pr),conn).set_index('Dates', drop=True)
-                                medSig += sl.rowStoch(sub_sig, mode='abs')
-                                for ratesKernel in ['U.S.', 'Germany', 'U.K.', 'China', 'Japan']:
-                                    sigKernel = sl.rs(medSig.loc[:, [x for x in medSig.columns if ratesKernel in x]])
-                                    sig = sl.preCursor(df, sigKernel, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
-                                    sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
-                                    sigList.append(sig)
-
-                            except Exception as e:
-                                pass
-                                #print(e)
-
-                    elif scenario == 13:
-
-                        #preCursorParams = [25, 1, 'roll']
-                        preCursorParams = [25, 1, 'exp']
-                        Assets_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_AssetsRets_sumKLMedian_Temporal',conn).set_index('Dates', drop=True)
-                        Assets_MedSig = sl.rowStoch(Assets_Sig, mode='abs')
-                        medSig = Assets_MedSig.iloc[:, 0]
-
-                        sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                        sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
-                        sigList.append(sig)
-
-                        for pr in [1,2,3,4]:  # None, 1,2,3,4
-                            try:
-                                medSig += Assets_MedSig.iloc[:, pr]
-                                sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
-                                sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
-                                sigList.append(sig)
-
-                            except Exception as e:
-                                pass
-                                #print(e)
-
-                    elif scenario == 14:
-
-                        #preCursorParams = [25, 1, 'roll']
-                        preCursorParams = [25, 1, 'exp']
-                        Rates_Sig = pd.read_sql('SELECT * FROM gDMAP_TES_Rates_sumKLMedian_Temporal',conn).set_index('Dates', drop=True)
-                        Rates_MedSig = sl.rowStoch(Rates_Sig, mode='abs')
-                        medSig = Rates_MedSig.iloc[:, 0]
-                        sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1], mode=preCursorParams[2])[1]
-                        sig.name = "scenario_" + str(scenario) + "_" + "0_" + ratesKernel
-                        sigList.append(sig)
-
-                        for pr in [1,2,3,4]:  # None, 1,2,3,4
-                            try:
-                                medSig += Rates_MedSig.iloc[:, pr]
-                                sig = sl.preCursor(df, medSig, nIn=preCursorParams[0], multiplier=preCursorParams[1],mode=preCursorParams[2])[1]
-                                sig.name = "scenario_" + str(scenario) + "_" + "0to" + str(pr) + "_" + ratesKernel
-                                sigList.append(sig)
-
-                            except Exception as e:
-                                pass
-                                #print(e)
-
-            print("Calculating PnLs ... ")
-            ###########################################################################################################
-
-            shList = []
-            for sigDF in tqdm(sigList):
-                pnl = df.mul(sl.S(sigDF), axis=0).fillna(0)
-                rs_pnl = sl.rs(pnl, formatOut="DataFrameOut")
-                sh_rs_pnl = sl.sharpe(rs_pnl, mode='processNA')
-                sh_rs_pnl['StrategyName'] = sigDF.name
-                sh_rs_pnl[["rawSharpe", "finalSharpe"]] *= np.sqrt(252)
-                shList.append(sh_rs_pnl)
-
-            shDF = pd.concat(shList)#, columns=['StrategyName', 'Strategies Raw_Sharpes', 'Strategies Length DF', 'Strategies Final_Sharpes']).set_index('StrategyName', drop=True)
-            shDF.to_sql('shDF_'+tradingAssetsMode, conn, if_exists='replace')
+                shDF = pd.concat(shList).set_index("StrategyName", drop=True)
+                shDF.to_sql('shDF_'+metadataMode+"_"+tradingAssetsMode, conn, if_exists='replace')
 
 pnlCalculator = 0
 
@@ -1442,10 +1578,9 @@ if __name__ == '__main__':
 
     #SharpeRatioSimulations()
 
-    LongOnly()
+    #LongOnly()
     #RiskParity()
-
-    #RollingSharpes('Benchmark')
+    #BenchmarkPortfolios_RollingSharpes()
 
     #RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
     #RunRollManifold("DMAP_pyDmapsRun", 'Rates')
@@ -1459,7 +1594,7 @@ if __name__ == '__main__':
     #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
     #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    #gDMAP_TES("TradeProjections", "AssetsRets", 'sumKLMedian', '')
+    gDMAP_TES("TradeProjections", "AssetsRets", 'sumKLMedian', '')
 
     #ARIMAonPortfolios('Assets', 'Main', 'run')
     #ARIMAonPortfolios('Assets', 'Main', 'report')
