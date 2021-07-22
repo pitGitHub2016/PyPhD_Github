@@ -1032,7 +1032,7 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
     print("Calculating PnLs ... " + metadataMode + "_" + tradingAssetsMode)
     ###########################################################################################################
 
-    pickle.dump(sigList, open("sigList"+metadataMode+"_"+tradingAssetsMode+"_"+str(preCursorParams[0])+"_"+str(preCursorParams[1])+".p", "wb" ) )
+    #pickle.dump(sigList, open("sigList"+metadataMode+"_"+tradingAssetsMode+"_"+str(preCursorParams[0])+"_"+str(preCursorParams[1])+"_"+str(preCursorParams[2])+".p", "wb" ) )
 
     shList = []
     for sigDF in tqdm(sigList):
@@ -1048,7 +1048,22 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
         shList.append(sh_rs_pnl)
 
     shDF = pd.concat(shList).set_index("StrategyName", drop=True)
-    shDF.to_sql('shDF_'+metadataMode+"_"+tradingAssetsMode+"_"+str(preCursorParams[0])+"_"+str(preCursorParams[1]), conn, if_exists='replace')
+    shDF.to_sql('shDF_'+metadataMode+"_"+tradingAssetsMode+"_"+str(preCursorParams[0])+"_"+str(preCursorParams[1])+"_"+str(preCursorParams[2]), conn, if_exists='replace')
+
+def mergegDMAPSharpes():
+    shList = []
+    for metadataMode in ["Raw", "rowStochastic"]:
+        for tradingAssetsMode in ['Assets', 'RiskParity', 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200']:
+            for preCursorParams in [[25, 1, 'roll'], [25, 4, 'exp'], [250, 1, 'roll'], [250, 4, 'exp']]:
+                medshDF = pd.read_sql('SELECT * FROM shDF_'+ metadataMode + "_" + tradingAssetsMode
+                                      + "_" + str(preCursorParams[0]) + "_" + str(preCursorParams[1]) + "_" + str(preCursorParams[2]), conn).set_index('StrategyName', drop=True)
+                medshDF['metadataMode'] = metadataMode
+                medshDF['tradingAssetsMode'] = tradingAssetsMode
+                medshDF['preCursorParams'] = str(preCursorParams[0]) + "_" + str(preCursorParams[1]) + "_" + str(preCursorParams[2])
+                shList.append(medshDF)
+
+    shDF_All = pd.concat(shList)
+    shDF_All.to_sql('shDF_All', conn, if_exists='replace')
 
 pnlCalculator = 0
 
@@ -1586,15 +1601,21 @@ if __name__ == '__main__':
     #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
     #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    time_configuration = 'roll' # 'roll', 'exp'
-    gDMAP_TES_TradeProjections("Raw", 'Assets', [25, 1, time_configuration])
-    gDMAP_TES_TradeProjections("Raw", 'RiskParity', [25, 1, time_configuration])
-    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_100', [25, 1, time_configuration])
-    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_200', [25, 1, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'Assets', [25, 1, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'RiskParity', [25, 1, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100', [25, 1, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200', [25, 1, time_configuration])
+    #time_configuration = 'exp' # 'roll', 'exp'
+    #rollPeriod = 250 # 25, 250
+    #stdIn = 1
+    #if time_configuration == 'exp':
+    #    stdIn = 4
+    #gDMAP_TES_TradeProjections("Raw", 'Assets', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("Raw", 'RiskParity', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_100', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_200', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'Assets', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'RiskParity', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200', [rollPeriod, stdIn, time_configuration])
+
+    mergegDMAPSharpes()
 
     #ARIMAonPortfolios('Assets', 'Main', 'run')
     #ARIMAonPortfolios('Assets', 'Main', 'report')
