@@ -600,6 +600,12 @@ class Slider:
         if mode == 'standard':
             out = df.mean() / df.std()
         elif mode == 'processNA':
+
+            if 'annualiseFlag' in kwargs:
+                annualiseFlag = kwargs['annualiseFlag']
+            else:
+                annualiseFlag = 'no'
+
             shList = []
             for c in df.columns:
                 subTS = df[c]
@@ -611,6 +617,9 @@ class Slider:
                 shList.append([initial_lenDF, rawSh, tap_lenDF, medSh])
 
             out = pd.DataFrame(shList, columns=["initial_lenDF", "rawSharpe", "tap_lenDF", "finalSharpe"], index=df.columns)
+
+            if annualiseFlag == 'yes':
+                out[["rawSharpe", "finalSharpe"]] = (np.sqrt(252) * out[["rawSharpe", "finalSharpe"]]).round(2)
 
         return out
 
@@ -1954,14 +1963,24 @@ class Slider:
                         Loadings_Target[c].append(list(pca.components_[eig]))
                         c += 1
 
-                elif manifoldIn == 'LLE':
+                elif manifoldIn == 'LLE_Spacial':
                     lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
                                                           method=LLE_Method, n_jobs=-1)
-                    X_lle = lle.fit_transform(x)  # ; print(X_lle.shape)
+                    X_lle = lle.fit_transform(x)
                     lambdasList.append(1)
                     c = 0
                     for eig in eigsPC:
                         Loadings_Target[c].append(list(X_lle[:, eig]))
+                        c += 1
+
+                elif manifoldIn == 'LLE': #Temporal --> paper
+                    lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
+                                                          method=LLE_Method, n_jobs=-1)
+                    X_lle = lle.fit_transform(x)
+                    lambdasList.append(1)
+                    c = 0
+                    for eig in eigsPC:
+                        Loadings_Target[c].append(list(X_lle[eig]))
                         c += 1
 
                 elif manifoldIn == 'DMAP_gDmapsRun':
@@ -1995,17 +2014,33 @@ class Slider:
                 axis=0, ignore_index=True).fillna(0)
             lambdasDF.index = df0.index
 
+            #print(pd.DataFrame(Loadings_Target[0]))
+            #print(pd.DataFrame(np.zeros((st - 1, len(Loadings_Target[0][0])))))
+            #print("#####################")
+            #print(pd.concat(
+            #            [pd.DataFrame(np.zeros((st - 1, len(Loadings_Target[0][0]))), columns=["TP"+"_"+str(x) for x in range(len(Loadings_Target[0][0]))]),
+            #             pd.DataFrame(Loadings_Target[0], columns=["TP"+"_"+str(x) for x in range(len(Loadings_Target[0][0]))])], axis=0, ignore_index=True))
+
             principalCompsDf_Target = [[] for j in range(len(Loadings_Target))]
             principalCompsDf_First = [[] for j in range(len(Loadings_First))]
             principalCompsDf_Last = [[] for j in range(len(Loadings_Last))]
+
+            if manifoldIn in ['PCA', 'LLE_Spacial', 'DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
+                zerosSpace = len(df0.columns)
+                columnsIn = df0.columns
+            elif manifoldIn in ['LLE']:
+                zerosSpace = len(Loadings_Target[0][0])
+                columnsIn = ["P" + "_" + str(x) for x in range(len(Loadings_Target[0][0]))]
+
             for k in range(len(Loadings_Target)):
                 principalCompsDf_Target[k] = pd.concat(
-                    [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
-                     pd.DataFrame(Loadings_Target[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    [pd.DataFrame(np.zeros((st - 1, zerosSpace)), columns=columnsIn),
+                     pd.DataFrame(Loadings_Target[k], columns=columnsIn)], axis=0, ignore_index=True)
                 principalCompsDf_Target[k].index = df0.index
                 principalCompsDf_Target[k] = principalCompsDf_Target[k].ffill()
-                ####
-                try:
+
+                #### ONLY FOR DMAPS CASE ####
+                if manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
                     principalCompsDf_First[k] = pd.concat(
                         [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
                          pd.DataFrame(Loadings_First[k], columns=df0.columns)], axis=0, ignore_index=True)
@@ -2017,20 +2052,12 @@ class Slider:
                          pd.DataFrame(Loadings_Last[k], columns=df0.columns)], axis=0, ignore_index=True)
                     principalCompsDf_Last[k].index = df0.index
                     principalCompsDf_Last[k] = principalCompsDf_Last[k].ffill()
-                except:
-                    principalCompsDf_First[k] = pd.concat(
-                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
-                         pd.DataFrame(Loadings_Target[k], columns=df0.columns)], axis=0, ignore_index=True)
-                    principalCompsDf_First[k].index = df0.index
-                    principalCompsDf_First[k] = principalCompsDf_First[k].ffill()
+                else:
+                    principalCompsDf_First[k] = principalCompsDf_Target[k].copy()
                     ####
-                    principalCompsDf_Last[k] = pd.concat(
-                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
-                         pd.DataFrame(Loadings_Target[k], columns=df0.columns)], axis=0, ignore_index=True)
-                    principalCompsDf_Last[k].index = df0.index
-                    principalCompsDf_Last[k] = principalCompsDf_Last[k].ffill()
+                    principalCompsDf_Last[k] = principalCompsDf_Target[k].copy()
 
-            if manifoldIn in ['PCA', 'LLE']:
+            if manifoldIn in ['PCA', 'LLE_Spacial', 'LLE']:
                 return [df0, principalCompsDf_Target, lambdasDF]
             elif manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
                 sigmaListDF = pd.DataFrame(sigmaList)
