@@ -1916,7 +1916,7 @@ class Slider:
             if 'ProjectionMode' in kwargs:
                 ProjectionMode = kwargs['ProjectionMode']
             else:
-                ProjectionMode = 'NoTranspose'
+                ProjectionMode = 'Spacial'
 
             if 'LLE_n_neighbors' in kwargs:
                 n_neighbors = kwargs['LLE_n_neighbors']
@@ -1931,18 +1931,16 @@ class Slider:
             Loadings_Target = [[] for j in range(len(eigsPC))]
             Loadings_First = [[] for j in range(len(eigsPC))]
             Loadings_Last = [[] for j in range(len(eigsPC))]
+            Loadings_Temporal = []
             lambdasList = []
             sigmaList = []
-            for i in range(st, len(df0) + 1):
+            for i in tqdm(range(st, len(df0) + 1)):
 
-                print("Step:", i, " of ", len(df0) + 1)
+                #print("Step:", i, " of ", len(df0) + 1)
                 if RollMode == 'RollWindow':
                     df = df0.iloc[i - st:i, :]
                 else:
                     df = df0.iloc[0:i, :]
-
-                if ProjectionMode == 'Transpose':
-                    df = df.T
 
                 features = df.columns.values
                 x = df.loc[:, features].values
@@ -1952,60 +1950,65 @@ class Slider:
                 elif Scaler == 'SimpleImputer':
                     x = SimpleImputer(missing_values=np.nan, strategy='constant').fit_transform(x)
 
-                if manifoldIn == 'PCA':
-                    pca = PCA(n_components=NumProjections)
-                    X_pca = pca.fit_transform(x)
-                    lambdasList.append(list(pca.singular_values_))
-                    c = 0
-                    for eig in eigsPC:
-                        # print("c = ", c, ", eig = ", eig, ' : ', len(pca.components_[eig]), ',', len(pca.components_))
-                        # print(list(pca.components_[eig]))
-                        Loadings_Target[c].append(list(pca.components_[eig]))
-                        c += 1
+                #### SPACIAL PROJECTION ####
+                if ProjectionMode == 'Spacial':
+                    df = df.T
 
-                elif manifoldIn == 'LLE_Spacial':
-                    lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
-                                                          method=LLE_Method, n_jobs=-1)
-                    X_lle = lle.fit_transform(x)
-                    lambdasList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Loadings_Target[c].append(list(X_lle[:, eig]))
-                        c += 1
+                    if manifoldIn == 'PCA':
+                        pca = PCA(n_components=NumProjections)
+                        X_pca = pca.fit_transform(x)
+                        lambdasList.append(list(pca.singular_values_))
+                        c = 0
+                        for eig in eigsPC:
+                            # print("c = ", c, ", eig = ", eig, ' : ', len(pca.components_[eig]), ',', len(pca.components_))
+                            # print(list(pca.components_[eig]))
+                            Loadings_Target[c].append(list(pca.components_[eig]))
+                            c += 1
 
-                elif manifoldIn == 'LLE': #Temporal --> paper
-                    lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
-                                                          method=LLE_Method, n_jobs=-1)
-                    X_lle = lle.fit_transform(x)
-                    lambdasList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Loadings_Target[c].append(list(X_lle[eig]))
-                        c += 1
+                    elif manifoldIn == 'LLE':
+                        lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
+                                                              method=LLE_Method, n_jobs=-1)
+                        X_lle = lle.fit_transform(x)
+                        lambdasList.append(1)
+                        c = 0
+                        for eig in eigsPC:
+                            Loadings_Target[c].append(list(X_lle[:, eig]))
+                            c += 1
 
-                elif manifoldIn == 'DMAP_gDmapsRun':
-                    dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections)
-                    dmapsEigsOut = dMapsOut[0]
-                    lambdasList.append(list(dMapsOut[1]))
-                    sigmaList.append(dMapsOut[2])
-                    c = 0
-                    for eig in eigsPC:
-                        Loadings_Target[c].append(dmapsEigsOut.iloc[:, eig])
-                        c += 1
+                    elif manifoldIn == 'DMAP_gDmapsRun':
+                        dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections)
+                        dmapsEigsOut = dMapsOut[0]
+                        lambdasList.append(list(dMapsOut[1]))
+                        sigmaList.append(dMapsOut[2])
+                        c = 0
+                        for eig in eigsPC:
+                            Loadings_Target[c].append(dmapsEigsOut.iloc[:, eig])
+                            c += 1
 
-                elif manifoldIn == 'DMAP_pyDmapsRun':
-                    dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
-                    dMapsProjectionOut = dMapsOut[0]
-                    eigFirst = dMapsOut[1]
-                    eigLast = dMapsOut[2]
-                    lambdasList.append(list(dMapsOut[3]))
-                    sigmaList.append(dMapsOut[4])
-                    c = 0
-                    for eig in eigsPC:
-                        Loadings_Target[c].append(dMapsProjectionOut.iloc[:, eig])
-                        Loadings_First[c].append(eigFirst.iloc[:, eig])
-                        Loadings_Last[c].append(eigLast.iloc[:, eig])
-                        c += 1
+                    elif manifoldIn == 'DMAP_pyDmapsRun':
+                        dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
+                        dMapsProjectionOut = dMapsOut[0]
+                        eigFirst = dMapsOut[1]
+                        eigLast = dMapsOut[2]
+                        lambdasList.append(list(dMapsOut[3]))
+                        sigmaList.append(dMapsOut[4])
+                        c = 0
+                        for eig in eigsPC:
+                            Loadings_Target[c].append(dMapsProjectionOut.iloc[:, eig])
+                            Loadings_First[c].append(eigFirst.iloc[:, eig])
+                            Loadings_Last[c].append(eigLast.iloc[:, eig])
+                            c += 1
+
+                else:
+                    if manifoldIn == 'LLE': #Temporal --> paper
+                        lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
+                                                              method=LLE_Method, n_jobs=-1)
+                        X_lle = lle.fit_transform(x)
+                        X_lle_DF = pd.DataFrame(X_lle)
+                        targetLoadings = X_lle_DF.iloc[-1,:].tolist()
+                        targetLoadings.append(df.index[-1])
+                        lambdasList.append(1)
+                        Loadings_Temporal.append(targetLoadings)
 
             lambdasListDF = pd.DataFrame(lambdasList)
             lambdasDF = pd.concat(
@@ -2021,44 +2024,49 @@ class Slider:
             #            [pd.DataFrame(np.zeros((st - 1, len(Loadings_Target[0][0]))), columns=["TP"+"_"+str(x) for x in range(len(Loadings_Target[0][0]))]),
             #             pd.DataFrame(Loadings_Target[0], columns=["TP"+"_"+str(x) for x in range(len(Loadings_Target[0][0]))])], axis=0, ignore_index=True))
 
-            principalCompsDf_Target = [[] for j in range(len(Loadings_Target))]
-            principalCompsDf_First = [[] for j in range(len(Loadings_First))]
-            principalCompsDf_Last = [[] for j in range(len(Loadings_Last))]
+            if ProjectionMode == 'Spacial':
+                principalCompsDf_Target = [[] for j in range(len(Loadings_Target))]
+                principalCompsDf_First = [[] for j in range(len(Loadings_First))]
+                principalCompsDf_Last = [[] for j in range(len(Loadings_Last))]
 
-            if manifoldIn in ['PCA', 'LLE_Spacial', 'DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
-                zerosSpace = len(df0.columns)
-                columnsIn = df0.columns
-            elif manifoldIn in ['LLE']:
-                zerosSpace = len(Loadings_Target[0][0])
-                columnsIn = ["P" + "_" + str(x) for x in range(len(Loadings_Target[0][0]))]
-
-            for k in range(len(Loadings_Target)):
-                principalCompsDf_Target[k] = pd.concat(
-                    [pd.DataFrame(np.zeros((st - 1, zerosSpace)), columns=columnsIn),
-                     pd.DataFrame(Loadings_Target[k], columns=columnsIn)], axis=0, ignore_index=True)
-                principalCompsDf_Target[k].index = df0.index
-                principalCompsDf_Target[k] = principalCompsDf_Target[k].ffill()
-
-                #### ONLY FOR DMAPS CASE ####
-                if manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
-                    principalCompsDf_First[k] = pd.concat(
+                for k in range(len(Loadings_Target)):
+                    principalCompsDf_Target[k] = pd.concat(
                         [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
-                         pd.DataFrame(Loadings_First[k], columns=df0.columns)], axis=0, ignore_index=True)
-                    principalCompsDf_First[k].index = df0.index
-                    principalCompsDf_First[k] = principalCompsDf_First[k].ffill()
-                    ####
-                    principalCompsDf_Last[k] = pd.concat(
-                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
-                         pd.DataFrame(Loadings_Last[k], columns=df0.columns)], axis=0, ignore_index=True)
-                    principalCompsDf_Last[k].index = df0.index
-                    principalCompsDf_Last[k] = principalCompsDf_Last[k].ffill()
+                         pd.DataFrame(Loadings_Target[k], columns=df0.columns)], axis=0, ignore_index=True)
+                    principalCompsDf_Target[k].index = df0.index
+                    principalCompsDf_Target[k] = principalCompsDf_Target[k].ffill()
+
+                    #### ONLY FOR DMAPS CASE ####
+                    if manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
+                        principalCompsDf_First[k] = pd.concat(
+                            [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                             pd.DataFrame(Loadings_First[k], columns=df0.columns)], axis=0, ignore_index=True)
+                        principalCompsDf_First[k].index = df0.index
+                        principalCompsDf_First[k] = principalCompsDf_First[k].ffill()
+                        ####
+                        principalCompsDf_Last[k] = pd.concat(
+                            [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
+                             pd.DataFrame(Loadings_Last[k], columns=df0.columns)], axis=0, ignore_index=True)
+                        principalCompsDf_Last[k].index = df0.index
+                        principalCompsDf_Last[k] = principalCompsDf_Last[k].ffill()
+                    else:
+                        principalCompsDf_First[k] = principalCompsDf_Target[k].copy()
+                        principalCompsDf_Last[k] = principalCompsDf_Target[k].copy()
+            elif ProjectionMode == 'Temporal':
+                sub_principalCompsDf_Target = pd.DataFrame(Loadings_Temporal)
+                sub_principalCompsDf_Target.columns = ["col_" + str(x) for x in sub_principalCompsDf_Target.columns]
+                sub_principalCompsDf_Target = sub_principalCompsDf_Target.rename(columns={"col_" + str(len(sub_principalCompsDf_Target.columns) - 1): "Dates"})
+                sub_principalCompsDf_Target = sub_principalCompsDf_Target.set_index('Dates', drop=True)
+                aggDF = pd.concat([df0, sub_principalCompsDf_Target], axis=1).fillna(0)
+                principalCompsDf_Target = aggDF[sub_principalCompsDf_Target.columns]
+
+            if manifoldIn in ['PCA', 'LLE']:
+                if ProjectionMode == 'Spacial':
+                    return [df0, principalCompsDf_Target, lambdasDF]
+                elif ProjectionMode == 'Temporal':
+                    return [df0, [principalCompsDf_Target], lambdasDF]
                 else:
-                    principalCompsDf_First[k] = principalCompsDf_Target[k].copy()
-                    ####
-                    principalCompsDf_Last[k] = principalCompsDf_Target[k].copy()
-
-            if manifoldIn in ['PCA', 'LLE_Spacial', 'LLE']:
-                return [df0, principalCompsDf_Target, lambdasDF]
+                    print("Please choose a proper ProjectionMode : Spacial or Temporal ... Sleeping on error ... ")
             elif manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
                 sigmaListDF = pd.DataFrame(sigmaList)
                 sigmaDF = pd.concat(

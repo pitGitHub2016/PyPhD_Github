@@ -21,6 +21,7 @@ warnings.filterwarnings('ignore')
 conn = sqlite3.connect('FXeodData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
+#twList = [25]
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 def DataHandler(mode):
@@ -353,41 +354,42 @@ def RiskParity(mode):
             plt.show()
 
 def RunManifold(argList):
+    localConn = sqlite3.connect('FXeodData_principalCompsDf.db')
     df = argList[0]
     manifoldIn = argList[1]
     tw = argList[2]
 
-    print([df, manifoldIn, tw])
+    print([manifoldIn, tw])
 
     if tw != 'ExpWindow25':
         print(manifoldIn + " tw = ", tw)
         if manifoldIn == 'PCA':
             out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard') #RollMode='ExpWindow'
         elif manifoldIn == 'LLE':
-            out = sl.AI.gRollingManifold(manifoldIn, df, tw, 19, range(len(df.columns)-1), LLE_n_neighbors=5, ProjectionMode='Transpose') # RollMode='ExpWindow'
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, 5, [0,1,2,3,4], LLE_n_neighbors=5, ProjectionMode='Temporal') # RollMode='ExpWindow', ProjectionMode='Transpose'
 
-        out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), conn, if_exists='replace')
+        out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), localConn, if_exists='replace')
         principalCompsDfList = out[1]
-        out[2].to_sql(manifoldIn + '_lambdasDf_tw_' + str(tw), conn, if_exists='replace')
+        out[2].to_sql(manifoldIn + '_lambdasDf_tw_' + str(tw), localConn, if_exists='replace')
         for k in range(len(principalCompsDfList)):
-            principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), conn, if_exists='replace')
+            principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
 
     else:
         if manifoldIn == 'PCA':
             out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard', RollMode='ExpWindow')
         elif manifoldIn == 'LLE':
-            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 19, range(len(df.columns)-1), LLE_n_neighbors=5, ProjectionMode='Transpose', RollMode='ExpWindow')
+            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, RollMode='ExpWindow', ProjectionMode='Temporal') # RollMode='ExpWindow', ProjectionMode='Transpose'
 
-        out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), conn, if_exists='replace')
+        out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), localConn, if_exists='replace')
         principalCompsDfList = out[1]
-        out[2].to_sql(manifoldIn + '_lambdasDf_tw_' + str(tw), conn, if_exists='replace')
+        out[2].to_sql(manifoldIn + '_lambdasDf_tw_' + str(tw), localConn, if_exists='replace')
         for k in range(len(principalCompsDfList)):
-            principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), conn, if_exists='replace')
+            principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
 
 def RunManifoldLearningOnFXPairs():
-    df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
+    df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True).iloc[-100:,:]
     processList = []
-    for manifoldIn in ['PCA', 'LLE']:
+    for manifoldIn in ['LLE']: #'PCA'
         for tw in twList:
             print(manifoldIn, ",", tw)
             processList.append([df, manifoldIn, tw])
@@ -915,43 +917,44 @@ def Test():
 
 #####################################################
 
-#DataHandler('investingCom')
-#DataHandler('investingCom_Invert')
-#shortTermInterestRatesSetup("MainSetup")
-#shortTermInterestRatesSetup("retsIRDsSetup")
-#shortTermInterestRatesSetup("retsIRDs")
+if __name__ == '__main__':
+    #DataHandler('investingCom')
+    #DataHandler('investingCom_Invert')
+    #shortTermInterestRatesSetup("MainSetup")
+    #shortTermInterestRatesSetup("retsIRDsSetup")
+    #shortTermInterestRatesSetup("retsIRDs")
 
-#LongOnly()
-#RiskParity('run')
-#RiskParity('plots')
+    #LongOnly()
+    #RiskParity('run')
+    #RiskParity('plots')
 
-#RunManifoldLearningOnFXPairs()
-#CrossValidateEmbeddings("PCA", 250, "run")
-#CrossValidateEmbeddings("PCA", 250, "Test0")
+    RunManifoldLearningOnFXPairs()
+    #CrossValidateEmbeddings("PCA", 250, "run")
+    #CrossValidateEmbeddings("PCA", 250, "Test0")
 
-getProjections()
+    #getProjections()
 
-#StationarityOnProjections('PCA', 'build')
-#StationarityOnProjections('LLE', 'build')
-#StationarityOnProjections('PCA', 'plot')
-#StationarityOnProjections('LLE', 'plot')
+    #StationarityOnProjections('PCA', 'build')
+    #StationarityOnProjections('LLE', 'build')
+    #StationarityOnProjections('PCA', 'plot')
+    #StationarityOnProjections('LLE', 'plot')
 
-#Test()
-#ContributionAnalysis()
+    #Test()
+    #ContributionAnalysis()
 
-#FinalModelPlot('PnL')
-#FinalModelPlot('modelParams')
-#FinalModelPlot('residuals')
+    #FinalModelPlot('PnL')
+    #FinalModelPlot('modelParams')
+    #FinalModelPlot('residuals')
 
-#RollingStatistics('Assets', 'Exp', 'Sharpe')
-#RollingStatistics('Assets', 'Exp', 'Hurst')
-#RollingStatistics('FinalModels', 'Exp', 'Hurst')
-#RollingStatistics('FinalModels_InitialTS', 'Exp', 'Hurst').
-#RollingStatistics('Benchmark', 'Roll', 'Sharpe')
-#RollingStatistics('Benchmark', 'Exp', 'Sharpe')
-#RollingStatistics('Benchmark', 'Exp', 'Hurst')
-#RollingStatistics('FinalModels', 'Roll', 'Sharpe')
-#RollingStatistics('FinalModels', 'Exp', 'Sharpe')
-#RollingStatistics('FinalModels', 'Roll', 'Sharpe')
-#RollingStatistics('FinalModels_InitialTS', 'Exp', 'Sharpe')
+    #RollingStatistics('Assets', 'Exp', 'Sharpe')
+    #RollingStatistics('Assets', 'Exp', 'Hurst')
+    #RollingStatistics('FinalModels', 'Exp', 'Hurst')
+    #RollingStatistics('FinalModels_InitialTS', 'Exp', 'Hurst').
+    #RollingStatistics('Benchmark', 'Roll', 'Sharpe')
+    #RollingStatistics('Benchmark', 'Exp', 'Sharpe')
+    #RollingStatistics('Benchmark', 'Exp', 'Hurst')
+    #RollingStatistics('FinalModels', 'Roll', 'Sharpe')
+    #RollingStatistics('FinalModels', 'Exp', 'Sharpe')
+    #RollingStatistics('FinalModels', 'Roll', 'Sharpe')
+    #RollingStatistics('FinalModels_InitialTS', 'Exp', 'Sharpe')
 
