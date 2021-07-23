@@ -478,7 +478,7 @@ def RunRollManifold(manifoldIn, universe):
             principalCompsDfList_First[k].to_sql(manifoldIn + "_" + universe + '_principalCompsDf_First_tw_' + str(tw) + "_" + str(k), conn, if_exists='replace')
             principalCompsDfList_Last[k].to_sql(manifoldIn + "_" + universe + '_principalCompsDf_Last_tw_' + str(tw) + "_" + str(k), conn, if_exists='replace')
 
-def gDMAP_TES(mode, universe, alphaChoice, lifting):
+def gDMAP(mode, universe, alphaChoice, lifting):
 
     df = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
     df.drop(['CBOE Volatility Index'], axis=1, inplace=True)
@@ -593,7 +593,7 @@ def gDMAP_TES(mode, universe, alphaChoice, lifting):
 
                     c += 1
 
-def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams):
+def gDMAP_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams):
 
     df = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
     df.drop(['CBOE Volatility Index'], axis=1, inplace=True)
@@ -1114,15 +1114,17 @@ def gDMAP_TES_TradeProjections(metadataMode, tradingAssetsMode, preCursorParams)
 
 def merge_gDMAP_Sharpes():
     shList = []
-    for metadataMode in ["Raw", "rowStochastic"]:
-        for tradingAssetsMode in ['Assets', 'RiskParity', 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200']:
-            for preCursorParams in [[25, 1, 'roll'], [25, 4, 'exp'], [250, 1, 'roll'], [250, 4, 'exp']]:
-                medshDF = pd.read_sql('SELECT * FROM shDF_'+ metadataMode + "_" + tradingAssetsMode
-                                      + "_" + str(preCursorParams[0]) + "_" + str(preCursorParams[1]) + "_" + str(preCursorParams[2]), conn).set_index('StrategyName', drop=True)
-                medshDF['metadataMode'] = metadataMode
-                medshDF['tradingAssetsMode'] = tradingAssetsMode
-                medshDF['preCursorParams'] = str(preCursorParams[0]) + "_" + str(preCursorParams[1]) + "_" + str(preCursorParams[2])
-                shList.append(medshDF)
+    for pnlMode in ['', 'binary_']:
+        for metadataMode in ["Raw", "rowStochastic"]:
+            for tradingAssetsMode in tqdm(['Assets', 'RiskParity', 'ARIMA_Raw_Assets_100', 'ARIMA_Raw_Assets_200']):
+                for preCursorParams in [[25, 1, 'roll'], [25, 4, 'exp'], [250, 1, 'roll'], [250, 4, 'exp']]:
+                    medshDF = pd.read_sql('SELECT * FROM '+pnlMode+'shDF_'+ metadataMode + "_" + tradingAssetsMode
+                                          + "_" + str(preCursorParams[0]) + "_" + str(preCursorParams[1]) + "_" + str(preCursorParams[2]), conn).set_index('StrategyName', drop=True)
+                    medshDF['pnlMode'] = pnlMode
+                    medshDF['metadataMode'] = metadataMode
+                    medshDF['tradingAssetsMode'] = tradingAssetsMode
+                    medshDF['preCursorParams'] = str(preCursorParams[0]) + "_" + str(preCursorParams[1]) + "_" + str(preCursorParams[2])
+                    shList.append(medshDF)
 
     shDF_All = pd.concat(shList)
     shDF_All.to_sql('shDF_All', conn, if_exists='replace')
@@ -1656,28 +1658,28 @@ if __name__ == '__main__':
     #RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
     #RunRollManifold("DMAP_gDmapsRun", 'Rates')
 
-    #gDMAP_TES("create", "AssetsRets", "", "")
-    #gDMAP_TES("create", "Rates", "", "")
-    #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'LinearRegression')
-    #gDMAP_TES("run", "Rates", 'sumKLMedian', 'LinearRegression')
-    #gDMAP_TES("run", "AssetsRets", 'sumKLMedian', 'Temporal')
-    #gDMAP_TES("run", "Rates", 'sumKLMedian', 'Temporal')
+    #gDMAP("create", "AssetsRets", "", "")
+    #gDMAP("create", "Rates", "", "")
+    #gDMAP("run", "AssetsRets", 'sumKLMedian', 'LinearRegression')
+    #gDMAP("run", "Rates", 'sumKLMedian', 'LinearRegression')
+    #gDMAP("run", "AssetsRets", 'sumKLMedian', 'Temporal')
+    #gDMAP("run", "Rates", 'sumKLMedian', 'Temporal')
 
-    time_configuration = 'roll' # 'roll', 'exp'
-    rollPeriod = 25 # 25, 250
-    stdIn = 1
-    if time_configuration == 'exp':
-        stdIn = 4
-    gDMAP_TES_TradeProjections("Raw", 'Assets', [rollPeriod, stdIn, time_configuration])
-    gDMAP_TES_TradeProjections("Raw", 'RiskParity', [rollPeriod, stdIn, time_configuration])
-    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_100', [rollPeriod, stdIn, time_configuration])
-    gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_200', [rollPeriod, stdIn, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'Assets', [rollPeriod, stdIn, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'RiskParity', [rollPeriod, stdIn, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100', [rollPeriod, stdIn, time_configuration])
-    gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200', [rollPeriod, stdIn, time_configuration])
+    #time_configuration = 'roll' # 'roll', 'exp'
+    #rollPeriod = 250 # 25, 250
+    #stdIn = 1
+    #if time_configuration == 'exp':
+    #    stdIn = 4
+    #gDMAP_TES_TradeProjections("Raw", 'Assets', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("Raw", 'RiskParity', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_100', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("Raw", 'ARIMA_Raw_Assets_200', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'Assets', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'RiskParity', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100', [rollPeriod, stdIn, time_configuration])
+    #gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200', [rollPeriod, stdIn, time_configuration])
 
-    #merge_gDMAP_Sharpes()
+    merge_gDMAP_Sharpes()
 
     #ARIMAonPortfolios('Assets', 'Main', 'run')
     #ARIMAonPortfolios('Assets', 'Main', 'report')
