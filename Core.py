@@ -21,8 +21,8 @@ warnings.filterwarnings('ignore')
 conn = sqlite3.connect('FXeodData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
-#twList = [25]
-twList = [25, 100, 150, 250, 'ExpWindow25']
+twList = [250]
+#twList = [25, 100, 150, 250, 'ExpWindow25']
 
 def DataHandler(mode):
 
@@ -387,7 +387,7 @@ def RunManifold(argList):
             principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
 
 def RunManifoldLearningOnFXPairs():
-    df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True).iloc[-100:,:]
+    df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
     processList = []
     for manifoldIn in ['LLE']: #'PCA'
         for tw in twList:
