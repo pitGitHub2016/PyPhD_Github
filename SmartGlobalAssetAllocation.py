@@ -1130,10 +1130,6 @@ def merge_gDMAP_Sharpes():
     shDF_All.to_sql('shDF_All', conn, if_exists='replace')
 
 pnlCalculator = 0
-
-calcMode = 'runSerial'
-#calcMode = 'read'
-pnlCalculator = 0
 #probThr = 0.5
 probThr = 0
 targetSystems = [2] #[0,1]
@@ -1141,7 +1137,7 @@ targetSystems = [2] #[0,1]
 def ARIMAlocal(argList):
     selection = argList[0]
     df = argList[1]
-    df = df[df!=0]
+    df = df[df!=0].dropna()
     trainLength = argList[2]
     orderIn = argList[3]
     rw = argList[4]
@@ -1167,6 +1163,7 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
 
     if Portfolios == 'Assets':
         allProjectionsDF = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
+        allProjectionsDF.drop(['CBOE Volatility Index'], axis=1, inplace=True)
 
     orderList = [(1,0,0),(2,0,0)]
 
@@ -1222,9 +1219,11 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
                 arimaPnLDF.to_sql(Portfolios + '_arimaPnLDF_' +str(orderIn[0])+str(orderIn[1])+str(orderIn[2])+ '_' + str(rw) , conn, if_exists='replace')
             shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True).round(2)
             shDF.to_sql(Portfolios+'_sh_ARIMA_pnl_' + str(rw), conn, if_exists='replace')
+            print("shDF = ", shDF)
 
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
             notProcessedDF.to_sql(Portfolios+'_notProcessedDF'+ '_' + str(rw), conn, if_exists='replace')
+            print("notProcessedDF = ", notProcessedDF)
 
     elif scanMode == 'ScanNotProcessed':
         processList = []
@@ -1249,11 +1248,12 @@ def ARIMAonPortfolios(Portfolios, scanMode, mode):
 def ClassificationProcess(argList):
     selection = argList[0]
     df = argList[1]
-    df = df[df != 0]
+    df = df[df != 0].dropna()
     params = argList[2]
     magicNum = argList[3]
+    calcMode = argList[4]
 
-    if calcMode in ['runSerial', 'runParallel']:
+    if calcMode == 'runSerial':
         print("Running gClassification")
         out = sl.AI.gClassification(df, params)
 
@@ -1263,8 +1263,13 @@ def ClassificationProcess(argList):
         out[3].to_sql('df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
         out[4].to_sql('df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
         out[5].to_sql('df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
-
-    elif calcMode == 'read':
+    
+    elif calcMode == 'runParallel':
+        print("Running gClassification")
+        out = sl.AI.gClassification(df, params)
+        pickle.dump(out, open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
+    
+    elif calcMode == 'readSQL':
         print(selection)
         out = [
             pd.read_sql('SELECT * FROM "df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
@@ -1274,6 +1279,9 @@ def ClassificationProcess(argList):
             pd.read_sql('SELECT * FROM "df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
             pd.read_sql('SELECT * FROM "df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum)+'"', conn).set_index('Dates', drop=True),
         ]
+
+    elif calcMode == 'readPickle':
+        out = pickle.load(open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "rb"))
 
     sig = out[3] # Predicted Price
     df_real_price_class_DF = out[4]
@@ -1347,30 +1355,22 @@ def runClassification(Portfolios, scanMode, mode):
 
     if Portfolios == 'Assets':
         allProjectionsDF = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
+        allProjectionsDF.drop(['CBOE Volatility Index'], axis=1, inplace=True)
 
     if scanMode == 'Main':
 
-        if mode == "runSerial":
-            for magicNum in targetSystems:
-                params = Architecture(magicNum)
-                for selection in allProjectionsDF.columns:
-                    try:
-                        ClassificationProcess([selection, allProjectionsDF[selection], params, magicNum])
-                    except Exception as e:
-                        print(e)
-
-        elif mode == "runParallel":
+        if mode == "runProcess":
             processList = []
             for magicNum in targetSystems:
                 params = Architecture(magicNum)
                 for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], params, magicNum])
+                    # ClassificationProcess([selection, allProjectionsDF[selection], params, magicNum, "runSerial"])
+                    # ClassificationProcess([selection, allProjectionsDF[selection], params, magicNum, "readSQL"])
+                    processList.append([selection, allProjectionsDF[selection], params, magicNum, "runParallel"])
+                    # processList.append([selection, allProjectionsDF[selection], params, magicNum, "readPickle"])
 
-            if calcMode == 'read':
-                p = mp.Pool(2)
-            else:
-                p = mp.Pool(mp.cpu_count())
-                #p = mp.Pool(len(processList))
+            p = mp.Pool(mp.cpu_count())
+            #p = mp.Pool(len(processList))
             #result = p.map(ClassificationProcess, tqdm(processList))
             result = p.map(ClassificationProcess, processList)
             p.close()
@@ -1447,11 +1447,12 @@ def runClassification(Portfolios, scanMode, mode):
 def RegressionProcess(argList):
     selection = argList[0]
     df = argList[1]
-    df = df[df != 0]
+    df = df[df != 0].dropna()
     params = argList[2]
     magicNum = argList[3]
+    calcMode = argList[4]
 
-    if calcMode in ['runSerial', 'runParallel']:
+    if calcMode == 'runSerial':
         print("Running gGPRegression")
         out = sl.AI.gGPRegression(df, params)
 
@@ -1470,7 +1471,12 @@ def RegressionProcess(argList):
                 print("Sleeping for some seconds and retrying ... ")
                 time.sleep(1)
 
-    elif calcMode == 'read':
+    elif calcMode == 'runParallel':
+        print("Running gGPRegression")
+        out = sl.AI.gGPRegression(df, params)
+        pickle.dump(out, open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
+
+    elif calcMode == 'readSQL':
         print(selection)
         out = [
             pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
@@ -1480,6 +1486,9 @@ def RegressionProcess(argList):
             pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
             pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
         ]
+
+    elif calcMode == 'readPickle':
+        out = pickle.load(open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "rb"))
 
     sig = out[3] # Predicted Price
     df_real_price_class_DF = out[4]
@@ -1503,7 +1512,10 @@ def RegressionProcess(argList):
     sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
     print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
 
-    pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+    if calcMode in ['runSerial', 'readSQL']:
+        pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+    else:
+        pickle.dump(out, open("Repo/ClassifiersData/pnl_" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
 
 def runRegression(Portfolios, scanMode, mode):
     def Architecture(magicNum):
@@ -1537,27 +1549,22 @@ def runRegression(Portfolios, scanMode, mode):
 
     if Portfolios == 'Assets':
         allProjectionsDF = sl.fd(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)).fillna(0)
+        allProjectionsDF.drop(['CBOE Volatility Index'], axis=1, inplace=True)
 
     if scanMode == 'Main':
 
-        if mode == "runSerial":
-            for magicNum in targetSystems:
-                params = Architecture(magicNum)
-                for selection in allProjectionsDF.columns:
-                    RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
-
-        elif mode == "runParallel":
+        if mode == "runProcess":
             processList = []
             for magicNum in targetSystems:
                 params = Architecture(magicNum)
                 for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], params, magicNum])
-
-            if calcMode == 'read':
-                p = mp.Pool(2)
-            else:
-                p = mp.Pool(mp.cpu_count())
-                #p = mp.Pool(len(processList))
+                    #RegressionProcess([selection, allProjectionsDF[selection], params, magicNum, "runSerial"])
+                    #RegressionProcess([selection, allProjectionsDF[selection], params, magicNum, "readSQL"])
+                    processList.append([selection, allProjectionsDF[selection], params, magicNum, "runParallel"])
+                    #processList.append([selection, allProjectionsDF[selection], params, magicNum, "readPickle"])
+                    
+            p = mp.Pool(mp.cpu_count())
+            #p = mp.Pool(len(processList))
             result = p.map(RegressionProcess, tqdm(processList))
             #result = p.map(RegressionProcess, processList)
             p.close()
@@ -1679,18 +1686,18 @@ if __name__ == '__main__':
     #gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_100', [rollPeriod, stdIn, time_configuration])
     #gDMAP_TES_TradeProjections("rowStochastic", 'ARIMA_Raw_Assets_200', [rollPeriod, stdIn, time_configuration])
 
-    merge_gDMAP_Sharpes()
+    #merge_gDMAP_Sharpes()
 
     #ARIMAonPortfolios('Assets', 'Main', 'run')
     #ARIMAonPortfolios('Assets', 'Main', 'report')
     #ARIMAonPortfolios('Assets', 'ScanNotProcessed', '')
 
-    #runClassification("Assets", 'Main', "runSerial")
-    #runClassification("Assets", 'Main', "report")
-    #runClassification('Assets', 'ScanNotProcessed', '')
-
-    #runRegression("Assets", 'Main', "runSerial")
+    runRegression("Assets", 'Main', "runProcess")
     #runRegression("Assets", 'Main', "report")
     #runRegression("Assets", 'ScanNotProcessed', "")
+
+    #runClassification("Assets", 'Main', "runProcess")
+    #runClassification("Assets", 'Main', "report")
+    #runClassification('Assets', 'ScanNotProcessed', '')
 
     #DB_Handler()
