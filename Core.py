@@ -18,11 +18,11 @@ from sklearn.manifold import LocallyLinearEmbedding
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 warnings.filterwarnings('ignore')
 
-conn = sqlite3.connect('FXeodData.db')
+conn = sqlite3.connect('FXeodData_FxData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
-twList = [250]
-#twList = [25, 100, 150, 250, 'ExpWindow25']
+#twList = ['ExpWindow25']
+twList = [25, 100, 150, 250, 'ExpWindow25']
 
 def DataHandler(mode):
 
@@ -183,10 +183,12 @@ def shortTermInterestRatesSetup(mode):
 def LongOnly():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
     longOnlySharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(df), columns=["Sharpe"])
+    longOnlySharpes_active = pd.DataFrame(sl.sharpe(df, mode='processNA', annualiseFlag='yes'))
     df_Mean = 100 * 252 * df.mean()
     tConfdf = sl.tConfDF(pd.DataFrame(df).fillna(0), scalingFactor=252 * 100).set_index("index", drop=True)
     stddf = 100 * np.sqrt(252) * df.std()
     longOnlySharpes.to_sql('LongOnlySharpes', conn, if_exists='replace')
+    longOnlySharpes_active.to_sql('LongOnlySharpesActive', conn, if_exists='replace')
 
     randomWalkPnl_df = sl.S(sl.sign(df)) * df
     randomWalkPnl_dfSharpes = pd.DataFrame(np.sqrt(252) * sl.sharpe(randomWalkPnl_df), columns=["Sharpe"])
@@ -297,6 +299,8 @@ def RiskParity(mode):
 
             rsDf.to_sql('RiskParityEWPrsDf_tw_'+str(tw), conn, if_exists='replace')
             shrsdfRP = (np.sqrt(252) * sl.sharpe(rsDf)).round(4)
+            print("Risk Parity Sharpe Ratio : ", shrsdfRP, ", Mean : ", 100 * 252 * rsDf.mean().round(4), ", TConf : ", sl.tConfDF(rsDf, scalingFactor=252 * 100).set_index("index", drop=True),
+                  ", Std : ", 100 * np.sqrt(252) * rsDf.std().round(4))
 
             randomWalkPnl_rsDf = (sl.S(sl.sign(rsDf)) * rsDf).fillna(0)
             rsDf.to_sql('RiskParityEWPrsDf_randomWalkPnl_tw_'+str(tw), conn, if_exists='replace')
@@ -405,22 +409,22 @@ def getProjections():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
 
     allProjectionsList = []
-    for manifoldIn in ["PCA", "LLE"]:
+    for manifoldIn in ["PCA"]: #"LLE"
 
         projections_subgroup_List = []
         for tw in twList:
             print(manifoldIn + " tw = ", tw)
-            list = []
+            prlist = []
             for c in range(len(df.columns)):
                 try:
                     medDf = df * sl.S(pd.read_sql(
                         'SELECT * FROM ' + manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(c),
                         conn).set_index('Dates', drop=True))
                     pr = sl.rs(medDf.fillna(0))
-                    list.append(pr)
+                    prlist.append(pr)
                 except:
                     pass
-            exPostProjections = pd.concat(list, axis=1, ignore_index=True)
+            exPostProjections = pd.concat(prlist, axis=1, ignore_index=True)
             if manifoldIn == 'PCA':
                 exPostProjections.columns = [manifoldIn + '_' + str(tw) + '_' + str(x) for x in
                                              range(len(df.columns))]
@@ -451,6 +455,108 @@ def getProjections():
     allProjectionsDF.to_sql('allProjectionsDF', conn, if_exists='replace')
     allProjectionsDFSharpes = np.sqrt(252) * sl.sharpe(allProjectionsDF)
     allProjectionsDFSharpes.to_sql('allProjectionsDFSharpes', conn, if_exists='replace')
+
+def get_LLE_Temporal():
+    localConn = sqlite3.connect('FXeodData_principalCompsDf.db')
+
+    lleTemporalList = []
+    for tw in twList:
+        subDF = pd.read_sql('SELECT * FROM LLE_principalCompsDf_tw_' + str(tw) + "_0", localConn)
+        subDF = subDF.rename(columns={"index": "Dates"}).set_index('Dates', drop=True)
+        subDF.columns = ["LLE_Temporal_"+str(tw)+"_"+str(x.split("_")[1]) for x in subDF.columns]
+        lleTemporalList.append(subDF)
+    allProjectionsDF = pd.concat(lleTemporalList, axis=1)
+    allProjectionsDF.to_sql('LLE_Temporal_allProjectionsDF', localConn, if_exists='replace')
+
+def Trade_LLE_Temporal():
+    localConn = sqlite3.connect('FXeodData_FxData.db')
+    df = pd.read_sql('SELECT * FROM FxDataAdjRets', localConn).set_index('Dates', drop=True)
+    df_rp = sl.rp(df)
+    LO_DF = pd.read_sql('SELECT * FROM Edf_classic', localConn).set_index('Dates', drop=True)
+    LO_DF.columns = ["LO"]
+    RP_DF = pd.DataFrame(sl.rs(pd.read_sql('SELECT * FROM riskParityDF_tw_250', localConn).set_index('Dates', drop=True).fillna(0)), columns=["RP"])
+    benchDF = pd.concat([LO_DF, RP_DF], axis=1)
+
+    sigList = []
+    for strategy in tqdm(["Raw", "EMA", "ARIMA", "GPR", "RNN_R"]):
+        if strategy == "Raw":
+            print("Raw Signal setup ... ")
+            raw_sig = pd.read_sql('SELECT * FROM LLE_Temporal_allProjectionsDF', sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+            raw_sig.columns = [strategy+"_"+str(x) for x in raw_sig.columns]
+            sigList.append(raw_sig)
+        elif strategy == "EMA":
+            print("EMA Signal setup ... ")
+            EMA_sig_conn = sqlite3.connect('FXeodData_sema.db')
+            subsigList = []
+            for Lag in [2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]:
+                subsig = pd.read_sql('SELECT * FROM sema_sig_'+str(Lag), EMA_sig_conn).set_index('Dates',drop=True)
+                subsig.columns = [strategy+"_"+str(Lag)+"_"+str(x) for x in subsig.columns]
+                subsigList.append(subsig)
+            ema_sig = pd.concat(subsigList, axis=1)
+            sigList.append(ema_sig)
+        elif strategy == "ARIMA":
+            print("ARIMA Signal setup ... ")
+            ARIMA_sig_conn = sqlite3.connect('FXeodDataARIMA.db')
+            subsigList = []
+            for tw in twList:
+                for pr in [0,1,2,3,4]:
+                    for orderIn in ["100", "200", "300"]:
+                        subsig = pd.read_sql('SELECT * FROM LLE_Temporal_' +str(tw) + "_" + str(pr) + "_ARIMA_PredictionsDF_" + orderIn + "_250", ARIMA_sig_conn).set_index('Dates', drop=True)
+                        subsig.columns = [strategy+"_"+str(tw)+"_"+str(pr)+"_"+orderIn+"_"+str(x) for x in subsig.columns]
+                        subsigList.append(subsig)
+            arima_sig = pd.concat(subsigList, axis=1)
+            sigList.append(arima_sig)
+        elif strategy == "GPR":
+            print("GPR Signal setup ... ")
+            subsigList = []
+            for tw in tqdm(twList):
+                for pr in [0, 1, 2, 3, 4]:
+                    for sys in [0, 1, 2, 3, 4]:
+                        outRead = pickle.load(open("Repo/ClassifiersData/GPR_LLE_Temporal_"+str(tw)+"_"+str(pr)+"_"+str(sys)+".p", "rb"))
+                        subsig = pd.DataFrame(outRead[3].iloc[:,0])
+                        subsig.columns = [strategy + "_" + str(tw) + "_" + str(pr) + "_" + str(sys)]
+                        subsigList.append(subsig)
+            gpr_sig = pd.concat(subsigList, axis=1)
+            sigList.append(gpr_sig)
+        elif strategy == "RNN_R":
+            sig_Table = "0"
+            sig_conn = sqlite3.connect('FXeodData_RNN_R.db')
+
+    df_pnlList = []
+    df_rp_pnlList = []
+    benchDF_pnlList = []
+
+    for sig in sigList:
+        for c in sig.columns:
+            sigDF = sl.S(sl.sign(sig[c]))
+            sub_df_pnl = df.mul(sigDF, axis=0)
+            sub_df_pnl.columns = [c+"_"+str(x) for x in sub_df_pnl.columns]
+            sub_df_pnl[c+"_"+"E_PnL"] = sl.E(sub_df_pnl)
+            df_pnlList.append(sub_df_pnl)
+
+            sub_df_rp_pnl = df_rp.mul(sigDF, axis=0)
+            sub_df_rp_pnl.columns = [c+"_"+str(x) for x in sub_df_rp_pnl.columns]
+            sub_df_rp_pnl[c+"_"+"E_PnL"] = sl.E(sub_df_rp_pnl)
+            df_rp_pnlList.append(sub_df_rp_pnl)
+
+            sub_benchDF_pnl = benchDF.mul(sigDF, axis=0)
+            sub_benchDF_pnl.columns = [c + "_" + str(x) for x in sub_benchDF_pnl.columns]
+            benchDF_pnlList.append(sub_benchDF_pnl)
+
+    df_pnl_DF = pd.concat(df_pnlList, axis=1)
+    df_rp_pnl_DF = pd.concat(df_rp_pnlList, axis=1)
+    benchDF_pnl_DF = pd.concat(benchDF_pnlList, axis=1)
+
+    df_pnl_DF_sh = pd.DataFrame(sl.sharpe(df_pnl_DF, mode='processNA', annualiseFlag='yes'))
+    df_rp_pnl_DF_sh = pd.DataFrame(sl.sharpe(df_rp_pnl_DF, mode='processNA', annualiseFlag='yes'))
+    benchDF_pnl_DF_sh = pd.DataFrame(sl.sharpe(benchDF_pnl_DF, mode='processNA', annualiseFlag='yes'))
+    df_pnl_DF_sh.to_sql('LLE_Temporal_df_pnl_DF_sh', localConn, if_exists='replace')
+    df_rp_pnl_DF_sh.to_sql('LLE_Temporal_df_rp_pnl_DF_sh', localConn, if_exists='replace')
+    benchDF_pnl_DF_sh.to_sql('LLE_Temporal_benchDF_pnl_DF_sh', localConn, if_exists='replace')
+
+    pickle.dump(df_pnl_DF, open("df_pnl_DF.p", "wb"))
+    pickle.dump(df_rp_pnl_DF, open("df_rp_pnl_DF.p", "wb"))
+    pickle.dump(benchDF_pnl_DF, open("benchDF_pnl_DF.p", "wb"))
 
 def StationarityOnProjections(manifoldIn, mode):
     allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
@@ -925,14 +1031,16 @@ if __name__ == '__main__':
     #shortTermInterestRatesSetup("retsIRDs")
 
     #LongOnly()
-    #RiskParity('run')
+    RiskParity('run')
     #RiskParity('plots')
 
-    RunManifoldLearningOnFXPairs()
+    #RunManifoldLearningOnFXPairs()
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
 
     #getProjections()
+    #get_LLE_Temporal()
+    #Trade_LLE_Temporal()
 
     #StationarityOnProjections('PCA', 'build')
     #StationarityOnProjections('LLE', 'build')

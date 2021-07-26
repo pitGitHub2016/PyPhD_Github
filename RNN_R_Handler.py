@@ -18,7 +18,7 @@ mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
 
 try:
-    conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData.db')
+    conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData_RNN_R.db')
 except:
     conn = sqlite3.connect('Temp.db')
 twList = [25, 100, 150, 250, 'ExpWindow25']
@@ -32,11 +32,13 @@ targetSystems = [0, 1, 2, 3, 4]
 def RegressionProcess(argList):
     selection = argList[0]
     df = argList[1]
+    #df = df[df != 0].dropna()
     params = argList[2]
     magicNum = argList[3]
+    calcMode = argList[4]
 
-    if calcMode in ['runSerial', 'runParallel']:
-        print("Running gRNN_Regression")
+    if calcMode == 'runSerial':
+        print("Running gRNNregression")
         out = sl.AI.gRNN_Regression(df, params)
 
         writeFlag = False
@@ -51,11 +53,15 @@ def RegressionProcess(argList):
                 writeFlag = True
             except Exception as e:
                 print(e)
-                conn.close()
                 print("Sleeping for some seconds and retrying ... ")
-                time.sleep(randint(0, 5))
+                time.sleep(1)
 
-    elif calcMode == 'read':
+    elif calcMode == 'runParallel':
+        print("Running gRNNregression")
+        out = sl.AI.gRNN_Regression(df, params)
+        pickle.dump(out, open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
+
+    elif calcMode == 'readSQL':
         print(selection)
         out = [
             pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
@@ -65,6 +71,9 @@ def RegressionProcess(argList):
             pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
             pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
         ]
+
+    elif calcMode == 'readPickle':
+        out = pickle.load(open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "rb"))
 
     sig = out[3] # Predicted Price
     df_real_price_class_DF = out[4]
@@ -77,13 +86,6 @@ def RegressionProcess(argList):
 
     sigDF.columns = ["ScaledSignal"]
 
-    if selection == "LO1":
-        fig, ax = plt.subplots(sharex=True, nrows=3, ncols=1)
-        df_real_price_class_DF.plot(ax=ax[0])
-        sig.plot(ax=ax[1])
-        sigDF.plot(ax=ax[2])
-        plt.show()
-
     dfPnl = pd.concat([df_real_price_test_DF, sigDF], axis=1)
     dfPnl.columns = ["Real_Price", "Sig"]
     #dfPnl["Sig"].plot()
@@ -95,7 +97,10 @@ def RegressionProcess(argList):
     sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
     print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
 
-    pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+    if calcMode in ['runSerial', 'readSQL']:
+        pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+    else:
+        pickle.dump(out, open("Repo/ClassifiersData/pnl_" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
 
 def runRegression(Portfolios, scanMode, mode):
     def Architecture(magicNum):
@@ -120,7 +125,9 @@ def runRegression(Portfolios, scanMode, mode):
             "SubHistoryLength": 250,  # 760
             "SubHistoryTrainingLength": 250 - 1,  # 510
             "Scaler": "Standard",  # Standard
-            "epochsIn": 100,  # 100
+            "epochsT0": 100,  # 100
+            "epochsThr": 1,  # 100
+            "epochsRun": 10,  # 100
             "batchSIzeIn": 10,  # 16
             "EarlyStopping_patience_Epochs": 10,  # 10
             "LearningMode": 'static',  # 'static', 'online'
@@ -135,12 +142,15 @@ def runRegression(Portfolios, scanMode, mode):
 
     if Portfolios == 'Projections':
         allProjectionsDF = pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True)
-        #allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
+        # allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
+    elif Portfolios == 'LLE_Temporal':
+        allProjectionsDF = pd.read_sql('SELECT * FROM LLE_Temporal_allProjectionsDF',
+                                       sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
     elif Portfolios == 'globalProjections':
         globalProjectionsList = []
         for manifoldIn in ["PCA", "LLE"]:
-            #medDF = pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True)
-            medDF = pd.read_csv('globalProjectionsDF_' + manifoldIn +'.csv').set_index('Dates', drop=True)
+            # medDF = pd.read_sql('SELECT * FROM globalProjectionsDF_' + manifoldIn, conn).set_index('Dates', drop=True)
+            medDF = pd.read_csv('globalProjectionsDF_' + manifoldIn + '.csv').set_index('Dates', drop=True)
             globalProjectionsList.append(medDF)
         allProjectionsDF = pd.concat(globalProjectionsList, axis=1)
         print("len(allProjectionsDF.columns) = ", len(allProjectionsDF.columns))
@@ -148,37 +158,26 @@ def runRegression(Portfolios, scanMode, mode):
         allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
         allProjectionsDF.columns = ["RP"]
         allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
-    elif Portfolios == 'Finalists':
-        #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0',
-                                                                                                              'PCA_250_19', 'LLE_250_18',
-                                                                                                              'PCA_ExpWindow25_0', 'LLE_ExpWindow25_0',
-                                                                                                              'PCA_ExpWindow25_19', 'LLE_ExpWindow25_18']]
+        allProjectionsDF.to_csv("ClassicPortfolios.csv")
 
-    #allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
+    # allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
 
     if scanMode == 'Main':
 
-        if mode == "runSerial":
-            for magicNum in targetSystems:
-                params = Architecture(magicNum)
-                for selection in allProjectionsDF.columns:
-                    RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
-
-        elif mode == "runParallel":
+        if mode == "runProcess":
             processList = []
             for magicNum in targetSystems:
                 params = Architecture(magicNum)
                 for selection in allProjectionsDF.columns:
-                    processList.append([selection, allProjectionsDF[selection], params, magicNum])
+                    # RegressionProcess([selection, allProjectionsDF[selection], params, magicNum, "runSerial"])
+                    # RegressionProcess([selection, allProjectionsDF[selection], params, magicNum, "readSQL"])
+                    processList.append([selection, allProjectionsDF[selection], params, magicNum, "runParallel"])
+                    # processList.append([selection, allProjectionsDF[selection], params, magicNum, "readPickle"])
 
-            if calcMode == 'read':
-                p = mp.Pool(2)
-            else:
-                p = mp.Pool(mp.cpu_count())
-                #p = mp.Pool(len(processList))
-            #result = p.map(RegressionProcess, tqdm(processList))
-            result = p.map(RegressionProcess, processList)
+            p = mp.Pool(mp.cpu_count())
+            # p = mp.Pool(len(processList))
+            result = p.map(RegressionProcess, tqdm(processList))
+            # result = p.map(RegressionProcess, processList)
             p.close()
             p.join()
 
@@ -190,14 +189,17 @@ def runRegression(Portfolios, scanMode, mode):
                 for selection in allProjectionsDF.columns:
                     try:
                         pnl = pd.read_sql(
-                        'SELECT * FROM pnl_'+Classifier+'_' + selection + '_' + str(magicNum), conn).set_index('Dates', drop=True).dropna()
+                            'SELECT * FROM "pnl_' + Classifier + '_' + selection + '_' + str(magicNum) + '"',
+                            conn).set_index('Dates', drop=True).dropna()
 
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
 
                         sh = np.sqrt(252) * sl.sharpe(pnl)
                         MEANs = (252 * pnl.mean() * 100).round(2)
-                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252 * 100).set_index("index",drop=True).round(2)
+                        tConfDf = sl.tConfDF(pd.DataFrame(pnl).fillna(0), scalingFactor=252 * 100).set_index("index",
+                                                                                                             drop=True).round(
+                            2)
                         STDs = (np.sqrt(250) * pnl.std() * 100).round(2)
 
                         ttestPair = st.ttest_ind(pnl[selection].values, pnl['RW'].values, equal_var=False)
@@ -206,48 +208,51 @@ def runRegression(Portfolios, scanMode, mode):
                         statsMat = pd.concat([sh, MEANs, tConfDf, STDs], axis=1)
 
                         stats = pd.concat([statsMat.iloc[0, :], statsMat.iloc[1, :]], axis=0)
-                        stats.index = ["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std", "RW_sh", "RW_Mean",
+                        stats.index = ["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std",
+                                       "RW_sh", "RW_Mean",
                                        "RW_tConf", "RW_Std"]
                         stats[["Classifier_tConf", "RW_tConf"]] = stats[["Classifier_tConf", "RW_tConf"]].astype(str)
                         stats["selection"] = selection
-                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue,2)
+                        stats["ttestPair_pvalue"] = np.round(ttestPair.pvalue, 2)
                         stats["pnl_ttest_0_pvalue"] = np.round(pnl_ttest_0.pvalue, 2)
                         stats["rw_pnl_ttest_0_value"] = np.round(rw_pnl_ttest_0.pvalue, 2)
-                        stats["Classifier"] = Classifier+str(magicNum)
+                        stats["Classifier"] = Classifier + str(magicNum)
 
                         shList.append(stats)
                     except Exception as e:
                         print(e)
-                        notProcessed.append('pnl_'+Classifier+'_' + selection + '_' + str(magicNum))
+                        notProcessed.append('pnl_' + Classifier + '_' + selection + '_' + str(magicNum))
 
             shDF = pd.concat(shList, axis=1).T.set_index("selection", drop=True)
             shDF = shDF[["Classifier_sh", "Classifier_Mean", "Classifier_tConf", "Classifier_Std", "pnl_ttest_0_pvalue",
-                         "RW_sh", "RW_Mean", "RW_tConf", "RW_Std", "rw_pnl_ttest_0_value", "ttestPair_pvalue", "Classifier"]]
-            shDF.to_sql(Portfolios+"_"+Classifier+"_sharpe", conn, if_exists='replace')
+                         "RW_sh", "RW_Mean", "RW_tConf", "RW_Std", "rw_pnl_ttest_0_value", "ttestPair_pvalue",
+                         "Classifier"]]
+            shDF.to_sql(Portfolios + "_" + Classifier + "_sharpe", conn, if_exists='replace')
             print("shDF = ", shDF)
 
             notProcessedDF = pd.DataFrame(notProcessed, columns=['NotProcessedProjection'])
-            notProcessedDF.to_sql(Portfolios+'_notProcessedDF_'+Classifier, conn, if_exists='replace')
+            notProcessedDF.to_sql(Portfolios + '_notProcessedDF_' + Classifier, conn, if_exists='replace')
             print("notProcessedDF = ", notProcessedDF)
 
     elif scanMode == 'ScanNotProcessed':
         systemClass = 'RNNr'
-        notProcessedDF = pd.read_sql('SELECT * FROM '+Portfolios+'_notProcessedDF_'+systemClass, conn).set_index('index', drop=True)
+        notProcessedDF = pd.read_sql('SELECT * FROM ' + Portfolios + '_notProcessedDF_' + systemClass, conn).set_index(
+            'index', drop=True)
         print("len(notProcessedDF) = ", len(notProcessedDF))
         notProcessedList = []
-        for idx, row in notProcessedDF.iterrows():
-            Info = row['NotProcessedProjection'].replace("pnl_"+systemClass+"_", "")
+        for idx, row in tqdm(notProcessedDF.iterrows()):
+            Info = row['NotProcessedProjection'].replace("pnl_" + systemClass + "_", "")
             selection = Info[:-2]
             magicNum = Info[-1]
             params = Architecture(magicNum)
             print("Rerunning NotProcessed : ", selection, ", ", magicNum)
             RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
-            #notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
+            # notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
 
-        #p = mp.Pool(mp.cpu_count())
-        #result = p.map(RegressionProcess, tqdm(notProcessedList))
-        #p.close()
-        #p.join()
+        # p = mp.Pool(mp.cpu_count())
+        # result = p.map(RegressionProcess, tqdm(notProcessedList))
+        # p.close()
+        # p.join()
 
 def Test(mode):
     magicNum = "test"
@@ -283,7 +288,9 @@ def Test(mode):
             "SubHistoryLength": 250,  # 760
             "SubHistoryTrainingLength": 250 - 1,  # 510
             "Scaler": "Standard",  # Standard
-            "epochsIn": 100,  # 100
+            "epochsT0": 100,  # 100
+            "epochsThr": 1,  # 100
+            "epochsRun": 10,  # 100
             "batchSIzeIn": 10,  # 16
             "EarlyStopping_patience_Epochs": 10,  # 10
             "LearningMode": 'static',  # 'static', 'online'
@@ -337,7 +344,10 @@ if __name__ == '__main__':
     #runRegression("ClassicPortfolios", 'Main', "report")
     #runRegression("Projections", 'Main', "runParallel")
     #runRegression("Projections", 'Main', "report")
-    runRegression('Projections', 'ScanNotProcessed', "")
+    #runRegression('Projections', 'ScanNotProcessed', "")
+    runRegression("LLE_Temporal", 'Main', "runProcess")
+    # runRegression("LLE_Temporal", 'Main', "report")
+    # runRegression('LLE_Temporal', 'ScanNotProcessed', "")
     #runRegression("globalProjections", 'Main', "runParallel")
     #runRegression("globalProjections", 'Main', "report")
     #runRegression('globalProjections', 'ScanNotProcessed', "")
