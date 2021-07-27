@@ -468,95 +468,119 @@ def get_LLE_Temporal():
     allProjectionsDF = pd.concat(lleTemporalList, axis=1)
     allProjectionsDF.to_sql('LLE_Temporal_allProjectionsDF', localConn, if_exists='replace')
 
-def Trade_LLE_Temporal():
-    localConn = sqlite3.connect('FXeodData_FxData.db')
-    df = pd.read_sql('SELECT * FROM FxDataAdjRets', localConn).set_index('Dates', drop=True)
-    df_rp = sl.rp(df)
-    LO_DF = pd.read_sql('SELECT * FROM Edf_classic', localConn).set_index('Dates', drop=True)
-    LO_DF.columns = ["LO"]
-    RP_DF = pd.DataFrame(sl.rs(pd.read_sql('SELECT * FROM riskParityDF_tw_250', localConn).set_index('Dates', drop=True).fillna(0)), columns=["RP"])
-    benchDF = pd.concat([LO_DF, RP_DF], axis=1)
+def Trade_LLE_Temporal(mode):
+    if mode == 'run':
+        localConn = sqlite3.connect('FXeodData_FxData.db')
+        #df = pd.read_sql('SELECT * FROM FxDataAdjRets', localConn).set_index('Dates', drop=True)
+        df = pd.concat([pd.read_csv("allProjectionsDF.csv").set_index('Dates', drop=True),pd.read_csv("globalProjectionsDF_PCA.csv").set_index('Dates', drop=True)], axis=1)
+        df = df[[x for x in df.columns if 'PCA' in x]]
+        df_rp = sl.rp(df)
+        LO_DF = pd.read_sql('SELECT * FROM Edf_classic', localConn).set_index('Dates', drop=True)
+        LO_DF.columns = ["LO"]
+        RP_DF = pd.DataFrame(sl.rs(pd.read_sql('SELECT * FROM riskParityDF_tw_250', localConn).set_index('Dates', drop=True).fillna(0)), columns=["RP"])
+        benchDF = pd.concat([LO_DF, RP_DF], axis=1)
 
-    sigList = []
-    for strategy in tqdm(["Raw", "EMA", "ARIMA", "GPR", "RNN_R"]):
-        if strategy == "Raw":
-            print("Raw Signal setup ... ")
-            raw_sig = pd.read_sql('SELECT * FROM LLE_Temporal_allProjectionsDF', sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
-            raw_sig.columns = [strategy+"_"+str(x) for x in raw_sig.columns]
-            sigList.append(raw_sig)
-        elif strategy == "EMA":
-            print("EMA Signal setup ... ")
-            EMA_sig_conn = sqlite3.connect('FXeodData_sema.db')
-            subsigList = []
-            for Lag in [2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]:
-                subsig = pd.read_sql('SELECT * FROM sema_sig_'+str(Lag), EMA_sig_conn).set_index('Dates',drop=True)
-                subsig.columns = [strategy+"_"+str(Lag)+"_"+str(x) for x in subsig.columns]
-                subsigList.append(subsig)
-            ema_sig = pd.concat(subsigList, axis=1)
-            sigList.append(ema_sig)
-        elif strategy == "ARIMA":
-            print("ARIMA Signal setup ... ")
-            ARIMA_sig_conn = sqlite3.connect('FXeodDataARIMA.db')
-            subsigList = []
-            for tw in twList:
-                for pr in [0,1,2,3,4]:
-                    for orderIn in ["100", "200", "300"]:
-                        subsig = pd.read_sql('SELECT * FROM LLE_Temporal_' +str(tw) + "_" + str(pr) + "_ARIMA_PredictionsDF_" + orderIn + "_250", ARIMA_sig_conn).set_index('Dates', drop=True)
-                        subsig.columns = [strategy+"_"+str(tw)+"_"+str(pr)+"_"+orderIn+"_"+str(x) for x in subsig.columns]
-                        subsigList.append(subsig)
-            arima_sig = pd.concat(subsigList, axis=1)
-            sigList.append(arima_sig)
-        elif strategy == "GPR":
-            print("GPR Signal setup ... ")
-            subsigList = []
-            for tw in tqdm(twList):
-                for pr in [0, 1, 2, 3, 4]:
-                    for sys in [0, 1, 2, 3, 4]:
-                        outRead = pickle.load(open("Repo/ClassifiersData/GPR_LLE_Temporal_"+str(tw)+"_"+str(pr)+"_"+str(sys)+".p", "rb"))
-                        subsig = pd.DataFrame(outRead[3].iloc[:,0])
-                        subsig.columns = [strategy + "_" + str(tw) + "_" + str(pr) + "_" + str(sys)]
-                        subsigList.append(subsig)
-            gpr_sig = pd.concat(subsigList, axis=1)
-            sigList.append(gpr_sig)
-        elif strategy == "RNN_R":
-            sig_Table = "0"
-            sig_conn = sqlite3.connect('FXeodData_RNN_R.db')
+        sigList = []
+        for strategy in tqdm(["Raw", "EMA", "ARIMA", "GPR", "RNN_R"]):
+            if strategy == "Raw":
+                print("Raw Signal setup ... ")
+                raw_sig = pd.read_sql('SELECT * FROM LLE_Temporal_allProjectionsDF', sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+                raw_sig.columns = [strategy+"_"+str(x) for x in raw_sig.columns]
+                sigList.append(raw_sig)
+            elif strategy == "EMA":
+                print("EMA Signal setup ... ")
+                EMA_sig_conn = sqlite3.connect('FXeodData_sema.db')
+                subsigList = []
+                for Lag in [2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]:
+                    subsig = pd.read_sql('SELECT * FROM sema_sig_'+str(Lag), EMA_sig_conn).set_index('Dates',drop=True)
+                    subsig.columns = [strategy+"_"+str(Lag)+"_"+str(x) for x in subsig.columns]
+                    subsigList.append(subsig)
+                ema_sig = pd.concat(subsigList, axis=1)
+                sigList.append(ema_sig)
+            elif strategy == "ARIMA":
+                print("ARIMA Signal setup ... ")
+                ARIMA_sig_conn = sqlite3.connect('FXeodDataARIMA.db')
+                subsigList = []
+                for tw in twList:
+                    for pr in [0,1,2,3,4]:
+                        for orderIn in ["100", "200", "300"]:
+                            subsig = pd.read_sql('SELECT * FROM LLE_Temporal_' +str(tw) + "_" + str(pr) + "_ARIMA_PredictionsDF_" + orderIn + "_250", ARIMA_sig_conn).set_index('Dates', drop=True)
+                            subsig.columns = [strategy+"_"+str(tw)+"_"+str(pr)+"_"+orderIn+"_"+str(x) for x in subsig.columns]
+                            subsigList.append(subsig)
+                arima_sig = pd.concat(subsigList, axis=1)
+                sigList.append(arima_sig)
+            elif strategy == "GPR":
+                print("GPR Signal setup ... ")
+                subsigList = []
+                for tw in tqdm(twList):
+                    for pr in [0, 1, 2, 3, 4]:
+                        for sys in [0, 1, 2, 3, 4]:
+                            outRead = pickle.load(open("Repo/ClassifiersData/GPR_LLE_Temporal_"+str(tw)+"_"+str(pr)+"_"+str(sys)+".p", "rb"))
+                            subsig = pd.DataFrame(outRead[3].iloc[:,0])
+                            subsig.columns = [strategy + "_" + str(tw) + "_" + str(pr) + "_" + str(sys)]
+                            subsigList.append(subsig)
+                gpr_sig = pd.concat(subsigList, axis=1)
+                sigList.append(gpr_sig)
+            elif strategy == "RNN_R":
+                print("RNN Signal setup ... ")
+                subsigList = []
+                for tw in tqdm(twList):
+                    for pr in [0, 1, 2, 3, 4]:
+                        for sys in [0, 1, 2, 3, 4]:
+                            try:
+                                outRead = pickle.load(open("Repo/ClassifiersData/RNNr_LLE_Temporal_" + str(tw) + "_" + str(pr) + "_" + str(sys) + ".p", "rb"))
+                                subsig = pd.DataFrame(outRead[3].iloc[:, 0])
+                                subsig.columns = [strategy + "_" + str(tw) + "_" + str(pr) + "_" + str(sys)]
+                                subsigList.append(subsig)
+                            except Exception as e:
+                                print(e)
+                rnn_sig = pd.concat(subsigList, axis=1)
+                sigList.append(rnn_sig)
 
-    df_pnlList = []
-    df_rp_pnlList = []
-    benchDF_pnlList = []
+        pickle.dump(sigList, open("sigList.p", "wb"))
 
-    for sig in sigList:
-        for c in sig.columns:
-            sigDF = sl.S(sl.sign(sig[c]))
-            sub_df_pnl = df.mul(sigDF, axis=0)
-            sub_df_pnl.columns = [c+"_"+str(x) for x in sub_df_pnl.columns]
-            sub_df_pnl[c+"_"+"E_PnL"] = sl.E(sub_df_pnl)
-            df_pnlList.append(sub_df_pnl)
+        df_pnlList = []
+        df_rp_pnlList = []
+        benchDF_pnlList = []
 
-            sub_df_rp_pnl = df_rp.mul(sigDF, axis=0)
-            sub_df_rp_pnl.columns = [c+"_"+str(x) for x in sub_df_rp_pnl.columns]
-            sub_df_rp_pnl[c+"_"+"E_PnL"] = sl.E(sub_df_rp_pnl)
-            df_rp_pnlList.append(sub_df_rp_pnl)
+        for sig in sigList:
+            for c in sig.columns:
+                sigDF = sl.S(sl.sign(sig[c]))
+                sub_df_pnl = df.mul(sigDF, axis=0)
+                sub_df_pnl.columns = [c+"_"+str(x) for x in sub_df_pnl.columns]
+                sub_df_pnl[c+"_"+"E_PnL"] = sl.E(sub_df_pnl)
+                df_pnlList.append(sub_df_pnl)
 
-            sub_benchDF_pnl = benchDF.mul(sigDF, axis=0)
-            sub_benchDF_pnl.columns = [c + "_" + str(x) for x in sub_benchDF_pnl.columns]
-            benchDF_pnlList.append(sub_benchDF_pnl)
+                sub_df_rp_pnl = df_rp.mul(sigDF, axis=0)
+                sub_df_rp_pnl.columns = [c+"_"+str(x) for x in sub_df_rp_pnl.columns]
+                sub_df_rp_pnl[c+"_"+"E_PnL"] = sl.E(sub_df_rp_pnl)
+                df_rp_pnlList.append(sub_df_rp_pnl)
 
-    df_pnl_DF = pd.concat(df_pnlList, axis=1)
-    df_rp_pnl_DF = pd.concat(df_rp_pnlList, axis=1)
-    benchDF_pnl_DF = pd.concat(benchDF_pnlList, axis=1)
+                sub_benchDF_pnl = benchDF.mul(sigDF, axis=0)
+                sub_benchDF_pnl.columns = [c + "_" + str(x) for x in sub_benchDF_pnl.columns]
+                benchDF_pnlList.append(sub_benchDF_pnl)
 
-    df_pnl_DF_sh = pd.DataFrame(sl.sharpe(df_pnl_DF, mode='processNA', annualiseFlag='yes'))
-    df_rp_pnl_DF_sh = pd.DataFrame(sl.sharpe(df_rp_pnl_DF, mode='processNA', annualiseFlag='yes'))
-    benchDF_pnl_DF_sh = pd.DataFrame(sl.sharpe(benchDF_pnl_DF, mode='processNA', annualiseFlag='yes'))
-    df_pnl_DF_sh.to_sql('LLE_Temporal_df_pnl_DF_sh', localConn, if_exists='replace')
-    df_rp_pnl_DF_sh.to_sql('LLE_Temporal_df_rp_pnl_DF_sh', localConn, if_exists='replace')
-    benchDF_pnl_DF_sh.to_sql('LLE_Temporal_benchDF_pnl_DF_sh', localConn, if_exists='replace')
+        df_pnl_DF = pd.concat(df_pnlList, axis=1)
+        df_rp_pnl_DF = pd.concat(df_rp_pnlList, axis=1)
+        benchDF_pnl_DF = pd.concat(benchDF_pnlList, axis=1)
 
-    pickle.dump(df_pnl_DF, open("df_pnl_DF.p", "wb"))
-    pickle.dump(df_rp_pnl_DF, open("df_rp_pnl_DF.p", "wb"))
-    pickle.dump(benchDF_pnl_DF, open("benchDF_pnl_DF.p", "wb"))
+        df_pnl_DF_sh = pd.DataFrame(sl.sharpe(df_pnl_DF, mode='processNA', annualiseFlag='yes'))
+        df_rp_pnl_DF_sh = pd.DataFrame(sl.sharpe(df_rp_pnl_DF, mode='processNA', annualiseFlag='yes'))
+        benchDF_pnl_DF_sh = pd.DataFrame(sl.sharpe(benchDF_pnl_DF, mode='processNA', annualiseFlag='yes'))
+        df_pnl_DF_sh.to_sql('LLE_Temporal_df_pnl_DF_sh', localConn, if_exists='replace')
+        df_rp_pnl_DF_sh.to_sql('LLE_Temporal_df_rp_pnl_DF_sh', localConn, if_exists='replace')
+        benchDF_pnl_DF_sh.to_sql('LLE_Temporal_benchDF_pnl_DF_sh', localConn, if_exists='replace')
+
+        pickle.dump(df_pnl_DF, open("df_pnl_DF.p", "wb"))
+        pickle.dump(df_rp_pnl_DF, open("df_rp_pnl_DF.p", "wb"))
+        pickle.dump(benchDF_pnl_DF, open("benchDF_pnl_DF.p", "wb"))
+
+    elif mode == 'read':
+        df_pnl_DF = pickle.load(open("df_pnl_DF.p", "rb"))
+        df_pnl_DF_mean = df_pnl_DF.mean()
+        df_pnl_DF_std = df_pnl_DF.std()
+        print(df_pnl_DF_mean)
+        time.sleep(3000)
 
 def StationarityOnProjections(manifoldIn, mode):
     allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
@@ -1031,7 +1055,7 @@ if __name__ == '__main__':
     #shortTermInterestRatesSetup("retsIRDs")
 
     #LongOnly()
-    RiskParity('run')
+    #RiskParity('run')
     #RiskParity('plots')
 
     #RunManifoldLearningOnFXPairs()
@@ -1040,7 +1064,8 @@ if __name__ == '__main__':
 
     #getProjections()
     #get_LLE_Temporal()
-    #Trade_LLE_Temporal()
+    Trade_LLE_Temporal('run')
+    #Trade_LLE_Temporal('read')
 
     #StationarityOnProjections('PCA', 'build')
     #StationarityOnProjections('LLE', 'build')

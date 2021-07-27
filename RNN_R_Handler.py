@@ -24,85 +24,92 @@ except:
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 #calcMode = 'runSerial'
-calcMode = 'runParallel'
+#calcMode = 'runParallel'
+#calcMode = 'readSQL'
+#calcMode = 'readPickle'
 #calcMode = 'read'
 pnlCalculator = 0
 targetSystems = [0, 1, 2, 3, 4]
 
 def RegressionProcess(argList):
-    selection = argList[0]
-    df = argList[1]
-    #df = df[df != 0].dropna()
-    params = argList[2]
-    magicNum = argList[3]
-    calcMode = argList[4]
+    try:
+        selection = argList[0]
+        df = argList[1]
+        #df = df[df != 0].dropna()
+        params = argList[2]
+        magicNum = argList[3]
+        calcMode = argList[4]
 
-    if calcMode == 'runSerial':
-        print("Running gRNNregression")
-        out = sl.AI.gRNN_Regression(df, params)
+        if calcMode == 'runSerial':
+            print("Running gRNNregression")
+            out = sl.AI.gRNN_Regression(df, params)
 
-        writeFlag = False
-        while writeFlag == False:
-            try:
-                out[0].to_sql('df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
-                out[1].to_sql('df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
-                out[2].to_sql('df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
-                out[3].to_sql('df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
-                out[4].to_sql('df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
-                out[5].to_sql('df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
-                writeFlag = True
-            except Exception as e:
-                print(e)
-                print("Sleeping for some seconds and retrying ... ")
-                time.sleep(1)
+            writeFlag = False
+            while writeFlag == False:
+                try:
+                    out[0].to_sql('df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                    out[1].to_sql('df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                    out[2].to_sql('df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                    out[3].to_sql('df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                    out[4].to_sql('df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                    out[5].to_sql('df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn, if_exists='replace')
+                    writeFlag = True
+                except Exception as e:
+                    print(e)
+                    print("Sleeping for some seconds and retrying ... ")
+                    time.sleep(1)
 
-    elif calcMode == 'runParallel':
-        print("Running gRNNregression")
-        out = sl.AI.gRNN_Regression(df, params)
-        pickle.dump(out, open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
+        elif calcMode == 'runParallel':
+            print("Running gRNNregression")
+            out = sl.AI.gRNN_Regression(df, params)
+            pickle.dump(out, open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
 
-    elif calcMode == 'readSQL':
-        print(selection)
-        out = [
-            pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
-        ]
+        elif calcMode == 'readSQL':
+            print(selection)
+            out = [
+                pd.read_sql('SELECT * FROM df_predicted_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+                pd.read_sql('SELECT * FROM df_real_price_class_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+                pd.read_sql('SELECT * FROM df_real_price_train_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+                pd.read_sql('SELECT * FROM df_predicted_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+                pd.read_sql('SELECT * FROM df_real_price_class_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+                pd.read_sql('SELECT * FROM df_real_price_test_' + params["model"] + "_" + selection + "_" + str(magicNum), conn).set_index('Dates', drop=True),
+            ]
 
-    elif calcMode == 'readPickle':
-        out = pickle.load(open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "rb"))
+        elif calcMode == 'readPickle':
+            out = pickle.load(open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "rb"))
 
-    sig = out[3] # Predicted Price
-    df_real_price_class_DF = out[4]
-    df_real_price_test_DF = out[5]
+        sig = out[3] # Predicted Price
+        df_real_price_class_DF = out[4]
+        df_real_price_test_DF = out[5]
 
-    sigDF = sig.copy()
-    if pnlCalculator == 0:
-        sigDF = sigDF["Predicted_Test_" + selection]
-        sigDF = sl.sign(sigDF)
+        sigDF = sig.copy()
+        if pnlCalculator == 0:
+            sigDF = sigDF["Predicted_Test_" + selection]
+            sigDF = sl.sign(sigDF)
 
-    sigDF.columns = ["ScaledSignal"]
+        sigDF.columns = ["ScaledSignal"]
 
-    dfPnl = pd.concat([df_real_price_test_DF, sigDF], axis=1)
-    dfPnl.columns = ["Real_Price", "Sig"]
-    #dfPnl["Sig"].plot()
-    #plt.show()
-    #time.sleep(3000)
+        dfPnl = pd.concat([df_real_price_test_DF, sigDF], axis=1)
+        dfPnl.columns = ["Real_Price", "Sig"]
+        #dfPnl["Sig"].plot()
+        #plt.show()
+        #time.sleep(3000)
 
-    pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
-    pnl = pnl.dropna()
-    sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
-    print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
+        pnl = dfPnl["Real_Price"] * dfPnl["Sig"]
+        pnl = pnl.dropna()
+        sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
+        print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
 
-    if calcMode in ['runSerial', 'readSQL']:
-        pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
-    else:
-        pickle.dump(out, open("Repo/ClassifiersData/pnl_" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
+        if calcMode in ['runSerial', 'readSQL']:
+            pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+        else:
+            print("Pickling Pnl ... ")
+            pickle.dump(pnl, open("Repo/ClassifiersData/pnl_" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
 
-def runRegression(Portfolios, scanMode, mode):
+    except Exception as e:
+        print(e)
+
+def runRegression(Portfolios, scanMode, mode, runMode):
     def Architecture(magicNum):
 
         magicNum = int(magicNum)
@@ -169,10 +176,7 @@ def runRegression(Portfolios, scanMode, mode):
             for magicNum in targetSystems:
                 params = Architecture(magicNum)
                 for selection in allProjectionsDF.columns:
-                    # RegressionProcess([selection, allProjectionsDF[selection], params, magicNum, "runSerial"])
-                    # RegressionProcess([selection, allProjectionsDF[selection], params, magicNum, "readSQL"])
-                    processList.append([selection, allProjectionsDF[selection], params, magicNum, "runParallel"])
-                    # processList.append([selection, allProjectionsDF[selection], params, magicNum, "readPickle"])
+                    processList.append([selection, allProjectionsDF[selection], params, magicNum, runMode])
 
             p = mp.Pool(mp.cpu_count())
             # p = mp.Pool(len(processList))
@@ -188,9 +192,8 @@ def runRegression(Portfolios, scanMode, mode):
                 Classifier = "RNNr"
                 for selection in allProjectionsDF.columns:
                     try:
-                        pnl = pd.read_sql(
-                            'SELECT * FROM "pnl_' + Classifier + '_' + selection + '_' + str(magicNum) + '"',
-                            conn).set_index('Dates', drop=True).dropna()
+                        #pnl = pd.read_sql('SELECT * FROM "pnl_' + Classifier + '_' + selection + '_' + str(magicNum) + '"',conn).set_index('Dates', drop=True).dropna()
+                        pnl = pd.DataFrame(pickle.load(open("Repo/ClassifiersData/pnl_"+Classifier+ '_' + selection + '_' + str(magicNum) + ".p","rb")))
 
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
@@ -246,13 +249,13 @@ def runRegression(Portfolios, scanMode, mode):
             magicNum = Info[-1]
             params = Architecture(magicNum)
             print("Rerunning NotProcessed : ", selection, ", ", magicNum)
-            RegressionProcess([selection, allProjectionsDF[selection], params, magicNum])
-            # notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum])
+            #RegressionProcess([selection, allProjectionsDF[selection], params, magicNum, runMode])
+            notProcessedList.append([selection, allProjectionsDF[selection], params, magicNum, runMode])
 
-        # p = mp.Pool(mp.cpu_count())
-        # result = p.map(RegressionProcess, tqdm(notProcessedList))
-        # p.close()
-        # p.join()
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(RegressionProcess, tqdm(notProcessedList))
+        p.close()
+        p.join()
 
 def Test(mode):
     magicNum = "test"
@@ -340,19 +343,12 @@ def Test(mode):
 
 if __name__ == '__main__':
 
-    #runRegression("ClassicPortfolios", 'Main', "runParallel")
-    #runRegression("ClassicPortfolios", 'Main', "report")
-    #runRegression("Projections", 'Main', "runParallel")
-    #runRegression("Projections", 'Main', "report")
-    #runRegression('Projections', 'ScanNotProcessed', "")
-    runRegression("LLE_Temporal", 'Main', "runProcess")
-    # runRegression("LLE_Temporal", 'Main', "report")
-    # runRegression('LLE_Temporal', 'ScanNotProcessed', "")
-    #runRegression("globalProjections", 'Main', "runParallel")
-    #runRegression("globalProjections", 'Main', "report")
-    #runRegression('globalProjections', 'ScanNotProcessed', "")
-    #runRegression("Finalists", 'Main', "runParallel")
-    #runRegression("Finalists", 'Main', "report")
+    #runRegression("LLE_Temporal", 'Main', "runProcess", "runSerial")
+    #runRegression("LLE_Temporal", 'Main', "runProcess", "runParallel")
+    #runRegression("LLE_Temporal", 'Main', "runProcess", "readSQL")
+    #runRegression("LLE_Temporal", 'Main', "runProcess", "readPickle")
+    #runRegression("LLE_Temporal", 'Main', "report", "")
+    runRegression('LLE_Temporal', 'ScanNotProcessed', "", "runParallel")
 
     #Test("run")
     #Test("read")
