@@ -347,8 +347,8 @@ if __name__ == '__main__':
     #runRegression("LLE_Temporal", 'Main', "runProcess", "runParallel")
     #runRegression("LLE_Temporal", 'Main', "runProcess", "readSQL")
     #runRegression("LLE_Temporal", 'Main', "runProcess", "readPickle")
-    #runRegression("LLE_Temporal", 'Main', "report", "")
-    runRegression('LLE_Temporal', 'ScanNotProcessed', "", "runParallel")
+    runRegression("LLE_Temporal", 'Main', "report", "")
+    #runRegression('LLE_Temporal', 'ScanNotProcessed', "", "runParallel")
 
     #Test("run")
     #Test("read")

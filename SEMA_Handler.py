@@ -95,7 +95,9 @@ def TCA():
     #selection = 'LLE_100_18'; Lag = 200
     #selection = 'LLE_ExpWindow25_0'; Lag = 2
     #selection = 'PCA_100_4_Tail'; Lag = 2; co = 'global_PCA'
-    selection = 'LLE_250_4_Head'; Lag = 15; co = 'global_LLE'
+    #selection = 'LLE_250_4_Head'; Lag = 15; co = 'global_LLE'
+    selection = 'LO'; Lag = 2; co = 'LO'
+    #selection = 'RP'; Lag = 2; co = 'RP'
 
     if co == 'single':
         allProjectionsDF = pd.read_csv('allProjectionsDF.csv').set_index('Dates', drop=True)
@@ -110,11 +112,26 @@ def TCA():
         prinCompsDF = prinCompsList[0]
         for l in range(1,len(prinCompsList)):
             prinCompsDF += prinCompsList[l]
+    elif co == 'LO':
+        allProjectionsDF = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["LO"]
+        prinCompsDF = sl.sign(pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True))
+    elif co == 'RP':
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        #allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        prinCompsDF = 1/pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        print(prinCompsDF)
 
-    TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+    try:
+        TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+    except Exception as e:
+        print(e)
+        TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
 
     sig = sl.S(sl.sign(sl.ema(allProjectionsDF, nperiods=Lag)))
-    sema_pnl = (sig * allProjectionsDF).fillna(0) *(-1)
+    sema_pnl = (sig * allProjectionsDF).fillna(0)
+    #sema_pnl = sema_pnl*(-1)
     strat_pnl = sema_pnl[selection]
     rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
     print(rawSharpe)
@@ -140,6 +157,6 @@ def TCA():
 #####################################################
 #semaOnProjections("ClassicPortfolios", "Direct")
 #semaOnProjections("Projections", "Direct")
-semaOnProjections("LLE_Temporal", "Direct")
+#semaOnProjections("LLE_Temporal", "Direct")
 #semaOnProjections("globalProjections", "Direct")
-#TCA()
+TCA()

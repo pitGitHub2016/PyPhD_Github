@@ -2003,12 +2003,19 @@ class Slider:
                     if manifoldIn == 'LLE': #Temporal --> paper
                         lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
                                                               method=LLE_Method, n_jobs=-1)
-                        X_lle = lle.fit_transform(x)
-                        X_lle_DF = pd.DataFrame(X_lle)
-                        targetLoadings = X_lle_DF.iloc[-1,:].tolist()
-                        targetLoadings.append(df.index[-1])
+                        try:
+                            X_lle = lle.fit_transform(x)
+                            X_lle_DF = pd.DataFrame(X_lle)
+                            targetLoadings = X_lle_DF.iloc[-1,:].tolist()
+                            targetLoadings.append(df.index[-1])
+                            Loadings_Temporal.append(targetLoadings)
+                        except Exception as e:
+                            print(i, e)
+                            targetLoadings = [0] * NumProjections
+                            targetLoadings.append(df.index[-1])
+                            Loadings_Temporal.append(targetLoadings)
+
                         lambdasList.append(1)
-                        Loadings_Temporal.append(targetLoadings)
 
             lambdasListDF = pd.DataFrame(lambdasList)
             lambdasDF = pd.concat(
@@ -2865,9 +2872,15 @@ class Slider:
                     ####
                     my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=params["EarlyStopping_patience_Epochs"])]
                     model.compile(optimizer=params["CompilerSettings"][0], loss=params["CompilerSettings"][1])
+
+                if megaCount < params["eptConfDFochsThr"]:
+                    epochsIn = params["epochsT0"]
+                else:
+                    epochsIn = params["epochsRun"]
+                #print("megaCount = ", megaCount, ", epochsIn = ", epochsIn)
                 # Fitting the RNN Model to the Training set
                 try:
-                    model.fit(X_train, y_train, epochs=params["epochsIn"], batch_size=params["batchSIzeIn"],
+                    model.fit(X_train, y_train, epochs=epochsIn, batch_size=params["batchSIzeIn"],
                               verbose=0, callbacks=my_callbacks)
                 except Exception as e:
                     print(e)
