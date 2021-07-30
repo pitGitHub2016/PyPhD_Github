@@ -90,14 +90,16 @@ def semaOnProjections(space, mode):
         shSemaDF.to_sql('semapnlSharpes_'+space, conn, if_exists='replace')
 
 def TCA():
-    #selection = 'PCA_250_19'; Lag = 5; co = 'single'
-    #selection = 'PCA_ExpWindow25_19'; Lag = 2
-    #selection = 'LLE_100_18'; Lag = 200
-    #selection = 'LLE_ExpWindow25_0'; Lag = 2
-    #selection = 'PCA_100_4_Tail'; Lag = 2; co = 'global_PCA'
-    #selection = 'LLE_250_4_Head'; Lag = 15; co = 'global_LLE'
-    selection = 'LO'; Lag = 2; co = 'LO'
-    #selection = 'RP'; Lag = 2; co = 'RP'
+    #selection = 'PCA_250_19'; Lag = 5; co = 'single'; rev = -1
+    #selection = 'PCA_150_19'; Lag = 2; co = 'single'; rev = -1
+    #selection = 'PCA_100_0'; Lag = 2; co = 'single'; rev = 1
+    #selection = 'PCA_100_4_Tail'; Lag = 2; co = 'global_PCA'; rev = -1
+
+    #selection = 'PCA_ExpWindow25_19'; Lag = 2; co = 'single'; rev = -1
+    selection = 'PCA_ExpWindow25_2'; Lag = 2; co = 'single'; rev = -1
+
+    #selection = 'LO'; Lag = 2; co = 'LO'; rev = 1
+    #selection = 'RP'; Lag = 2; co = 'RP'; rev = 1
 
     if co == 'single':
         allProjectionsDF = pd.read_csv('allProjectionsDF.csv').set_index('Dates', drop=True)
@@ -115,13 +117,11 @@ def TCA():
     elif co == 'LO':
         allProjectionsDF = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
         allProjectionsDF.columns = ["LO"]
-        prinCompsDF = sl.sign(pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True))
+        prinCompsDF = sl.sign(pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True).abs())
     elif co == 'RP':
         allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
         allProjectionsDF.columns = ["RP"]
-        #allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
         prinCompsDF = 1/pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
-        print(prinCompsDF)
 
     try:
         TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
@@ -131,28 +131,23 @@ def TCA():
 
     sig = sl.S(sl.sign(sl.ema(allProjectionsDF, nperiods=Lag)))
     sema_pnl = (sig * allProjectionsDF).fillna(0)
-    #sema_pnl = sema_pnl*(-1)
+    sema_pnl = sema_pnl*rev
     strat_pnl = sema_pnl[selection]
-    rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
+    rawSharpe = (np.sqrt(252) * sl.sharpe(strat_pnl)).round(2)
     print(rawSharpe)
 
-    #print(prinCompsDF)
     trW = prinCompsDF.mul(sig[selection], axis=0)
-    #print(sl.d(trW).tail())
     delta_pos = sl.d(trW).fillna(0)
-    #print(delta_pos)
-    #time.sleep(3000)
+    net_SharpeList = []
     for scenario in ['Scenario1','Scenario2','Scenario3','Scenario4','Scenario5','Scenario6']:
         my_tcs = delta_pos.copy()
-        #print(my_tcs.tail())
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
-        #print(my_tcs.tail())
-        #print(sl.rs(my_tcs).tail())
-        #time.sleep(3000)
         strat_pnl_afterCosts = strat_pnl - sl.rs(my_tcs)
-        after_TCA_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
-        print(scenario, ", ", after_TCA_Sharpe)
+        net_Sharpe = (np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)).round(2)
+        net_SharpeList.append(net_Sharpe)
+    print("net_SharpeList")
+    print(' & '.join([str(x) for x in net_SharpeList]))
 
 #####################################################
 #semaOnProjections("ClassicPortfolios", "Direct")

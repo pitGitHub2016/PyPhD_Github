@@ -209,25 +209,28 @@ def Test(mode):
         #out = pnlAll.rolling(window=250, center=False).apply(lambda x: qs.kelly_criterion(pd.Series(x)))
 
 def TCA():
-    TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+
     #selection = 'PCA_250_19'; p = 1; co = 'single'
+    #selection = 'PCA_150_19'; p = 2; co = 'single'
+    selection = 'PCA_100_19'; p = 3; co = 'single'
+
     #selection = 'PCA_ExpWindow25_19'; p = 1; co = 'single'
-    selection = 'PCA_ExpWindow25_2'; p = 3; co = 'single'
-    #selection = 'LLE_150_1'; p = 2; co = 'single'
-    #selection = 'LLE_ExpWindow25_17'; p = 1; co = 'single'
+    #selection = 'PCA_ExpWindow25_2'; p = 3; co = 'single'
     #selection = 'PCA_100_4_Tail'; p = 1; co = 'global_PCA'
+    #selection = 'LO';  p = 2; co = 'LO'
+    #selection = 'RP'; p = 2; co = 'RP'
 
     localConn = sqlite3.connect('FXeodDataARIMA.db')
 
     allProjectionsDF = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_testDF_'+str(p)+'00_250', localConn).set_index('Dates', drop=True)
     allProjectionsDF.columns = [selection]
     arimaSigCore = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_PredictionsDF_'+str(p)+'00_250', localConn).set_index('Dates', drop=True)
-    #.iloc[round(0.1*len(allProjectionsDF)):]
+
     sig = sl.sign(arimaSigCore)
     sig.columns = [selection]
     strat_pnl = (sig * allProjectionsDF).iloc[round(0.1*len(allProjectionsDF)):]
     rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
-    print(rawSharpe)
+    print(rawSharpe.round(2))
 
     if co == 'single':
         prinCompsDF = pd.read_sql(
@@ -242,18 +245,33 @@ def TCA():
         prinCompsDF = prinCompsList[0]
         for l in range(1, len(prinCompsList)):
             prinCompsDF += prinCompsList[l]
+    elif co == 'LO':
+        allProjectionsDF = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["LO"]
+        prinCompsDF = sl.sign(pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True).abs())
+    elif co == 'RP':
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        prinCompsDF = 1/pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
 
-    # print(prinCompsDF)
+    try:
+        TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+    except Exception as e:
+        print(e)
+        TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
+
     trW = prinCompsDF.mul(sig[selection], axis=0)
-    # print(sl.d(trW).tail())
     delta_pos = sl.d(trW).fillna(0)
+    net_SharpeList = []
     for scenario in ['Scenario1','Scenario2','Scenario3','Scenario4','Scenario5','Scenario6']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
-        after_TCA_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
-        print(scenario, ", ", after_TCA_Sharpe)
+        net_Sharpe = (np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)).round(2).values[0]
+        net_SharpeList.append(net_Sharpe)
+    print("net_SharpeList")
+    print(' & '.join([str(x) for x in net_SharpeList]))
 
 #####################################################
 
@@ -265,7 +283,7 @@ if __name__ == '__main__':
     #ARIMAonPortfolios("Projections", 'Main', "report")
     #ARIMAonPortfolios("Projections", "ScanNotProcessed", "")
     #ARIMAonPortfolios("LLE_Temporal", 'Main', "run")
-    ARIMAonPortfolios("LLE_Temporal", 'Main', "report")
+    #ARIMAonPortfolios("LLE_Temporal", 'Main', "report")
     #ARIMAonPortfolios("LLE_Temporal", "ScanNotProcessed", "")
     #ARIMAonPortfolios("globalProjections", 'Main', "run")
     #ARIMAonPortfolios("globalProjections", 'Main', "report")
@@ -274,4 +292,4 @@ if __name__ == '__main__':
     #ARIMAonPortfolios("Finalists", 'Main', "run")
     #ARIMAonPortfolios("Finalists", 'Main', "report")
 
-    #TCA()
+    TCA()

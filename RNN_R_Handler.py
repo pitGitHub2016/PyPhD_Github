@@ -341,6 +341,41 @@ def Test(mode):
         sl.cs(pnl).plot()
         plt.show()
 
+def TCA():
+    TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+    selection = 'PCA_250_19'
+    # selection = 'PCA_ExpWindow25_19'
+    localConn = sqlite3.connect('FXeodDataARIMA.db')
+
+    allProjectionsDF = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_testDF_100_250', localConn).set_index('Dates',
+                                                                                                                drop=True)
+    allProjectionsDF.columns = [selection]
+    arimaSigCore = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_PredictionsDF_100_250', localConn).set_index(
+        'Dates', drop=True)
+    # .iloc[round(0.1*len(allProjectionsDF)):]
+    sig = sl.sign(arimaSigCore)
+    sig.columns = [selection]
+    strat_pnl = (sig * allProjectionsDF).iloc[round(0.1 * len(allProjectionsDF)):]
+    rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
+    print(rawSharpe)
+
+    prinCompsDF = pd.read_sql(
+        'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+        selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+
+    trW = prinCompsDF.mul(sig[selection], axis=0)
+    delta_pos = sl.d(trW).fillna(0)
+    net_SharpeList = []
+    for scenario in ['Scenario0', 'Scenario1', 'Scenario2', 'Scenario3', 'Scenario4']:
+        my_tcs = delta_pos.copy()
+        for c in my_tcs.columns:
+            my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
+        strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
+        net_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
+        net_SharpeList.append(net_Sharpe)
+    print("net_SharpeList")
+    print(' & '.join([str(x) for x in net_SharpeList]))
+
 if __name__ == '__main__':
 
     #runRegression("LLE_Temporal", 'Main', "runProcess", "runSerial")

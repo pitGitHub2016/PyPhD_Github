@@ -327,24 +327,13 @@ def Test(mode):
         sl.cs(pnl).plot()
         plt.show()
 
-def DeleteTable():
-    mycursor = conn.cursor()
-
-    sql = "DROP TABLE df_predicted_price_train_GPR_PCA_25_4_Head_0"
-
-    mycursor.execute(sql)
-
 def TCA():
-    TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
-    selection = 'PCA_250_19'
-    # selection = 'PCA_ExpWindow25_19'
-    localConn = sqlite3.connect('FXeodDataARIMA.db')
+    
+    selection = 'PCA_100_19'; p = 3; co = 'single'
 
-    allProjectionsDF = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_testDF_100_250', localConn).set_index('Dates',
-                                                                                                                drop=True)
-    allProjectionsDF.columns = [selection]
-    arimaSigCore = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_PredictionsDF_100_250', localConn).set_index(
-        'Dates', drop=True)
+    out = pickle.load(
+        open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "rb"))
+
     # .iloc[round(0.1*len(allProjectionsDF)):]
     sig = sl.sign(arimaSigCore)
     sig.columns = [selection]
@@ -352,21 +341,51 @@ def TCA():
     rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
     print(rawSharpe)
 
-    prinCompsDF = pd.read_sql(
-        'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
-        selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+    if co == 'single':
+        prinCompsDF = pd.read_sql(
+            'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+            selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+    elif co.split("_")[0] == 'global':
+        prinCompsList = []
+        for pr in range(int(selection.split("_")[2])):
+            prinCompsList.append(pd.read_sql(
+                'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+                str(pr), sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True))
+        prinCompsDF = prinCompsList[0]
+        for l in range(1, len(prinCompsList)):
+            prinCompsDF += prinCompsList[l]
+    elif co == 'LO':
+        allProjectionsDF = pd.read_sql('SELECT * FROM LongOnlyEWPEDf',
+                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["LO"]
+        prinCompsDF = sl.sign(
+            pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates',
+                                                                                                                drop=True).abs())
+    elif co == 'RP':
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250',
+                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        prinCompsDF = 1 / pd.read_sql('SELECT * FROM riskParityVol_tw_250',
+                                      sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
 
-    # print(prinCompsDF)
+    try:
+        TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+    except Exception as e:
+        print(e)
+        TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
+
     trW = prinCompsDF.mul(sig[selection], axis=0)
-    # print(sl.d(trW).tail())
     delta_pos = sl.d(trW).fillna(0)
+    net_SharpeList = []
     for scenario in ['Scenario0', 'Scenario1', 'Scenario2', 'Scenario3', 'Scenario4']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
-        after_TCA_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
-        print(after_TCA_Sharpe)
+        net_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
+        net_SharpeList.append(net_Sharpe)
+    print("net_SharpeList")
+    print(' & '.join([str(x) for x in net_SharpeList]))
 
 if __name__ == '__main__':
 
@@ -377,7 +396,7 @@ if __name__ == '__main__':
     #runRegression("Projections", 'Main', "runParallel")
     #runRegression("Projections", 'Main', "report")
     #runRegression('Projections', 'ScanNotProcessed', "")
-    runRegression("LLE_Temporal", 'Main', "runProcess")
+    #runRegression("LLE_Temporal", 'Main', "runProcess")
     #runRegression("LLE_Temporal", 'Main', "report")
     #runRegression('LLE_Temporal', 'ScanNotProcessed', "")
     #runRegression("globalProjections", 'Main', "runSerial")
@@ -389,4 +408,5 @@ if __name__ == '__main__':
 
     #Test("run")
     #Test("read")
-    #DeleteTable()
+
+    TCA()

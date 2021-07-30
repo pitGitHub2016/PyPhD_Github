@@ -7,6 +7,8 @@ import multiprocessing as mp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy import stats as st
+import seaborn as sns
+
 mpl.rcParams['font.family'] = ['serif']
 mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
@@ -630,6 +632,96 @@ def Trade_LLE_Temporal(strategy):
         df_sh.to_sql('LLE_Temporal_'+dfName+'_sh_'+strategy, localConn, if_exists='replace')
     ############################################################################################################
 
+def PlotGallery(graph):
+    if graph == 'PCA_Rolling_vs_Expanding_Loadings':
+        dfList = []
+        for selection in ['PCA_250_0', 'PCA_ExpWindow25_0']:
+            dfList.append(pd.read_sql(
+                    'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+                    str(selection.split('_')[2]), sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True))
+
+        fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
+        mpl.pyplot.locator_params(axis='x', nbins=35)
+        titleList = ['(a)', '(b)']
+        c = 0
+        for df in dfList:
+            df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+            mpl.pyplot.locator_params(axis='x', nbins=35)
+            if c == 0:
+                (df * 100).plot(ax=ax[c])
+            else:
+                (df * 100).plot(ax=ax[c], legend=None)
+            for label in ax[c].get_xticklabels():
+                label.set_fontsize(25)
+                label.set_ha("right")
+                label.set_rotation(40)
+            ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
+            ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
+            ax[c].set_ylabel("$v_{j,t}$", fontsize=22)
+            if c == 0:
+                #box = ax[c].get_position()
+                #ax[c].set_position([box.x0, box.y0, box.width * 0.9, box.height])
+                ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+                ax[c].margins(0, 0)
+            ax[c].grid()
+            c += 1
+        plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0.5, wspace=0)
+        plt.show()
+
+    elif graph == 'PCA_vs_LO_and_RP':
+        df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
+        dfList = []
+        for selection in ['PCA_250_0', 'PCA_ExpWindow25_0', "LO", "RP"]:
+            if 'PCA' in selection:
+                medDf = df * sl.S(pd.read_sql('SELECT * FROM ' + selection.split("_")[0] + '_principalCompsDf_tw_' + str(selection.split("_")[1]) + "_" + str(selection.split("_")[2]),
+                                              sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True))
+                pr = pd.DataFrame(sl.rs(medDf.fillna(0)), columns=[selection])
+                dfList.append(pr)
+            elif selection == 'LO':
+                LOdf = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
+                LOdf.columns = ["LO"]
+                dfList.append(LOdf)
+            elif selection == 'RP':
+                RPdf = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', conn).set_index('Dates', drop=True)
+                RPdf.columns = ["RP"]
+                dfList.append(RPdf)
+
+        allDF = pd.concat(dfList, axis=1)
+        allDF["PCA_ExpWindow25_0"] *= -1
+        allDF.columns = ["$y_{PCA, 250, t}$","$y_{PCA, EW, t}$","$y_{LO, t}$","$y_{RP, t}$"]
+        allDF_NormVol = allDF/(allDF.std())
+
+        dfList = [sl.cs(allDF), sl.cs(allDF_NormVol)]
+        fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
+        mpl.pyplot.locator_params(axis='x', nbins=35)
+        titleList = ['(a)', '(b)']
+        c = 0
+        for df in dfList:
+            df.index = [x.replace("00:00:00", "").strip() for x in df.index]
+            mpl.pyplot.locator_params(axis='x', nbins=35)
+            (df * 100).plot(ax=ax[c], legend=None)
+            for label in ax[c].get_xticklabels():
+                label.set_fontsize(25)
+                label.set_ha("right")
+                label.set_rotation(40)
+            ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
+            ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
+            if c == 0:
+                # box = ax[c].get_position()
+                # ax[c].set_position([box.x0, box.y0, box.width * 0.9, box.height])
+                ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+                ax[c].margins(0, 0)
+            ax[c].grid()
+            c += 1
+        plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.08, hspace=0.5, wspace=0)
+        plt.show()
+
+        #corr = allDF.corr()
+        #print(corr)
+
+        # plot the heatmap
+        #sns.heatmap(corr,xticklabels=corr.columns, yticklabels=corr.columns)
+
 def StationarityOnProjections(manifoldIn, mode):
     allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
 
@@ -1106,6 +1198,9 @@ if __name__ == '__main__':
     #RiskParity('run')
     #RiskParity('plots')
 
+    #PlotGallery('PCA_Rolling_vs_Expanding_Loadings')
+    PlotGallery('PCA_vs_LO_and_RP')
+
     #RunManifoldLearningOnFXPairs()
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
@@ -1116,7 +1211,7 @@ if __name__ == '__main__':
     #Trade_LLE_Temporal("EMA")
     #Trade_LLE_Temporal("ARIMA")
     #Trade_LLE_Temporal("GPR")
-    Trade_LLE_Temporal("RNN_R")
+    #Trade_LLE_Temporal("RNN_R")
 
     #StationarityOnProjections('PCA', 'build')
     #StationarityOnProjections('LLE', 'build')
