@@ -2,9 +2,9 @@ import time
 
 import pandas as pd, sqlite3
 
-def to_other_DB(DB, kws_str):
-    db = sqlite3.connect(DB+'.db')
-    to_db = sqlite3.connect(DB+'_'+kws_str+'.db')
+def to_other_DB(fromFolderPath, toFolderPath, DB, kws_str):
+    db = sqlite3.connect(fromFolderPath+DB+'.db')
+    to_db = sqlite3.connect(toFolderPath+DB+'_'+kws_str+'.db')
     cursor = db.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
     tables = cursor.fetchall()
@@ -23,8 +23,8 @@ def to_other_DB(DB, kws_str):
     db.close()
 
 #for kw in ["allProjectionsDF", "FxData", "IRD", "principalCompsDf", "sema","ARIMA"]:#
-#    to_other_DB('FXeodData_', kw)
+#    to_other_DB('','','FXeodData', kw)
 
-for kw in ["allProjectionsDF", "FxData", "IRD", "principalCompsDf", "sema","ARIMA"]:#
-    to_other_DB('FXeodData_', kw)
+for kw in ["GPR"]:
+    to_other_DB('E:\PhD_DB_Repo_28-7-2021\\','E:\PhD_DB_Repo_28-7-2021\\','Temp', kw)
 

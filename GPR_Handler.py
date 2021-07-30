@@ -17,10 +17,8 @@ mpl.rcParams['font.family'] = ['serif']
 mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
 
-try:
-    conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData_GPR.db', timeout=30)
-except:
-    conn = sqlite3.connect('Temp.db', timeout=30)
+#conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData_GPR.db', timeout=30)
+conn = sqlite3.connect('E:\PhD_DB_Repo_28-7-2021\Temp.db', timeout=30)
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 pnlCalculator = 0
@@ -178,7 +176,7 @@ def runRegression(Portfolios, scanMode, mode):
                     try:
                         pnl = pd.read_sql(
                             'SELECT * FROM "pnl_' + Classifier + '_' + selection + '_' + str(magicNum) + '"',
-                            conn).set_index('Dates', drop=True).dropna()
+                            conn).set_index('Dates', drop=True)#.dropna()
 
                         pnl.columns = [selection]
                         pnl['RW'] = sl.S(sl.sign(allProjectionsDF[selection])) * allProjectionsDF[selection]
@@ -319,17 +317,21 @@ def Test(mode):
         plt.show()
 
 def TCA():
-    
-    selection = 'PCA_100_19'; p = 3; co = 'single'
 
-    out = pickle.load(
-        open("Repo/ClassifiersData/" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "rb"))
+    #selection = 'PCA_250_19'; magicNum = 2; co = 'single'
+    selection = 'PCA_150_5'; magicNum = 2; co = 'single'
+    #selection = 'PCA_ExpWindow25_19'; magicNum = 2; co = 'single'
 
-    # .iloc[round(0.1*len(allProjectionsDF)):]
-    sig = sl.sign(arimaSigCore)
+    allProjectionsDF = pd.read_sql('SELECT * FROM df_real_price_test_GPR_'+selection + '_' + str(magicNum),
+                                   conn).set_index('Dates', drop=True)
+    allProjectionsDF.columns = [selection]
+    gprSigCore = pd.read_sql('SELECT * FROM df_predicted_price_test_GPR_'+selection + '_' + str(magicNum),
+                                   conn).set_index('Dates', drop=True)["Predicted_Test_"+selection]
+
+    sig = pd.DataFrame(sl.sign(gprSigCore))
     sig.columns = [selection]
     strat_pnl = (sig * allProjectionsDF).iloc[round(0.1 * len(allProjectionsDF)):]
-    rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
+    rawSharpe = (np.sqrt(252) * sl.sharpe(strat_pnl)).round(2)
     print(rawSharpe)
 
     if co == 'single':
@@ -373,18 +375,18 @@ def TCA():
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
-        net_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
+        net_Sharpe = (np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)).round(2).values[0]
         net_SharpeList.append(net_Sharpe)
     print("net_SharpeList")
     print(' & '.join([str(x) for x in net_SharpeList]))
 
 if __name__ == '__main__':
 
-    runRegression("Projections", 'Main', "runParallel")
+    #runRegression("Projections", 'Main', "runParallel")
     #runRegression("Projections", 'Main', "report")
     #runRegression('Projections', 'ScanNotProcessed', "")
 
     #Test("run")
     #Test("read")
 
-    #TCA()
+    TCA()
