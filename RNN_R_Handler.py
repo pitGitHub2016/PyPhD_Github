@@ -17,10 +17,8 @@ mpl.rcParams['font.family'] = ['serif']
 mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
 
-try:
-    conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData_RNN_R.db')
-except:
-    conn = sqlite3.connect('Temp.db')
+#conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData_RNN_R.db')
+conn = sqlite3.connect('E:\PhD_DB_Repo_28-7-2021\Temp.db', timeout=30)
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 #calcMode = 'runSerial'
@@ -342,26 +340,54 @@ def Test(mode):
         plt.show()
 
 def TCA():
-    TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
-    selection = 'PCA_250_19'
-    # selection = 'PCA_ExpWindow25_19'
-    localConn = sqlite3.connect('FXeodDataARIMA.db')
 
-    allProjectionsDF = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_testDF_100_250', localConn).set_index('Dates',
-                                                                                                                drop=True)
+    #selection = 'PCA_250_19'; magicNum = 0; co = 'single'
+    selection = 'PCA_ExpWindow25_19'; magicNum = 0; co = 'single'
+
+    allProjectionsDF = pd.read_sql('SELECT * FROM df_real_price_test_RNNr_'+selection + '_' + str(magicNum),
+                                   conn).set_index('Dates', drop=True)
     allProjectionsDF.columns = [selection]
-    arimaSigCore = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_PredictionsDF_100_250', localConn).set_index(
-        'Dates', drop=True)
-    # .iloc[round(0.1*len(allProjectionsDF)):]
-    sig = sl.sign(arimaSigCore)
+    gprSigCore = pd.read_sql('SELECT * FROM df_predicted_price_test_RNNr_'+selection + '_' + str(magicNum),
+                                   conn).set_index('Dates', drop=True)["Predicted_Test_"+selection]
+
+    sig = pd.DataFrame(sl.sign(gprSigCore))
     sig.columns = [selection]
     strat_pnl = (sig * allProjectionsDF).iloc[round(0.1 * len(allProjectionsDF)):]
-    rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
+    rawSharpe = (np.sqrt(252) * sl.sharpe(strat_pnl)).round(2)
     print(rawSharpe)
 
-    prinCompsDF = pd.read_sql(
-        'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
-        selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+    if co == 'single':
+        prinCompsDF = pd.read_sql(
+            'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+            selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+    elif co.split("_")[0] == 'global':
+        prinCompsList = []
+        for pr in range(int(selection.split("_")[2])):
+            prinCompsList.append(pd.read_sql(
+                'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+                str(pr), sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True))
+        prinCompsDF = prinCompsList[0]
+        for l in range(1, len(prinCompsList)):
+            prinCompsDF += prinCompsList[l]
+    elif co == 'LO':
+        allProjectionsDF = pd.read_sql('SELECT * FROM LongOnlyEWPEDf',
+                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["LO"]
+        prinCompsDF = sl.sign(
+            pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates',
+                                                                                                                drop=True).abs())
+    elif co == 'RP':
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250',
+                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        prinCompsDF = 1 / pd.read_sql('SELECT * FROM riskParityVol_tw_250',
+                                      sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+
+    try:
+        TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
+    except Exception as e:
+        print(e)
+        TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
 
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)
@@ -371,7 +397,7 @@ def TCA():
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
-        net_Sharpe = np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)
+        net_Sharpe = (np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)).round(2).values[0]
         net_SharpeList.append(net_Sharpe)
     print("net_SharpeList")
     print(' & '.join([str(x) for x in net_SharpeList]))
@@ -382,8 +408,10 @@ if __name__ == '__main__':
     #runRegression("LLE_Temporal", 'Main', "runProcess", "runParallel")
     #runRegression("LLE_Temporal", 'Main', "runProcess", "readSQL")
     #runRegression("LLE_Temporal", 'Main', "runProcess", "readPickle")
-    runRegression("LLE_Temporal", 'Main', "report", "")
+    #runRegression("LLE_Temporal", 'Main', "report", "")
     #runRegression('LLE_Temporal', 'ScanNotProcessed', "", "runParallel")
 
     #Test("run")
     #Test("read")
+
+    TCA()
