@@ -388,7 +388,7 @@ def TCA():
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)
     net_SharpeList = []
-    for scenario in ['Scenario0', 'Scenario1', 'Scenario2', 'Scenario3', 'Scenario4']:
+    for scenario in ['Scenario1','Scenario2','Scenario3','Scenario4','Scenario5','Scenario6']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
