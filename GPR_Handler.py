@@ -319,8 +319,9 @@ def Test(mode):
 def TCA():
 
     #selection = 'PCA_250_19'; magicNum = 2; co = 'single'
-    selection = 'PCA_150_5'; magicNum = 2; co = 'single'
+    #selection = 'PCA_150_5'; magicNum = 2; co = 'single'
     #selection = 'PCA_ExpWindow25_19'; magicNum = 2; co = 'single'
+    selection = 'PCA_ExpWindow25_2'; magicNum = 3; co = 'single'
 
     allProjectionsDF = pd.read_sql('SELECT * FROM df_real_price_test_GPR_'+selection + '_' + str(magicNum),
                                    conn).set_index('Dates', drop=True)
@@ -361,16 +362,12 @@ def TCA():
         prinCompsDF = 1 / pd.read_sql('SELECT * FROM riskParityVol_tw_250',
                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
 
-    try:
-        TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
-    except Exception as e:
-        print(e)
-        TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
+    TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
 
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)
     net_SharpeList = []
-    for scenario in ['Scenario0', 'Scenario1', 'Scenario2', 'Scenario3', 'Scenario4']:
+    for scenario in ['Scenario1','Scenario2','Scenario3','Scenario4','Scenario5','Scenario6']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]

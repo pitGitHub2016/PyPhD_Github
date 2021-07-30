@@ -254,11 +254,7 @@ def TCA():
         allProjectionsDF.columns = ["RP"]
         prinCompsDF = 1/pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
 
-    try:
-        TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
-    except Exception as e:
-        print(e)
-        TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
+    TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
 
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)

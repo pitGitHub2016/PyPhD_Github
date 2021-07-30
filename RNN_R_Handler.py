@@ -341,8 +341,8 @@ def Test(mode):
 
 def TCA():
 
-    #selection = 'PCA_250_19'; magicNum = 0; co = 'single'
-    selection = 'PCA_ExpWindow25_19'; magicNum = 0; co = 'single'
+    selection = 'PCA_250_19'; magicNum = 0; co = 'single'
+    #selection = 'PCA_ExpWindow25_19'; magicNum = 0; co = 'single'
 
     allProjectionsDF = pd.read_sql('SELECT * FROM df_real_price_test_RNNr_'+selection + '_' + str(magicNum),
                                    conn).set_index('Dates', drop=True)
@@ -383,11 +383,7 @@ def TCA():
         prinCompsDF = 1 / pd.read_sql('SELECT * FROM riskParityVol_tw_250',
                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
 
-    try:
-        TCspecs = pd.read_excel('TCA.xlsx').set_index('Asset', drop=True)
-    except Exception as e:
-        print(e)
-        TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
+    TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
 
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)
