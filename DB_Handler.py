@@ -22,5 +22,9 @@ def to_other_DB(DB, kws_str):
     cursor.close()
     db.close()
 
+#for kw in ["allProjectionsDF", "FxData", "IRD", "principalCompsDf", "sema","ARIMA"]:#
+#    to_other_DB('FXeodData_', kw)
+
 for kw in ["allProjectionsDF", "FxData", "IRD", "principalCompsDf", "sema","ARIMA"]:#
-    to_other_DB('FXeodData', kw)
+    to_other_DB('FXeodData_', kw)
+

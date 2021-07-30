@@ -23,9 +23,6 @@ except:
     conn = sqlite3.connect('Temp.db', timeout=30)
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
-#calcMode = 'runSerial'
-calcMode = 'runParallel'
-#calcMode = 'read'
 pnlCalculator = 0
 targetSystems = [0, 1, 2, 3, 4]
 
@@ -150,12 +147,6 @@ def runRegression(Portfolios, scanMode, mode):
         allProjectionsDF.columns = ["RP"]
         allProjectionsDF["LO"] = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', conn).set_index('Dates', drop=True)
         allProjectionsDF.to_csv("ClassicPortfolios.csv")
-    elif Portfolios == 'Finalists':
-        #allProjectionsDF = pd.read_csv("E:/PyPhD/PCA_LLE_Data/allProjectionsDF.csv").set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0', 'PCA_250_19', 'LLE_250_18']]
-        allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)[['PCA_250_0', 'LLE_250_0',
-                                                                                                              'PCA_250_19', 'LLE_250_18',
-                                                                                                              'PCA_ExpWindow25_0', 'LLE_ExpWindow25_0',
-                                                                                                              'PCA_ExpWindow25_19', 'LLE_ExpWindow25_18']]
 
     #allProjectionsDF = allProjectionsDF[[x for x in allProjectionsDF.columns if 'ExpWindow25' not in x]]
 
@@ -389,24 +380,11 @@ def TCA():
 
 if __name__ == '__main__':
 
-    #runRegression("ClassicPortfolios", 'Main', "runSerial")
-    #runRegression("ClassicPortfolios", 'Main', "runParallel")
-    #runRegression("ClassicPortfolios", 'Main', "report")
-    #runRegression("ClassicPortfolios", 'ScanNotProcessed', "")
-    #runRegression("Projections", 'Main', "runParallel")
+    runRegression("Projections", 'Main', "runParallel")
     #runRegression("Projections", 'Main', "report")
     #runRegression('Projections', 'ScanNotProcessed', "")
-    #runRegression("LLE_Temporal", 'Main', "runProcess")
-    #runRegression("LLE_Temporal", 'Main', "report")
-    #runRegression('LLE_Temporal', 'ScanNotProcessed', "")
-    #runRegression("globalProjections", 'Main', "runSerial")
-    #runRegression("globalProjections", 'Main', "runParallel")
-    #runRegression("globalProjections", 'Main', "report")
-    #runRegression('globalProjections', 'ScanNotProcessed', "")
-    #runRegression("Finalists", 'Main', "runParallel")
-    #runRegression("Finalists", 'Main', "report")
 
     #Test("run")
     #Test("read")
 
-    TCA()
+    #TCA()
