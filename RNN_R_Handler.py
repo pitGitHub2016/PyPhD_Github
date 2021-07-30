@@ -341,8 +341,8 @@ def Test(mode):
 
 def TCA():
 
-    selection = 'PCA_250_19'; magicNum = 0; co = 'single'
-    #selection = 'PCA_ExpWindow25_19'; magicNum = 0; co = 'single'
+    #selection = 'PCA_250_19'; magicNum = 0; co = 'single'
+    selection = 'PCA_ExpWindow25_19'; magicNum = 0; co = 'single'
 
     allProjectionsDF = pd.read_sql('SELECT * FROM df_real_price_test_RNNr_'+selection + '_' + str(magicNum),
                                    conn).set_index('Dates', drop=True)
