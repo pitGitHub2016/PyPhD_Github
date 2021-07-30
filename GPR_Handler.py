@@ -18,7 +18,8 @@ mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
 
 #conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData_GPR.db', timeout=30)
-conn = sqlite3.connect('E:\PhD_DB_Repo_28-7-2021\Temp.db', timeout=30)
+#conn = sqlite3.connect('E:\PhD_DB_Repo_28-7-2021\Temp.db', timeout=30)
+conn = sqlite3.connect('FXeodData_FxData.db', timeout=30)
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 pnlCalculator = 0
@@ -318,20 +319,66 @@ def Test(mode):
 
 def TCA():
 
-    #selection = 'PCA_250_19'; magicNum = 2; co = 'single'
-    #selection = 'PCA_150_5'; magicNum = 2; co = 'single'
-    #selection = 'PCA_ExpWindow25_19'; magicNum = 2; co = 'single'
-    selection = 'PCA_ExpWindow25_2'; magicNum = 3; co = 'single'
+    #selection = 'PCA_250_19'; mode = ""; magicNum = 2; co = 'single'; rev = 1
+    #selection = 'PCA_150_5'; mode = ""; magicNum = 2; co = 'single'; rev = 1
+    #selection = 'PCA_ExpWindow25_19'; mode = ""; magicNum = 2; co = 'single'; rev = 1
+    #selection = 'PCA_ExpWindow25_2'; mode = ""; magicNum = 3; co = 'single'; rev = 1
 
-    allProjectionsDF = pd.read_sql('SELECT * FROM df_real_price_test_GPR_'+selection + '_' + str(magicNum),
-                                   conn).set_index('Dates', drop=True)
-    allProjectionsDF.columns = [selection]
-    gprSigCore = pd.read_sql('SELECT * FROM df_predicted_price_test_GPR_'+selection + '_' + str(magicNum),
-                                   conn).set_index('Dates', drop=True)["Predicted_Test_"+selection]
+    #selection = 'PCA_ExpWindow25_7'; mode = "LLE_Temporal"; magicNum = "GPR_150_4_2"; co = 'single'; rev = 1
+    selection = 'PCA_250_6'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_3"; co = 'single'; rev = 1
+    #selection = 'PCA_ExpWindow25_16'; mode = "LLE_Temporal"; magicNum = "GPR_100_0_4"; co = 'single'; rev = 1
+    #selection = 'PCA_250_2_Head'; mode = "LLE_Temporal"; magicNum = "GPR_25_1_1"; co = 'single'; rev = 1
+    #selection = 'PCA_ExpWindow25_1'; mode = "LLE_Temporal"; magicNum = "GPR_ExpWindow25_3_1"; co = 'single'; rev = 1
+    #selection = 'PCA_100_4_Tail'; mode = "LLE_Temporal"; magicNum = "GPR_100_0_1"; co = 'single'; rev = 1
+    #selection = 'LO'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_1"; co = 'LO'; rev = 1
+    #selection = 'RP'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_1"; co = 'RP'; rev = 1
 
-    sig = pd.DataFrame(sl.sign(gprSigCore))
-    sig.columns = [selection]
-    strat_pnl = (sig * allProjectionsDF).iloc[round(0.1 * len(allProjectionsDF)):]
+    if co == 'single':
+        allProjectionsDF = pd.DataFrame(pd.read_csv('allProjectionsDF.csv').set_index('Dates', drop=True)[selection])
+        allProjectionsDF.columns = [selection]
+        prinCompsDF = pd.read_sql(
+            'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+            selection.split('_')[2], sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True)
+    elif co.split("_")[0] == 'global':
+        allProjectionsDF = pd.DataFrame(pd.read_csv('globalProjectionsDF_' + co.split("_")[1] + '.csv').set_index('Dates', drop=True)[selection])
+        allProjectionsDF.columns = [selection]
+        prinCompsList = []
+        for pr in range(int(selection.split("_")[2])):
+            prinCompsList.append(pd.read_sql(
+                'SELECT * FROM ' + selection.split('_')[0] + '_principalCompsDf_tw_' + selection.split('_')[1] + '_' +
+                str(pr), sqlite3.connect('FXeodData_principalCompsDf.db')).set_index('Dates', drop=True))
+        prinCompsDF = prinCompsList[0]
+        for l in range(1, len(prinCompsList)):
+            prinCompsDF += prinCompsList[l]
+    elif co == 'LO':
+        allProjectionsDF = pd.read_sql('SELECT * FROM LongOnlyEWPEDf',
+                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["LO"]
+        prinCompsDF = sl.sign(pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True).abs())
+    elif co == 'RP':
+        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250',
+                                       sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+        allProjectionsDF.columns = ["RP"]
+        prinCompsDF = 1/pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+
+    if mode == "LLE_Temporal":
+        gprSigCore = pd.DataFrame(pd.read_sql('SELECT * FROM storedSigDF_GPR', sqlite3.connect('FXeodData_LLE_Temporal.db')).set_index('index', drop=True)[magicNum])
+        gprSigCore.columns = [selection]
+    else:
+        allProjectionsDF = pd.read_sql('SELECT * FROM df_real_price_test_GPR_' + selection + '_' + str(magicNum),
+                                       conn).set_index('Dates', drop=True)
+        allProjectionsDF.columns = [selection]
+        gprSigCore = pd.read_sql('SELECT * FROM df_predicted_price_test_GPR_' + selection + '_' + str(magicNum),
+                                 conn).set_index('Dates', drop=True)["Predicted_Test_" + selection]
+
+    if mode == "LLE_Temporal":
+        sig = sl.sign(gprSigCore) * rev
+        sig.columns = [selection]
+        strat_pnl = (sig * allProjectionsDF).fillna(0)
+    else:
+        sig = pd.DataFrame(sl.sign(gprSigCore)) * rev
+        sig.columns = [selection]
+        strat_pnl = (sig * allProjectionsDF).fillna(0).iloc[round(0.1 * len(allProjectionsDF)):]
     rawSharpe = (np.sqrt(252) * sl.sharpe(strat_pnl)).round(2)
     print(rawSharpe)
 

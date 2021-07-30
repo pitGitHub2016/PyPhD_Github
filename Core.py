@@ -473,7 +473,7 @@ def get_LLE_Temporal():
 
 def Trade_LLE_Temporal(strategy):
 
-    localConn = sqlite3.connect('FXeodData_FxData.db')
+    localConn = sqlite3.connect('FXeodData_LLE_Temporal.db')
 
     # df Projections
     #df = pd.read_sql('SELECT * FROM FxDataAdjRets', localConn).set_index('Dates', drop=True)
@@ -484,9 +484,9 @@ def Trade_LLE_Temporal(strategy):
     df_rp = sl.rp(df)
 
     # Benchmark Portfolios
-    LO_DF = pd.read_sql('SELECT * FROM Edf_classic', localConn).set_index('Dates', drop=True)
+    LO_DF = pd.read_sql('SELECT * FROM Edf_classic', conn).set_index('Dates', drop=True)
     LO_DF.columns = ["LO"]
-    RP_DF = pd.DataFrame(sl.rs(pd.read_sql('SELECT * FROM riskParityDF_tw_250', localConn).set_index('Dates', drop=True).fillna(0)), columns=["RP"])
+    RP_DF = pd.DataFrame(sl.rs(pd.read_sql('SELECT * FROM riskParityDF_tw_250', conn).set_index('Dates', drop=True).fillna(0)), columns=["RP"])
     benchDF = pd.concat([LO_DF, RP_DF], axis=1)
 
     #Random Walks
@@ -496,6 +496,9 @@ def Trade_LLE_Temporal(strategy):
     ###################################################################################################################
 
     sigList = []
+    Final_Strategies = pd.read_csv("Final_LLE_Temporal_Strategies.csv")["Strategy"].tolist()
+    #print(Final_Strategies)
+    #time.sleep(3000)
 
     if strategy == "Raw":
         print("Raw Signal setup ... ")
@@ -504,22 +507,20 @@ def Trade_LLE_Temporal(strategy):
         sigList.append(raw_sig)
     elif strategy == "EMA":
         print("EMA Signal setup ... ")
-        EMA_sig_conn = sqlite3.connect('FXeodData_sema.db')
         subsigList = []
-        for Lag in tqdm([2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]):
-            subsig = pd.read_sql('SELECT * FROM sema_sig_'+str(Lag), EMA_sig_conn).set_index('Dates',drop=True)
+        for Lag in tqdm([2, 50, 100, 150, 250]): #lagList = [2, 3, 5, 10, 15, 25, 50, 100, 150, 200, 250]
+            subsig = pd.read_sql('SELECT * FROM sema_sig_'+str(Lag), sqlite3.connect('FXeodData_sema.db')).set_index('Dates',drop=True)
             subsig.columns = [strategy+"_"+str(Lag)+"_"+str(x) for x in subsig.columns]
             subsigList.append(subsig)
         ema_sig = pd.concat(subsigList, axis=1)
         sigList.append(ema_sig)
     elif strategy == "ARIMA":
         print("ARIMA Signal setup ... ")
-        ARIMA_sig_conn = sqlite3.connect('FXeodDataARIMA.db')
         subsigList = []
         for tw in tqdm(twList):
             for pr in [0,1,2,3,4]:
                 for orderIn in ["100", "200", "300"]:
-                    subsig = pd.read_sql('SELECT * FROM LLE_Temporal_' +str(tw) + "_" + str(pr) + "_ARIMA_PredictionsDF_" + orderIn + "_250", ARIMA_sig_conn).set_index('Dates', drop=True)
+                    subsig = pd.read_sql('SELECT * FROM LLE_Temporal_' +str(tw) + "_" + str(pr) + "_ARIMA_PredictionsDF_" + orderIn + "_250", sqlite3.connect('FXeodDataARIMA.db')).set_index('Dates', drop=True)
                     subsig.columns = [strategy+"_"+str(tw)+"_"+str(pr)+"_"+orderIn+"_"+str(x) for x in subsig.columns]
                     subsigList.append(subsig)
         arima_sig = pd.concat(subsigList, axis=1)
@@ -557,9 +558,11 @@ def Trade_LLE_Temporal(strategy):
     benchDF_pnlList = []
     tPairsMegaList = []
     tPairsMegaList_Bench = []
+    storedSigList = []
 
     for sig in tqdm(sigList):
         for c in sig.columns:
+
             sigDF = sl.S(sl.sign(sig[c]))
             sub_df_pnl = df.mul(sigDF, axis=0)
 
@@ -578,6 +581,9 @@ def Trade_LLE_Temporal(strategy):
             tPairsMegaList.append(tPairsDF)
 
             sub_df_pnl.columns = [c+"_"+str(x) for x in sub_df_pnl.columns]
+            check = any(item in list(sub_df_pnl.columns) for item in Final_Strategies)
+            if check == True:
+                storedSigList.append(sigDF)
             df_pnlList.append(sub_df_pnl)
 
             sub_df_rp_pnl = df_rp.mul(sigDF, axis=0)
@@ -602,7 +608,13 @@ def Trade_LLE_Temporal(strategy):
             tPairsMegaList_Bench.append(tPairsDF_Bench)
 
             sub_benchDF_pnl.columns = [c + "_" + str(x) for x in sub_benchDF_pnl.columns]
+            check_Bench = any(item in list(sub_benchDF_pnl.columns) for item in Final_Strategies)
+            if check_Bench == True:
+                storedSigList.append(sigDF)
             benchDF_pnlList.append(sub_benchDF_pnl)
+
+    storedSigDF = pd.concat(storedSigList, axis=1)
+    storedSigDF.to_sql('storedSigDF_'+strategy, localConn, if_exists='replace')
 
     df_pnl_DF = pd.concat(df_pnlList, axis=1)
     df_rp_pnl_DF = pd.concat(df_rp_pnlList, axis=1)
@@ -1199,7 +1211,7 @@ if __name__ == '__main__':
     #RiskParity('plots')
 
     #PlotGallery('PCA_Rolling_vs_Expanding_Loadings')
-    PlotGallery('PCA_vs_LO_and_RP')
+    #PlotGallery('PCA_vs_LO_and_RP')
 
     #RunManifoldLearningOnFXPairs()
     #CrossValidateEmbeddings("PCA", 250, "run")
@@ -1208,7 +1220,7 @@ if __name__ == '__main__':
     #getProjections()
     #get_LLE_Temporal()
     #Trade_LLE_Temporal("Raw")
-    #Trade_LLE_Temporal("EMA")
+    Trade_LLE_Temporal("EMA")
     #Trade_LLE_Temporal("ARIMA")
     #Trade_LLE_Temporal("GPR")
     #Trade_LLE_Temporal("RNN_R")

@@ -210,27 +210,23 @@ def Test(mode):
 
 def TCA():
 
-    #selection = 'PCA_250_19'; p = 1; co = 'single'
-    #selection = 'PCA_150_19'; p = 2; co = 'single'
-    selection = 'PCA_100_19'; p = 3; co = 'single'
+    #selection = 'LO'; mode = ""; p = 2; co = 'LO'; rev = 1
+    #selection = 'RP'; mode = ""; p = 2; co = 'RP'; rev = 1
 
-    #selection = 'PCA_ExpWindow25_19'; p = 1; co = 'single'
-    #selection = 'PCA_ExpWindow25_2'; p = 3; co = 'single'
-    #selection = 'PCA_100_4_Tail'; p = 1; co = 'global_PCA'
-    #selection = 'LO';  p = 2; co = 'LO'
-    #selection = 'RP'; p = 2; co = 'RP'
+    #selection = 'PCA_250_19'; mode = ""; p = 1; co = 'single'; rev = 1
+    #selection = 'PCA_150_19'; mode = ""; p = 2; co = 'single'; rev = 1
+    #selection = 'PCA_100_19'; mode = ""; p = 3; co = 'single'; rev = 1
 
-    localConn = sqlite3.connect('FXeodDataARIMA.db')
+    #selection = 'PCA_ExpWindow25_19'; mode = ""; p = 1; co = 'single'; rev = 1
+    #selection = 'PCA_ExpWindow25_2'; mode = ""; p = 3; co = 'single'; rev = 1
+    #selection = 'PCA_ExpWindow25_4_Head'; mode = ""; p = 2; co = 'global_PCA'; rev = 1
 
-    allProjectionsDF = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_testDF_'+str(p)+'00_250', localConn).set_index('Dates', drop=True)
-    allProjectionsDF.columns = [selection]
-    arimaSigCore = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_PredictionsDF_'+str(p)+'00_250', localConn).set_index('Dates', drop=True)
-
-    sig = sl.sign(arimaSigCore)
-    sig.columns = [selection]
-    strat_pnl = (sig * allProjectionsDF).iloc[round(0.1*len(allProjectionsDF)):]
-    rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
-    print(rawSharpe.round(2))
+    #selection = 'PCA_250_5'; mode = "LLE_Temporal"; p = "ARIMA_25_0_200_0"; co = 'single'; rev = 1
+    selection = 'PCA_150_15'; mode = "LLE_Temporal"; p = "ARIMA_ExpWindow25_2_300_0"; co = 'single'; rev = -1
+    #selection = 'PCA_ExpWindow25_13'; mode = "LLE_Temporal"; p = "ARIMA_250_0_300_0"; co = 'single'; rev = -1
+    #selection = 'PCA_100_5_Head'; mode = "LLE_Temporal"; p = "ARIMA_25_3_200_0"; co = 'global_PCA'; rev = 1
+    #selection = 'LO'; mode = "LLE_Temporal"; p = "ARIMA_250_2_300_0"; co = 'LO'; rev = 1
+    #selection = 'RP'; mode = "LLE_Temporal"; p = "ARIMA_250_2_300_0"; co = 'RP'; rev = 1
 
     if co == 'single':
         prinCompsDF = pd.read_sql(
@@ -246,13 +242,28 @@ def TCA():
         for l in range(1, len(prinCompsList)):
             prinCompsDF += prinCompsList[l]
     elif co == 'LO':
-        allProjectionsDF = pd.read_sql('SELECT * FROM LongOnlyEWPEDf', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
-        allProjectionsDF.columns = ["LO"]
         prinCompsDF = sl.sign(pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True).abs())
     elif co == 'RP':
-        allProjectionsDF = pd.read_sql('SELECT * FROM RiskParityEWPrsDf_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
-        allProjectionsDF.columns = ["RP"]
         prinCompsDF = 1/pd.read_sql('SELECT * FROM riskParityVol_tw_250', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
+
+    localConn = sqlite3.connect('FXeodDataARIMA.db')
+    allProjectionsDF = pd.read_sql('SELECT * FROM ' + selection + '_ARIMA_testDF_100_250',localConn).set_index('Dates', drop=True)
+    allProjectionsDF.columns = [selection]
+
+    if mode == "LLE_Temporal":
+        arimaSigCore = pd.DataFrame(pd.read_sql('SELECT * FROM storedSigDF_ARIMA', sqlite3.connect('FXeodData_LLE_Temporal.db')).set_index('Dates', drop=True)[p])
+        arimaSigCore.columns = [selection]
+    else:
+        arimaSigCore = pd.read_sql('SELECT * FROM '+selection + '_ARIMA_PredictionsDF_'+str(p)+'00_250', localConn).set_index('Dates', drop=True)
+
+    sig = sl.sign(arimaSigCore) * rev
+    sig.columns = [selection]
+    if mode == "LLE_Temporal":
+        strat_pnl = (sig * allProjectionsDF).fillna(0)
+    else:
+        strat_pnl = (sig * allProjectionsDF).fillna(0).iloc[round(0.1*len(allProjectionsDF)):]
+    rawSharpe = np.sqrt(252) * sl.sharpe(strat_pnl)
+    print(rawSharpe.round(2))
 
     TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
 
