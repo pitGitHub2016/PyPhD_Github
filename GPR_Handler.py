@@ -18,8 +18,8 @@ mpl.rcParams['font.serif'] = ['Times New Roman']
 mpl.rcParams['font.size'] = 20
 
 #conn = sqlite3.connect('/home/gekko/Desktop/PyPhD/RollingManifoldLearning/FXeodData_GPR.db', timeout=30)
-#conn = sqlite3.connect('E:\PhD_DB_Repo_28-7-2021\Temp.db', timeout=30)
-conn = sqlite3.connect('FXeodData_FxData.db', timeout=30)
+conn = sqlite3.connect('E:\PhD_DB_Repo_28-7-2021\Temp.db', timeout=30)
+#conn = sqlite3.connect('FXeodData_FxData.db', timeout=30)
 twList = [25, 100, 150, 250, 'ExpWindow25']
 
 pnlCalculator = 0
@@ -424,7 +424,7 @@ def TCA():
         net_SharpeList.append(net_Sharpe)
     strat_pnl_afterCosts_DF = pd.concat(netPnL_List, axis=1)
     print(strat_pnl_afterCosts_DF)
-    pickle.dump(strat_pnl_afterCosts_DF,open("Repo/FinalPortfolio/GPR_" + selection + "_" + str(p) + "_" + co + ".p", "wb"))
+    pickle.dump(strat_pnl_afterCosts_DF,open("GPR_" + selection + "_" + str(magicNum) + "_" + co + ".p", "wb"))
     print("net_SharpeList")
     print(' & '.join([str(x) for x in net_SharpeList]))
 
