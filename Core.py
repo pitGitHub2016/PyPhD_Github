@@ -614,6 +614,7 @@ def Trade_LLE_Temporal(strategy):
             benchDF_pnlList.append(sub_benchDF_pnl)
 
     storedSigDF = pd.concat(storedSigList, axis=1)
+    storedSigDF = storedSigDF.loc[:, ~storedSigDF.columns.duplicated()]
     storedSigDF.to_sql('storedSigDF_'+strategy, localConn, if_exists='replace')
 
     df_pnl_DF = pd.concat(df_pnlList, axis=1)
@@ -1220,10 +1221,10 @@ if __name__ == '__main__':
     #getProjections()
     #get_LLE_Temporal()
     #Trade_LLE_Temporal("Raw")
-    Trade_LLE_Temporal("EMA")
+    #Trade_LLE_Temporal("EMA")
     #Trade_LLE_Temporal("ARIMA")
     #Trade_LLE_Temporal("GPR")
-    #Trade_LLE_Temporal("RNN_R")
+    Trade_LLE_Temporal("RNN_R")
 
     #StationarityOnProjections('PCA', 'build')
     #StationarityOnProjections('LLE', 'build')

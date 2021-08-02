@@ -217,12 +217,12 @@ def TCA():
     #selection = 'PCA_150_19'; mode = ""; p = 2; co = 'single'; rev = 1
     #selection = 'PCA_100_19'; mode = ""; p = 3; co = 'single'; rev = 1
 
-    #selection = 'PCA_ExpWindow25_19'; mode = ""; p = 1; co = 'single'; rev = 1
+    selection = 'PCA_ExpWindow25_19'; mode = ""; p = 1; co = 'single'; rev = 1
     #selection = 'PCA_ExpWindow25_2'; mode = ""; p = 3; co = 'single'; rev = 1
     #selection = 'PCA_ExpWindow25_4_Head'; mode = ""; p = 2; co = 'global_PCA'; rev = 1
 
     #selection = 'PCA_250_5'; mode = "LLE_Temporal"; p = "ARIMA_25_0_200_0"; co = 'single'; rev = 1
-    selection = 'PCA_150_15'; mode = "LLE_Temporal"; p = "ARIMA_ExpWindow25_2_300_0"; co = 'single'; rev = -1
+    #selection = 'PCA_150_15'; mode = "LLE_Temporal"; p = "ARIMA_ExpWindow25_2_300_0"; co = 'single'; rev = -1
     #selection = 'PCA_ExpWindow25_13'; mode = "LLE_Temporal"; p = "ARIMA_250_0_300_0"; co = 'single'; rev = -1
     #selection = 'PCA_100_5_Head'; mode = "LLE_Temporal"; p = "ARIMA_25_3_200_0"; co = 'global_PCA'; rev = 1
     #selection = 'LO'; mode = "LLE_Temporal"; p = "ARIMA_250_2_300_0"; co = 'LO'; rev = 1
@@ -269,14 +269,20 @@ def TCA():
 
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)
+    netPnL_List = []
     net_SharpeList = []
     for scenario in ['Scenario1','Scenario2','Scenario3','Scenario4','Scenario5','Scenario6']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
+        strat_pnl_afterCosts.columns = [scenario]
+        netPnL_List.append(strat_pnl_afterCosts)
         net_Sharpe = (np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)).round(2).values[0]
         net_SharpeList.append(net_Sharpe)
+    strat_pnl_afterCosts_DF = pd.concat(netPnL_List, axis=1)
+    print(strat_pnl_afterCosts_DF)
+    pickle.dump(strat_pnl_afterCosts_DF,open("Repo/FinalPortfolio/AR_" + selection + "_" + str(p) + "_" + co + ".p", "wb"))
     print("net_SharpeList")
     print(' & '.join([str(x) for x in net_SharpeList]))
 

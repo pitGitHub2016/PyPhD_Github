@@ -101,20 +101,21 @@ def TCA():
     # selection = 'LO'; Lag = 2; co = 'LO'; rev = 1
     # selection = 'RP'; Lag = 2; co = 'RP'; rev = 1
 
-    # selection = 'PCA_250_19'; Lag = 5; co = 'single'; rev = -1
+    selection = 'PCA_250_19'; Lag = 5; co = 'single'; rev = -1
     # selection = 'PCA_150_19'; Lag = 2; co = 'single'; rev = -1
     # selection = 'PCA_100_0'; Lag = 2; co = 'single'; rev = 1
     # selection = 'PCA_100_4_Tail'; Lag = 2; co = 'global_PCA'; rev = -1
 
-    # selection = 'PCA_ExpWindow25_19'; Lag = 2; co = 'single'; rev = -1
+    #selection = 'PCA_ExpWindow25_19'; Lag = 2; co = 'single'; rev = -1
     # selection = 'PCA_ExpWindow25_2'; Lag = 2; co = 'single'; rev = -1
     #selection = 'PCA_ExpWindow25_4_Head'; Lag = 2; co = 'global_PCA'; rev = 1
 
-    selection = 'PCA_250_0'; Lag = "EMA_100_LLE_Temporal_250_0"; co = 'single'; rev = 1
+    #selection = 'PCA_250_0'; Lag = "EMA_100_LLE_Temporal_250_0"; co = 'single'; rev = 1
     #selection = "PCA_100_8"; Lag = "EMA_2_LLE_Temporal_250_4"; co = 'single'; rev = 1
     #selection = "PCA_ExpWindow25_0"; Lag = "EMA_50_LLE_Temporal_ExpWindow25_0"; co = 'single'; rev = -1
     #selection = "PCA_100_3_Head"; Lag = "EMA_150_LLE_Temporal_25_4"; co = 'global_PCA'; rev = -1
     #selection = "LO"; Lag = "EMA_50_LLE_Temporal_ExpWindow25_0"; co = 'LO'; rev = 1
+    #selection = "RP"; Lag = "EMA_150_LLE_Temporal_250_2"; co = 'RP'; rev = 1
 
     if co == 'single':
         allProjectionsDF = pd.read_csv('allProjectionsDF.csv').set_index('Dates', drop=True)
@@ -147,7 +148,7 @@ def TCA():
 
     TCspecs = pd.read_csv("TCA.csv").set_index('Asset', drop=True)
 
-    if "LLE_Temporal" in Lag:
+    if type(Lag) == str and "LLE_Temporal" in Lag:
         sig = pd.DataFrame(pd.read_sql('SELECT * FROM storedSigDF_EMA', sqlite3.connect('FXeodData_LLE_Temporal.db')).set_index('Dates', drop=True)[Lag]) * rev
         sig.columns = [selection]
         sema_pnl = allProjectionsDF.mul(sig, axis=0).fillna(0)
@@ -162,14 +163,20 @@ def TCA():
 
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)
+    netPnL_List = []
     net_SharpeList = []
     for scenario in ['Scenario1', 'Scenario2', 'Scenario3', 'Scenario4', 'Scenario5', 'Scenario6']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = strat_pnl - sl.rs(my_tcs)
+        strat_pnl_afterCosts.name = scenario
+        netPnL_List.append(strat_pnl_afterCosts)
         net_Sharpe = (np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)).round(2)
         net_SharpeList.append(net_Sharpe)
+    strat_pnl_afterCosts_DF = pd.concat(netPnL_List, axis=1)
+    print(strat_pnl_afterCosts_DF)
+    pickle.dump(strat_pnl_afterCosts_DF,open("Repo/FinalPortfolio/EMA_" + selection + "_" + str(Lag) + "_" + co + ".p", "wb"))
     print("net_SharpeList")
     print(' & '.join([str(x) for x in net_SharpeList]))
 

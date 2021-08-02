@@ -321,17 +321,15 @@ def TCA():
 
     #selection = 'PCA_250_19'; mode = ""; magicNum = 2; co = 'single'; rev = 1
     #selection = 'PCA_150_5'; mode = ""; magicNum = 2; co = 'single'; rev = 1
-    #selection = 'PCA_ExpWindow25_19'; mode = ""; magicNum = 2; co = 'single'; rev = 1
+    selection = 'PCA_ExpWindow25_19'; mode = ""; magicNum = 2; co = 'single'; rev = 1
     #selection = 'PCA_ExpWindow25_2'; mode = ""; magicNum = 3; co = 'single'; rev = 1
 
     #selection = 'PCA_ExpWindow25_7'; mode = "LLE_Temporal"; magicNum = "GPR_150_4_2"; co = 'single'; rev = 1
-    selection = 'PCA_250_6'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_3"; co = 'single'; rev = 1
-    #selection = 'PCA_ExpWindow25_16'; mode = "LLE_Temporal"; magicNum = "GPR_100_0_4"; co = 'single'; rev = 1
-    #selection = 'PCA_250_2_Head'; mode = "LLE_Temporal"; magicNum = "GPR_25_1_1"; co = 'single'; rev = 1
-    #selection = 'PCA_ExpWindow25_1'; mode = "LLE_Temporal"; magicNum = "GPR_ExpWindow25_3_1"; co = 'single'; rev = 1
-    #selection = 'PCA_100_4_Tail'; mode = "LLE_Temporal"; magicNum = "GPR_100_0_1"; co = 'single'; rev = 1
-    #selection = 'LO'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_1"; co = 'LO'; rev = 1
-    #selection = 'RP'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_1"; co = 'RP'; rev = 1
+    #selection = 'PCA_250_6'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_3"; co = 'single'; rev = -1
+    #selection = 'PCA_ExpWindow25_16'; mode = "LLE_Temporal"; magicNum = "GPR_100_0_4"; co = 'single'; rev = -1
+    #selection = 'PCA_100_4_Tail'; mode = "LLE_Temporal"; magicNum = "GPR_100_0_1"; co = 'global_PCA'; rev = 1
+    #selection = 'LO'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_1"; co = 'LO'; rev = -1
+    #selection = 'RP'; mode = "LLE_Temporal"; magicNum = "GPR_250_3_1"; co = 'RP'; rev = -1
 
     if co == 'single':
         allProjectionsDF = pd.DataFrame(pd.read_csv('allProjectionsDF.csv').set_index('Dates', drop=True)[selection])
@@ -413,14 +411,20 @@ def TCA():
 
     trW = prinCompsDF.mul(sig[selection], axis=0)
     delta_pos = sl.d(trW).fillna(0)
+    netPnL_List = []
     net_SharpeList = []
     for scenario in ['Scenario1','Scenario2','Scenario3','Scenario4','Scenario5','Scenario6']:
         my_tcs = delta_pos.copy()
         for c in my_tcs.columns:
             my_tcs[c] = my_tcs[c].abs() * TCspecs.loc[TCspecs.index == c, scenario].values[0]
         strat_pnl_afterCosts = (strat_pnl - pd.DataFrame(sl.rs(my_tcs), columns=strat_pnl.columns)).dropna()
+        strat_pnl_afterCosts.columns = [scenario]
+        netPnL_List.append(strat_pnl_afterCosts)
         net_Sharpe = (np.sqrt(252) * sl.sharpe(strat_pnl_afterCosts)).round(2).values[0]
         net_SharpeList.append(net_Sharpe)
+    strat_pnl_afterCosts_DF = pd.concat(netPnL_List, axis=1)
+    print(strat_pnl_afterCosts_DF)
+    pickle.dump(strat_pnl_afterCosts_DF,open("Repo/FinalPortfolio/GPR_" + selection + "_" + str(p) + "_" + co + ".p", "wb"))
     print("net_SharpeList")
     print(' & '.join([str(x) for x in net_SharpeList]))
 
