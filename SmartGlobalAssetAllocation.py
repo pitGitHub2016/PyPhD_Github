@@ -27,28 +27,25 @@ pd.set_option('display.max_columns',20)
 pd.set_option('display.max_rows',200)
 
 conn = sqlite3.connect('SmartGlobalAssetAllocation.db')
-fromDate = '01/02/2005'
-toDate = '01/02/2021'
+fromDate = '01/08/2006'
+toDate = '05/08/2021'
+dataVec = [1, 1, 1, 1, 1]
 twList = [250]
 spacialND = range(5)
 
-BondsTickers = ["U.S. 10Y", "U.S. 5Y", "U.S. 2Y", "U.S. 1Y", "U.S. 6M",
-                "U.K. 10Y", "U.K. 5Y", "U.K. 2Y", "U.K. 1Y", "U.K. 6M",
+BondsTickers = ["U.S. 10Y", "U.S. 5Y", "U.S. 2Y", "U.S. 6M",
+                "U.K. 10Y", "U.K. 5Y", "U.K. 2Y", "U.K. 1Y",
                 "China 10Y", "China 5Y", "China 2Y", "China 1Y",
                 "Japan 10Y", "Japan 5Y", "Japan 2Y", "Japan 1Y", "Japan 6M",
                 "Germany 10Y", "Germany 5Y", "Germany 2Y", "Germany 1Y", "Germany 6M"]
-EqsTickers = [["S&P 500", "United States"], ["Nasdaq", "United States"],
-              ["DAX", "Germany"], ["CAC 40", "France"], ["FTSE 100", "United Kingdom"],
-              ["Shanghai", "China"], ["Nikkei 225", "Japan"]]
+EqsTickers = [["Nasdaq", "United States"], ["DAX", "Germany"], ["FTSE 100", "United Kingdom"], ["Shanghai", "China"], ["Nikkei 225", "Japan"]]
 FxTickers = ['EUR/USD', 'GBP/USD', 'USD/CNY', 'USD/JPY']
-CommoditiesTickers = ['Gold', 'Silver', 'Brent Oil', 'Crude Oil WTI', 'Natural Gas']
+CommoditiesTickers = ['Gold', 'Brent Oil', 'Crude Oil WTI', 'Natural Gas']
 CustomTickers = [x for x in glob.glob("Investing_csvData/*.csv")]
 
 subPortfoliosList = [[[x[0] for x in EqsTickers], 'EqsFuts'],
-                   [['Euro SCHATZ Futures', 'Euro Bund Futures', 'Euro BOBL Futures',
-                     'US 2 Year T-Note Futures', 'US 5 Year T-Note Futures', 'US 10 Year T-Note Futures',
-                     'US 30 Year T-Bond Futures', 'UK Gilt Futures', 'Japan Government Bond Futures'], 'BondsFuts'],
-                   [['Euribor Futures', 'Eurodollar Futures'], 'IRsFuts'],
+                   [['US 10 Year T-Note Futures', 'US 30 Year T-Bond Futures', ], 'BondsFuts'],
+                   [['Eurodollar Futures'], 'IRsFuts'],
                    [CommoditiesTickers, 'Commodities'], [['EURUSD', 'GBPUSD', 'CNYUSD', 'JPYUSD','US Dollar Index Futures'], 'FX']]
 
 def ProductsSearch():
@@ -78,8 +75,6 @@ def ProductsSearch():
 
 def DataHandler(mode):
     if mode == 'run':
-
-        dataVec = [0, 0, 0, 0, 1]
 
         if dataVec[0] == 1:
 
@@ -152,7 +147,7 @@ def DataHandler(mode):
                 print(customProduct)
                 df = pd.read_csv(customProduct)
                 df['Date'] = pd.to_datetime(df['Date'])
-                CustomName = customProduct.split("/")[1].replace(" Historical Data.csv", "")
+                CustomName = customProduct.split("\\")[1].replace(" Historical Data.csv", "")
                 df = df.rename(columns={"Date": "Dates", "Price": CustomName}).set_index('Dates')[CustomName].sort_index()
                 CustomList.append(df)
 
@@ -168,18 +163,30 @@ def DataHandler(mode):
             df = pd.read_sql('SELECT * FROM '+x, conn)
             if x == 'Bonds_Prices':
                 df = df.rename(columns={"index": "Dates"})
-            df['Dates'] = pd.to_datetime(df['Dates'])
             df = df.set_index('Dates', drop=True)
             dataAll.append(df)
 
         Prices = pd.concat(dataAll, axis=1)
+        try:
+            Prices = Prices.reset_index().rename(columns={"index": "Dates"}).set_index('Dates', drop=True)
+        except Exception as e:
+            print(e)
         Prices.to_sql('Prices', conn, if_exists='replace')
 
         Rates = sl.d(Prices[BondsTickers]).fillna(0)
         Rates.to_sql('Rates', conn, if_exists='replace')
 
         PricesTrading = Prices.drop(BondsTickers, axis=1)
-        rets = sl.dlog(PricesTrading).fillna(0)
+        PricesTrading = PricesTrading.drop(["EURUSD","GBPUSD","CNYUSD","JPYUSD"], axis=1)
+
+        rets_wo_FX = sl.dlog(PricesTrading)
+        FX_Carry_Adjusted_Returns = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
+        rets = pd.concat([rets_wo_FX, FX_Carry_Adjusted_Returns], axis=1).fillna(0)
+        try:
+            rets = rets.reset_index().rename(columns={"index": "Dates"}).set_index('Dates', drop=True)
+        except Exception as e:
+            print(e)
+
         rets.to_sql('AssetsRets', conn, if_exists='replace')
 
         # TO PLOT
@@ -235,9 +242,121 @@ def DataHandler(mode):
             plt.grid()
             plt.show()
 
+def shortTermInterestRatesSetup(mode):
+    if mode == 'MainSetup':
+        # https://www.oecd-ilibrary.org/finance-and-investment/short-term-interest-rates/indicator/english_2cc37d77-en?parentId=http%3A%2F%2Finstance.metastore.ingenta.com%2Fcontent%2Fthematicgrouping%2F86b91cb3-en
+        df = pd.read_csv('shortTermInterestRates_05082021.csv')
+        irList = []
+        for item in set(list(df['LOCATION'])):
+            df0 = df[df['LOCATION'] == item].reset_index()
+            df1 = df0[['TIME', 'Value']].set_index('TIME')
+            df1.columns = [item]
+            irList.append(df1)
+        pd.concat(irList, axis=1).to_sql('irData', conn, if_exists='replace')
+
+        rawData = pd.read_sql('SELECT * FROM irData', conn)
+        rawData['index'] = pd.to_datetime(rawData['index'])
+        irData = rawData.set_index('index').fillna(method='ffill')
+        # dailyReSample = irData.resample('D').mean().fillna(method='ffill')
+        dailyReSample = irData.resample('D').interpolate(method='linear').fillna(method='ffill').fillna(0)
+        dailyReSample.to_sql('irDataDaily', conn, if_exists='replace')
+
+        dailyIR = (pd.read_sql('SELECT * FROM irDataDaily', conn).set_index('index') / 365) / 100
+        IRD = dailyIR
+
+        IRD['CNYUSD'] = IRD['CHN'] - IRD['USA']
+        IRD['EURUSD'] = IRD['EA19'] - IRD['USA']
+        IRD['GBPUSD'] = IRD['GBR'] - IRD['USA']
+        IRD['JPYUSD'] = IRD['JPN'] - IRD['USA']
+
+        iRTimeSeries = IRD[['USA', 'CHN', 'EA19', 'GBR', 'JPN']]
+        iRTimeSeries.astype(float).to_sql('iRTimeSeries', conn, if_exists='replace')
+
+        IRD = IRD.loc['2006-08-01 00:00:00':, ['EURUSD', 'GBPUSD', 'JPYUSD', 'CNYUSD']]
+
+        IRD.astype(float).to_sql('IRD', conn, if_exists='replace')
+
+        IRD.index = [x.replace("00:00:00", "").strip() for x in IRD.index]
+
+        fig, ax = plt.subplots()
+        mpl.pyplot.locator_params(axis='x', nbins=35)
+        IRD.plot(ax=ax)
+        for label in ax.get_xticklabels():
+            label.set_fontsize(25)
+            label.set_ha("right")
+            label.set_rotation(45)
+        ax.set_xlim(xmin=0.0, xmax=len(IRD) + 1)
+        mpl.pyplot.ylabel("IRD", fontsize=32)
+        plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+        plt.subplots_adjust(top=0.95, bottom=0.2, right=0.85, left=0.1, hspace=0, wspace=0)
+        plt.margins(0, 0)
+        plt.grid()
+        plt.show()
+    elif mode == 'retsIRDsSetup':
+        dfInvesting = pd.read_sql('SELECT * FROM Fx_Prices', conn).set_index('Dates', drop=True)
+        dfIRD = pd.read_sql('SELECT * FROM IRD', conn).rename(columns={"index": "Dates"}).set_index('Dates').loc[
+                dfInvesting.index, :].ffill()
+
+        fxRets = sl.dlog(dfInvesting, fillna="no")
+        fxIRD = fxRets + dfIRD
+
+        fxRets.fillna(0).to_sql('FxDataRawRets', conn, if_exists='replace')
+        fxIRD.fillna(0).to_sql('FxDataAdjRets', conn, if_exists='replace')
+    elif mode == 'retsIRDs':
+        dfRaw = pd.read_sql('SELECT * FROM FxDataRawRets', conn).set_index('Dates', drop=True)
+        dfAdj = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
+        print(dfAdj.columns)
+        dfRaw.index = [x.replace("00:00:00", "").strip() for x in dfRaw.index]
+        dfAdj.index = [x.replace("00:00:00", "").strip() for x in dfAdj.index]
+
+        csdfRaw = sl.ecs(dfRaw)
+        csdfRaw.index = [x.replace("00:00:00", "").strip() for x in csdfRaw.index]
+        csdfAdj = sl.ecs(dfAdj)
+        csdfAdj.index = [x.replace("00:00:00", "").strip() for x in csdfAdj.index]
+
+        labelList = ['$x_{i,t}$', '$r_{i,t}$']
+        c = 0
+        for df in [dfAdj, dfRaw]:
+            df -= 1
+            fig, ax = plt.subplots()
+            mpl.pyplot.locator_params(axis='x', nbins=35)
+            df.plot(ax=ax)
+            for label in ax.get_xticklabels():
+                label.set_fontsize(25)
+                label.set_ha("right")
+                label.set_rotation(45)
+            ax.set_xlim(xmin=0.0, xmax=len(csdfRaw) + 1)
+            mpl.pyplot.ylabel(labelList[c], fontsize=32)
+            plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.85, left=0.08, hspace=0, wspace=0)
+            plt.margins(0, 0)
+            plt.grid()
+            plt.show()
+            c += 1
+
+        labelList = ['$\Pi x_{i,t}$', '$\Pi r_{i,t}$']
+        c = 0
+        for df in [csdfAdj, csdfRaw]:
+            df -= 1
+            fig, ax = plt.subplots()
+            mpl.pyplot.locator_params(axis='x', nbins=35)
+            df.plot(ax=ax)
+            for label in ax.get_xticklabels():
+                label.set_fontsize(25)
+                label.set_ha("right")
+                label.set_rotation(45)
+            ax.set_xlim(xmin=0.0, xmax=len(csdfRaw) + 1)
+            mpl.pyplot.ylabel(labelList[c], fontsize=32)
+            plt.legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+            plt.subplots_adjust(top=0.95, bottom=0.2, right=0.85, left=0.08, hspace=0, wspace=0)
+            plt.margins(0, 0)
+            plt.grid()
+            plt.show()
+            c+=1
+
 def SharpeRatioSimulations():
     shList = []
-    for asset in ["S&P 500", "FTSE 100", "GBPUSD", "JPYUSD"]:
+    for asset in ["Nasdaq", "FTSE 100", "GBPUSD", "JPYUSD"]:
         dataSP = pd.DataFrame(pd.read_sql('SELECT * FROM AssetsRets', conn).set_index('Dates', drop=True)[asset].values, columns=['asset'])
         dataSP = pd.DataFrame(dataSP[dataSP != 0].dropna()['asset'].values)
         medshList = []
@@ -351,20 +470,19 @@ def RiskParity():
     SRollVol.to_sql('SRollVol', conn, if_exists='replace')
 
     dfAll = (dfAll / SRollVol).replace([np.inf, -np.inf], 0).fillna(0)
-    dfAll.loc["2006-01-06 00:00:00", "S&P 500"] = 0
     dfAll.to_sql('riskParityDF', conn, if_exists='replace')
 
     fig, ax = plt.subplots()
     SRollVol.index = [x.replace("00:00:00", "").strip() for x in SRollVol.index]
     mpl.pyplot.locator_params(axis='x', nbins=35)
-    SRollVol.plot(ax=ax, legend=None)
+    SRollVol.plot(ax=ax)
     for label in ax.get_xticklabels():
         label.set_fontsize(25)
         label.set_ha("right")
         label.set_rotation(45)
     ax.set_xlim(xmin=0.0, xmax=len(SRollVol) + 1)
     mpl.pyplot.ylabel("$\hat{\sigma}_{i,t}$", fontsize=32)
-    # plt.legend(loc=2, ncol=1, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 15})
+    plt.legend(loc=2, ncol=1, bbox_to_anchor=(1, 1.02), frameon=False, prop={'size': 15})
     plt.subplots_adjust(top=0.95, bottom=0.2, right=0.8, left=0.12, hspace=0, wspace=0)
     plt.margins(0, 0)
     plt.grid()
@@ -1310,7 +1428,10 @@ def ClassificationProcess(argList):
     sh_pnl = np.sqrt(252) * sl.sharpe(pnl)
     print("selection = ", selection, ", Target System = ", magicNum, ", ", sh_pnl)
 
-    pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+    if calcMode in ['runSerial', 'readSQL']:
+        pnl.to_sql('pnl_'+params['model']+'_' + selection + "_" + str(magicNum), conn, if_exists='replace')
+    else:
+        pickle.dump(out, open("Repo/ClassifiersData/pnl_" + params["model"] + "_" + selection + "_" + str(magicNum) + ".p", "wb"))
 
 def runClassification(Portfolios, scanMode, mode):
     def Architecture(magicNum):
@@ -1652,15 +1773,16 @@ def DB_Handler():
 if __name__ == '__main__':
     #ProductsSearch()
     #DataHandler("run")
+    #shortTermInterestRatesSetup('MainSetup')
+    #shortTermInterestRatesSetup('retsIRDsSetup')
+    #shortTermInterestRatesSetup('retsIRDs')
     #DataHandler("plot")
-
     #SharpeRatioSimulations()
-
     #LongOnly()
     #RiskParity()
     #BenchmarkPortfolios_RollingSharpes()
 
-    #RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
+    RunRollManifold("DMAP_pyDmapsRun", 'AssetsRets')
     #RunRollManifold("DMAP_pyDmapsRun", 'Rates')
     #RunRollManifold("DMAP_gDmapsRun", 'AssetsRets')
     #RunRollManifold("DMAP_gDmapsRun", 'Rates')
@@ -1692,7 +1814,7 @@ if __name__ == '__main__':
     #ARIMAonPortfolios('Assets', 'Main', 'report')
     #ARIMAonPortfolios('Assets', 'ScanNotProcessed', '')
 
-    runRegression("Assets", 'Main', "runProcess")
+    #runRegression("Assets", 'Main', "runProcess")
     #runRegression("Assets", 'Main', "report")
     #runRegression("Assets", 'ScanNotProcessed', "")
 
