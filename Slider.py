@@ -2003,11 +2003,12 @@ class Slider:
                         x = df.loc[:, features].values
 
                         eps = np.median(pd.DataFrame(squareform(pdist(df))))
-                        cut_off = 10 * eps
+                        cut_off = 100 * eps
 
                         dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': cut_off}
                         dm = DiffusionMaps(x, eps, cut_off=cut_off, num_eigenpairs=NumProjections)
                         ev = dm.eigenvectors
+                        #print(pd.DataFrame(ev))
 
                         lambdasList.append(list(dm.eigenvalues))
                         sigmaList.append([eps])
@@ -2017,12 +2018,16 @@ class Slider:
                             Loadings_Target[c].append(ev[eig, :])
 
                             evGH = GeometricHarmonicsInterpolator(x, ev[eig, :], eps, dmaps_opts)
+
+                            rel_err1 = (np.linalg.norm(ev[eig, :] - evGH(x), np.inf) / np.linalg.norm(ev[1, :], np.inf))
+                            print(rel_err1)
+
                             Loadings_First[c].append(evGH(x))
                             Loadings_Last[c].append(evGH(x))
                             c += 1
 
-                        #print(pd.DataFrame(Loadings_Target[0]))
-                        #print(pd.DataFrame(Loadings_First[0]))
+                        #print(pd.DataFrame(Loadings_Target[4]))
+                        #print(pd.DataFrame(Loadings_First[4]))
                         #time.sleep(3000)
 
                     elif manifoldIn == 'DMAP_gDmapsRun':
@@ -2074,6 +2079,38 @@ class Slider:
                             Loadings_Temporal.append(targetLoadings)
 
                         lambdasList.append(1)
+                        sigmaList.append(1)
+
+                    elif manifoldIn == 'DMAP_GH':
+
+                        features = df.columns.values
+                        x = df.loc[:, features].values
+
+                        eps = np.median(pd.DataFrame(squareform(pdist(df))))
+                        cut_off = 100 * eps
+
+                        dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': cut_off}
+                        dm = DiffusionMaps(x, eps, cut_off=cut_off, num_eigenpairs=NumProjections)
+                        ev = dm.eigenvectors
+
+                        evGH_List = []
+                        for eigCount in range(NumProjections):
+                            evGH = GeometricHarmonicsInterpolator(x, ev[eigCount, :], eps, dmaps_opts)
+                            evGH_List.append(pd.DataFrame(evGH(x), columns=["col"+str(eigCount)]))
+                        evGH_DF = pd.concat(evGH_List, axis=1)
+
+                        try:
+                            targetLoadings = evGH_DF.iloc[-1, :].tolist()
+                            targetLoadings.append(df.index[-1])
+                            Loadings_Temporal.append(targetLoadings)
+                        except Exception as e:
+                            print(i, e)
+                            targetLoadings = [0] * NumProjections
+                            targetLoadings.append(df.index[-1])
+                            Loadings_Temporal.append(targetLoadings)
+
+                        lambdasList.append(1)
+                        sigmaList.append(1)
 
                     elif manifoldIn == 'DMAP_gDmapsRun':
                         dMapsOut = Slider.AI.gDmaps(df.T, nD=NumProjections)
@@ -2139,213 +2176,22 @@ class Slider:
                 sub_principalCompsDf_Target = sub_principalCompsDf_Target.set_index('Dates', drop=True)
                 aggDF = pd.concat([df0, sub_principalCompsDf_Target], axis=1).fillna(0)
                 principalCompsDf_Target = aggDF[sub_principalCompsDf_Target.columns]
+                principalCompsDf_First = principalCompsDf_Target.copy()
+                principalCompsDf_Last = principalCompsDf_Target.copy()
 
             ##########################################################################################################
 
+            #print(principalCompsDf_Target)
+            #print("##########################")
+            #print(principalCompsDf_First)
+            #print("##########################")
+            #print(principalCompsDf_Last)
+
             return [df0, [principalCompsDf_Target, principalCompsDf_First, principalCompsDf_Last], lambdasDF, sigmaDF]
 
-        def gRollingManifoldPyErb(manifoldIn, df0, st, NumProjections, eigsPC, **kwargs):
-            if 'RollMode' in kwargs:
-                RollMode = kwargs['RollMode']
-            else:
-                RollMode = 'RollWindow'
-
-            if 'Scaler' in kwargs:
-                Scaler = kwargs['Scaler']
-            else:
-                Scaler = 'Standard'
-
-            if 'ProjectionMode' in kwargs:
-                ProjectionMode = kwargs['ProjectionMode']
-            else:
-                ProjectionMode = 'NoTranspose'
-
-            if 'contractiveObserver' in kwargs:
-                contractiveObserver = kwargs['contractiveObserver']
-            else:
-                contractiveObserver = 0
-
-            if 'LLE_n_neighbors' in kwargs:
-                n_neighbors = kwargs['LLE_n_neighbors']
-            else:
-                n_neighbors = 2
-
-            if 'LLE_Method' in kwargs:
-                LLE_Method = kwargs['LLE_n_neighbors']
-            else:
-                LLE_Method = 'standard'
-
-            if 'DMAPS_sigma' in kwargs:
-                sigma = kwargs['DMAPS_sigma']
-            else:
-                sigma = 'std'
-
-            "CALCULATE ROLLING STATISTIC"
-            if manifoldIn == 'CustomMetric':
-                if 'CustomMetricStatistic' in kwargs:
-                    CustomMetricStatistic = kwargs['CustomMetricStatistic']
-                    metaDF_Rolling = Slider.rollStatistics(df0.copy(), CustomMetricStatistic)
-                else:
-                    CustomMetricStatistic = None
-                    metaDF_Rolling = df0.copy()
-
-                if 'CustomMetric' in kwargs:
-                    CustomMetric = kwargs['CustomMetric']
-                else:
-                    CustomMetric = "euclidean"
-
-            eigDf = []
-            eigCoeffs = [[] for j in range(len(eigsPC))]
-            Comps = [[] for j in range(len(eigsPC))]
-            sigmaList = []
-            lambdasList = []
-            cObserverList = []
-            # st = 50; pcaN = 5; eigsPC = [0];
-            for i in range(st, len(df0) + 1):
-                # try:
-
-                print("Step:", i, " of ", len(df0) + 1)
-                if RollMode == 'RollWindow':
-                    df = df0.iloc[i - st:i, :]
-                else:
-                    df = df0.iloc[0:i, :]
-
-                if ProjectionMode == 'Transpose':
-                    df = df.T
-
-                features = df.columns.values
-                x = df.loc[:, features].values
-
-                if Scaler == 'Standard':
-                    x = StandardScaler().fit_transform(x)
-
-                if manifoldIn == 'CustomMetric':
-
-                    customMetric = Slider.Metric(metaDF_Rolling, statistic=CustomMetricStatistic, metric=CustomMetric)
-                    lambdasList.append(list(customMetric[0]))
-                    sigmaList.append(list(customMetric[0]))
-                    c = 0
-                    for eig in eigsPC:
-                        # print(eig, ', customMetric[1][eig] =', customMetric[1][eig]) # 0 , 100 , 5
-                        Comps[c].append(list(customMetric[1][eig]))
-                        c += 1
-
-                elif manifoldIn == 'PCA':
-                    pca = PCA(n_components=NumProjections)
-                    X_pca = pca.fit_transform(x)
-                    lambdasList.append(list(pca.singular_values_))
-                    sigmaList.append(list(pca.explained_variance_ratio_))
-                    c = 0
-                    for eig in eigsPC:
-                        # print(eig, ',', len(pca.components_[eig]), ',', len(pca.components_)) # 0 , 100 , 5
-                        Comps[c].append(list(pca.components_[eig]))
-                        c += 1
-
-                elif manifoldIn == 'BetaRegressV':
-                    BetaKernelDF = Slider.BetaKernel(df)
-
-                    lambdasList.append(1)
-                    sigmaList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Comps[c].append(BetaKernelDF.iloc[:, eig].tolist())
-                        c += 1
-
-                elif manifoldIn == 'BetaRegressH':
-                    BetaKernelDF = Slider.BetaKernel(df)
-
-                    lambdasList.append(1)
-                    sigmaList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Comps[c].append(BetaKernelDF.iloc[eig, :].tolist())
-                        c += 1
-
-                elif manifoldIn == 'BetaRegressC':
-                    BetaKernelDF = Slider.BetaKernel(df)
-
-                    lambdasList.append(1)
-                    sigmaList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Comps[c].append((BetaKernelDF.iloc[eig, :] + BetaKernelDF.iloc[:, eig]).tolist())
-                        c += 1
-
-                elif manifoldIn == 'Beta':
-                    BetaKernelDF = Slider.BetaKernel(df)
-                    U, s, VT = svd(BetaKernelDF.values)
-
-                    lambdasList.append(s)
-                    sigmaList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        Comps[c].append(U[eig])
-                        c += 1
-
-                elif manifoldIn == 'DMAPS':
-                    dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections, coFlag=contractiveObserver,
-                                                sigma=sigma)  # [eigOut, sigmaDMAPS, s[:nD], glA]
-                    eigDf.append(dMapsOut[0].iloc[-1, :])
-                    glAout = dMapsOut[3]
-                    cObserverList.append(dMapsOut[4].iloc[-1, :])
-                    sigmaList.append(dMapsOut[1])
-                    lambdasList.append(dMapsOut[2])
-                    for gl in glAout:
-                        Comps[gl].append(glAout[gl])
-                        eigCoeffs[gl].append(
-                            linear_model.LinearRegression(normalize=True).fit(df, dMapsOut[0].iloc[:, gl]).coef_)
-
-                elif manifoldIn == 'LLE':
-                    lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
-                                                          method=LLE_Method, n_jobs=-1)
-                    X_lle = lle.fit_transform(x)  # ; print(X_lle.shape)
-                    lambdasList.append(1)
-                    sigmaList.append(1)
-                    c = 0
-                    for eig in eigsPC:
-                        # print(eig, ',', len(X_lle[:, eig])) # 0 , 100 , 5
-                        Comps[c].append(list(X_lle[:, eig]))
-                        c += 1
-
-                # except Exception as e:
-                #    print(e)
-                #    for c in len(eigsPC):
-                #        Comps[c].append(list(np.zeros(len(df0.columns), 1)))
-                #        eigCoeffs[c].append(list(np.zeros(len(df0.columns), 1)))
-
-            sigmaDF = pd.concat([pd.DataFrame(np.zeros((st - 1, 1))), pd.DataFrame(sigmaList)], axis=0,
-                                ignore_index=True).fillna(0)
-            sigmaDF.index = df0.index
-            try:
-                if len(sigmaDF.columns) <= 1:
-                    sigmaDF.columns = ['sigma']
-            except Exception as e:
-                print(e)
-
-            lambdasDF = pd.concat(
-                [pd.DataFrame(np.zeros((st - 1, pd.DataFrame(lambdasList).shape[1]))), pd.DataFrame(lambdasList)],
-                axis=0, ignore_index=True).fillna(0)
-            lambdasDF.index = df0.index
-
-            if contractiveObserver == 0:
-                principalCompsDf = [[] for j in range(len(Comps))]
-                exPostProjections = [[] for j in range(len(Comps))]
-                for k in range(len(Comps)):
-                    # principalCompsDf[k] = pd.DataFrame(pcaComps[k], columns=df0.columns, index=df1.index)
-
-                    principalCompsDf[k] = pd.concat(
-                        [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
-                         pd.DataFrame(Comps[k], columns=df0.columns)], axis=0, ignore_index=True)
-                    principalCompsDf[k].index = df0.index
-                    principalCompsDf[k] = principalCompsDf[k].fillna(0).replace(0, np.nan).ffill()
-
-                    exPostProjections[k] = df0 * Slider.S(principalCompsDf[k])
-
-                return [df0, principalCompsDf, exPostProjections, sigmaDF, lambdasDF]
-
-            else:
-
-                return [df0, pd.DataFrame(eigDf), pd.DataFrame(cObserverList), sigmaDF, lambdasDF, Comps, eigCoeffs]
+        def gRollingPredictGH(ghDF, st):
+            for i in tqdm(range(st, len(ghDF) + 1)):
+                pass
 
         def gANN(X_train, X_test, y_train, params):
             epochsIn = params[0]

@@ -24,8 +24,8 @@ warnings.filterwarnings('ignore')
 conn = sqlite3.connect('FXeodData_FxData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
-twList = [25]
-#twList = [25, 100, 150, 250, 'ExpWindow25']
+#twList = [25]
+twList = [25, 100, 150, 250, 'ExpWindow25']
 
 def DataHandler(mode):
 
@@ -382,6 +382,8 @@ def RunManifold(argList):
                                              ProjectionMode='Temporal')
             elif manifoldIn == 'DMAP_GH_Spacial':
                 out = sl.AI.gRollingManifold("DMAP_GH", df, tw, 5, [0, 1, 2, 3, 4])
+            elif manifoldIn == 'DMAP_GH_Temporal':
+                out = sl.AI.gRollingManifold("DMAP_GH", df, tw, 5, [0, 1, 2, 3, 4], ProjectionMode='Temporal')
         else:
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard',
@@ -389,10 +391,11 @@ def RunManifold(argList):
             elif manifoldIn == 'LLE_Spacial':
                 out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, RollMode='ExpWindow')
             elif manifoldIn == 'LLE_Temporal':
-                out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, RollMode='ExpWindow',
-                                             ProjectionMode='Temporal')
+                out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, RollMode='ExpWindow', ProjectionMode='Temporal')
             elif manifoldIn == 'DMAP_GH_Spacial':
                 out = sl.AI.gRollingManifold("DMAP_GH", df, 25, 5, [0, 1, 2, 3, 4], RollMode='ExpWindow')
+            elif manifoldIn == 'DMAP_GH_Temporal':
+                out = sl.AI.gRollingManifold("DMAP_GH", df, 25, 5, [0, 1, 2, 3, 4], RollMode='ExpWindow', ProjectionMode='Temporal')
 
         pickle.dump(out, open("Repo\Embeddings\\" + manifoldIn + "_" + str(tw) + ".p", "wb"))
 
@@ -414,7 +417,7 @@ def RunManifold(argList):
 def RunManifoldLearningOnFXPairs(runMode):
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
     processList = []
-    for manifoldIn in ['LLE_Spacial', 'DMAP_GH_Spacial']: #'PCA', 'LLE_Temporal', 'LLE_Spacial', 'DMAP_GH_Spacial'
+    for manifoldIn in ['LLE_Temporal', 'DMAP_GH_Temporal']: #'PCA', 'LLE_Temporal', 'LLE_Spacial', 'DMAP_GH_Spacial'
         for tw in twList:
             print(manifoldIn, ",", tw)
             if runMode == 'runPickle':
@@ -756,6 +759,29 @@ def PlotGallery(graph):
 
         # plot the heatmap
         #sns.heatmap(corr,xticklabels=corr.columns, yticklabels=corr.columns)
+
+    elif graph == 'DMAPs_GH_test':
+        df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
+        GH_target = pd.read_sql('SELECT * FROM DMAP_GH_Spacial__principalCompsDf_Target_tw_250_2', sqlite3.connect("FXeodData_principalCompsDf.db")).set_index('Dates', drop=True)
+        GH = pd.read_sql('SELECT * FROM DMAP_GH_Spacial__principalCompsDf_First_tw_250_2', sqlite3.connect("FXeodData_principalCompsDf.db")).set_index('Dates', drop=True)
+        #GH_target = pd.read_sql('SELECT * FROM LLE_Spacial__principalCompsDf_Target_tw_250_2', sqlite3.connect("FXeodData_principalCompsDf.db")).set_index('Dates', drop=True)
+        #GH = pd.read_sql('SELECT * FROM LLE_Spacial__principalCompsDf_First_tw_250_2', sqlite3.connect("FXeodData_principalCompsDf.db")).set_index('Dates', drop=True)
+
+        #GH = sl.sign(GH.copy())
+        GH = sl.sign(sl.ema(GH_target.copy(),nperiods=25))
+        #GH = sl.rowStoch(GH_target.copy(), mode='abs')
+
+        pnl = df.mul(sl.S(GH), axis=0)
+        sh_pnl = np.sqrt(252) * sl.sharpe(sl.rs(pnl))
+        print(sh_pnl)
+
+        fig, ax = plt.subplots(sharex=True, nrows=4, ncols=1)
+        sl.cs(df).plot(ax=ax[0], legend=None)
+        sl.cs(sl.rs(pnl)).plot(ax=ax[1], legend=None)
+        GH_target.plot(ax=ax[2], legend=None)
+        GH.plot(ax=ax[3], legend=None)
+        #sl.cs(GH).plot(ax=ax[2], legend=None)
+        plt.show()
 
 def StationarityOnProjections(manifoldIn, mode):
     allProjectionsDF = pd.read_sql('SELECT * FROM allProjectionsDF', conn).set_index('Dates', drop=True)
@@ -1272,11 +1298,12 @@ def TestGH(mode):
         print(ghDF)
 
     elif mode == 1:
-        out = sl.AI.gRollingManifold('DMAP_GH', df.iloc[:300,:], 25, 5, [0,1,2,3,4], Scaler='Standard')
+        #out = sl.AI.gRollingManifold('DMAP_GH', df.iloc[:300,:], 50, 5, [0,1,2,3,4], Scaler='Standard')
+        out = sl.AI.gRollingManifold('DMAP_GH', df.iloc[:300,:], 50, 5, [0,1,2,3,4], Scaler='Standard', ProjectionMode='Temporal')
 
     elif mode == 2:
-        out = sl.AI.gRollingManifold('LLE', df.iloc[:300,:], 25, 5, [0,1,2,3,4], Scaler='Standard')
-
+        #out = sl.AI.gRollingManifold('LLE', df.iloc[:300,:], 50, 5, [0,1,2,3,4], Scaler='Standard')
+        out = sl.AI.gRollingManifold("LLE", df.iloc[:300,:], 50, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, ProjectionMode='Temporal')
 #####################################################
 
 if __name__ == '__main__':
@@ -1290,13 +1317,14 @@ if __name__ == '__main__':
     #RiskParity('run')
     #RiskParity('plots')
 
-    #PlotGallery('PCA_Rolling_vs_Expanding_Loadings')
-    #PlotGallery('PCA_vs_LO_and_RP')
-
-    #RunManifoldLearningOnFXPairs('runPickle')
+    RunManifoldLearningOnFXPairs('runPickle')
     RunManifoldLearningOnFXPairs('readPickle')
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
+
+    #PlotGallery('PCA_Rolling_vs_Expanding_Loadings')
+    #PlotGallery('PCA_vs_LO_and_RP')
+    #PlotGallery('DMAPs_GH_test')
 
     #getProjections()
     #get_LLE_Temporal()
