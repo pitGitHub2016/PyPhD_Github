@@ -365,54 +365,70 @@ def RunManifold(argList):
     df = argList[0]
     manifoldIn = argList[1]
     tw = argList[2]
+    runMode = argList[3]
 
     print([manifoldIn, tw])
 
-    if tw != 'ExpWindow25':
-        print(manifoldIn + " tw = ", tw)
-        if manifoldIn == 'PCA':
-            out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard')
-        elif manifoldIn == 'LLE_Spacial':
-            out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0,1,2,3,4], LLE_n_neighbors=5)
-        elif manifoldIn == 'LLE_Temporal':
-            out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0,1,2,3,4], LLE_n_neighbors=5, ProjectionMode='Temporal')
-        elif manifoldIn == 'DMAP_GH_Spacial':
-            out = sl.AI.gRollingManifold("DMAP_GH", df, tw, 5, [0,1,2,3,4])
-    else:
-        if manifoldIn == 'PCA':
-            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard', RollMode='ExpWindow')
-        elif manifoldIn == 'LLE_Spacial':
-            out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, RollMode='ExpWindow')
-        elif manifoldIn == 'LLE_Temporal':
-            out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, RollMode='ExpWindow', ProjectionMode='Temporal')
-        elif manifoldIn == 'DMAP_GH_Spacial':
-            out = sl.AI.gRollingManifold("DMAP_GH", df, 25, 5, [0,1,2,3,4], RollMode='ExpWindow')
+    if runMode == 'runPickle':
 
-    out[0].to_sql(manifoldIn + "_" + '_df_tw_' + str(tw), localConn, if_exists='replace')
-    principalCompsDfList_Target = out[1][0]
-    principalCompsDfList_First = out[1][1]
-    principalCompsDfList_Last = out[1][2]
-    out[2].to_sql(manifoldIn + "_" + '_lambdasDf_tw_' + str(tw), localConn, if_exists='replace')
-    out[3].to_sql(manifoldIn + "_" + '_sigmasDf_tw_' + str(tw), localConn, if_exists='replace')
-    for k in range(len(principalCompsDfList_Target)):
-        principalCompsDfList_Target[k].to_sql(manifoldIn + "_" + '_principalCompsDf_Target_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
-        principalCompsDfList_First[k].to_sql(manifoldIn + "_" + '_principalCompsDf_First_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
-        principalCompsDfList_Last[k].to_sql(manifoldIn + "_" + '_principalCompsDf_Last_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
+        if tw != 'ExpWindow25':
+            print(manifoldIn + " tw = ", tw)
+            if manifoldIn == 'PCA':
+                out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard')
+            elif manifoldIn == 'LLE_Spacial':
+                out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5)
+            elif manifoldIn == 'LLE_Temporal':
+                out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5,
+                                             ProjectionMode='Temporal')
+            elif manifoldIn == 'DMAP_GH_Spacial':
+                out = sl.AI.gRollingManifold("DMAP_GH", df, tw, 5, [0, 1, 2, 3, 4])
+        else:
+            if manifoldIn == 'PCA':
+                out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard',
+                                             RollMode='ExpWindow')
+            elif manifoldIn == 'LLE_Spacial':
+                out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, RollMode='ExpWindow')
+            elif manifoldIn == 'LLE_Temporal':
+                out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, RollMode='ExpWindow',
+                                             ProjectionMode='Temporal')
+            elif manifoldIn == 'DMAP_GH_Spacial':
+                out = sl.AI.gRollingManifold("DMAP_GH", df, 25, 5, [0, 1, 2, 3, 4], RollMode='ExpWindow')
 
-def RunManifoldLearningOnFXPairs():
+        pickle.dump(out, open("Repo\Embeddings\\" + manifoldIn + "_" + str(tw) + ".p", "wb"))
+
+    elif runMode == 'readPickle':
+
+        out = pickle.load(open("Repo\Embeddings\\" + manifoldIn + "_" + str(tw) + ".p", "rb"))
+
+        out[0].to_sql(manifoldIn + "_" + '_df_tw_' + str(tw), localConn, if_exists='replace')
+        principalCompsDfList_Target = out[1][0]
+        principalCompsDfList_First = out[1][1]
+        principalCompsDfList_Last = out[1][2]
+        out[2].to_sql(manifoldIn + "_" + '_lambdasDf_tw_' + str(tw), localConn, if_exists='replace')
+        out[3].to_sql(manifoldIn + "_" + '_sigmasDf_tw_' + str(tw), localConn, if_exists='replace')
+        for k in range(len(principalCompsDfList_Target)):
+            principalCompsDfList_Target[k].to_sql(manifoldIn + "_" + '_principalCompsDf_Target_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
+            principalCompsDfList_First[k].to_sql(manifoldIn + "_" + '_principalCompsDf_First_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
+            principalCompsDfList_Last[k].to_sql(manifoldIn + "_" + '_principalCompsDf_Last_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
+
+def RunManifoldLearningOnFXPairs(runMode):
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
     processList = []
     for manifoldIn in ['LLE_Spacial', 'DMAP_GH_Spacial']: #'PCA', 'LLE_Temporal', 'LLE_Spacial', 'DMAP_GH_Spacial'
         for tw in twList:
             print(manifoldIn, ",", tw)
-            processList.append([df, manifoldIn, tw])
+            if runMode == 'runPickle':
+                processList.append([df, manifoldIn, tw, runMode])
+            elif runMode == 'readPickle':
+                RunManifold([df, manifoldIn, tw, 'readPickle'])
 
     print("Total Processes = ", len(processList))
 
-    p = mp.Pool(mp.cpu_count())
-    result = p.map(RunManifold, tqdm(processList))
-    p.close()
-    p.join()
+    if runMode == 'runPickle':
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(RunManifold, tqdm(processList))
+        p.close()
+        p.join()
 
 def getProjections():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', conn).set_index('Dates', drop=True)
@@ -1277,7 +1293,8 @@ if __name__ == '__main__':
     #PlotGallery('PCA_Rolling_vs_Expanding_Loadings')
     #PlotGallery('PCA_vs_LO_and_RP')
 
-    RunManifoldLearningOnFXPairs()
+    #RunManifoldLearningOnFXPairs('runPickle')
+    RunManifoldLearningOnFXPairs('readPickle')
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
 
