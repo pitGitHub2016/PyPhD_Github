@@ -849,49 +849,73 @@ def ContributionAnalysis():
     df.columns = ["index", "sharpe"]
     print(df.sort_values(by='sharpe', ascending=False).set_index('index', drop=True).reset_index().loc[:5])
 
-def FinalModelPlot(mode):
+def FinalModel(mode):
     if mode == 'PnL':
-        #pnl = pd.concat([
-        #    pd.read_sql('SELECT * FROM PCA_ExpWindow25_2_GaussianProcess_250_pnl', conn).set_index('Dates', drop=True),
-        #    pd.read_sql('SELECT * FROM LLE_ExpWindow25_GaussianProcess_250_pnl', conn).set_index('Dates', drop=True),
-        #], axis=1).dropna()
-        pnl = pd.concat([
-            pd.read_sql('SELECT * FROM PCA_ExpWindow25_2_ARIMA_pnl_100_250', conn).set_index('Dates', drop=True),
-            pd.read_sql('SELECT * FROM LLE_ExpWindow25_ARIMA_pnl_100_250', conn).set_index('Dates', drop=True),
-        ], axis=1).dropna()
-        pnl = pnl.iloc[round(0.3*len(pnl)):]
-        #pnl.columns = ["GPR on $y_{PCA,3,t}$", "GPR on $Y_{LLE,t}$"]
-        pnl.columns = ["AR(1) on $y_{PCA,3,t}$", "AR(1) on $Y_{LLE,t}$"]
-        print(np.sqrt(252) * sl.sharpe(pnl))
-        comboPnL = sl.RV(pnl, mode='HedgeRatioBasket')
-        print(np.sqrt(252) * sl.sharpe(comboPnL))
 
-        BestPerformingStrategy_Coordinates = sl.ecs(pnl[pnl.columns[0]])
-        BestPerformingStrategy_Coordinates.index = [x.replace("00:00:00", "").strip() for x in BestPerformingStrategy_Coordinates.index]
-        BestPerformingStrategy_Global = sl.ecs(pnl[pnl.columns[1]])
-        BestPerformingStrategy_Global.index = [x.replace("00:00:00", "").strip() for x in BestPerformingStrategy_Global.index]
+        tradeOffList = []
+        for MR_Strat in [["EMA_PCA_250_19_5_single", 11], ["EMA_PCA_ExpWindow25_19_2_single", 15],
+                         ["AR_PCA_ExpWindow25_19_1_single", 21], ["GPR_PCA_ExpWindow25_19_2_single", 26]]:
+            for TR_Strat in [["EMA_PCA_250_0_EMA_100_LLE_Temporal_250_0_single",30], ["EMA_PCA_ExpWindow25_0_EMA_50_LLE_Temporal_ExpWindow25_0_single",32]]:
 
-        dfList = [BestPerformingStrategy_Coordinates, BestPerformingStrategy_Global]
-        fig, ax = plt.subplots(sharex=True, nrows=len((dfList)), ncols=1)
-        mpl.pyplot.locator_params(axis='x', nbins=35)
-        titleList = ['(a)', '(b)']
-        c = 0
-        for df in dfList:
-            df.index = [x.replace("00:00:00", "").strip() for x in df.index]
-            df -= 1
+                stratPair = [MR_Strat[0], TR_Strat[0]]
+
+                for scenario in ['Scenario1', 'Scenario2', 'Scenario3', 'Scenario4', 'Scenario5', 'Scenario6']:
+                    pnlList = []
+                    for strat in stratPair:
+                        if 'GPR' not in strat:
+                            subDF = pickle.load(open("Repo/FinalPortfolio/"+strat+".p", "rb"))[scenario]
+                        else:
+                            subDF = pd.read_csv("Repo/FinalPortfolio/GPR_PCA_ExpWindow25_19_2_single.csv")[scenario]
+                        subDF.name = strat
+                        pnlList.append(subDF)
+
+                    pnlDF = pd.concat(pnlList, axis=1)
+                    shDF = np.sqrt(252) * sl.sharpe(pnlDF)
+                    pnlDF /= pnlDF.std()
+
+                    comboPnL = sl.rs(pnlDF)
+                    comboSh = np.sqrt(252) * sl.sharpe(comboPnL)
+                    tradeOffList.append([str(MR_Strat[1]) + "," + str(TR_Strat[1]), scenario, comboSh, shDF[0], shDF[1]])
+
+        tradeOff_DF = pd.DataFrame(tradeOffList, columns=['Combination', 'scenario', 'comboSh', 'MR_Strat_sh', 'TR_Strat_sh']).set_index("Combination", drop=True)
+        tradeOff_DF.to_sql('tradeOff_DF', conn, if_exists='replace')
+
+        for trendStrategy in ["30", "32"]:
+            print(trendStrategy)
+            targetCols = ["scenario", "comboSh", "MR_Strat_sh"]
+            combosList = [x for x in list(tradeOff_DF.index) if trendStrategy in x]
+            dfList = []
+            for combo in set(combosList):
+                subDF = tradeOff_DF.loc[combo].reset_index()[targetCols].set_index("scenario", drop=True)
+                comboName = combo.split(",")[0]
+                subDF.columns = [comboName + " : " + x for x in subDF.columns]
+                dfList.append(subDF)
+
+            dfAll = pd.concat(dfList, axis=1)
+
+            subList = [dfAll[["11 : "+x for x in targetCols[1:]]],dfAll[["15 : "+x for x in targetCols[1:]]],dfAll[["21 : "+x for x in targetCols[1:]]],dfAll[["26 : "+x for x in targetCols[1:]]]]
+            fig, ax = plt.subplots(sharex=True, nrows=len((subList)), ncols=1)
             mpl.pyplot.locator_params(axis='x', nbins=35)
-            (df * 100).plot(ax=ax[c], legend=None)
-            for label in ax[c].get_xticklabels():
-                label.set_fontsize(25)
-                label.set_ha("right")
-                label.set_rotation(40)
-            ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
-            ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
-            ax[c].set_ylabel(pnl.columns[c], fontsize=22)
-            ax[c].grid()
-            c += 1
-        plt.subplots_adjust(top=0.95, bottom=0.2)#, right=0.8, left=0.08) #, hspace=0.5, wspace=0
-        plt.show()
+            titleList = ['(a)', '(b)', '(c)', '(d)']
+            c = 0
+            for df in subList:
+                dfID = df.columns[0].split(":")[0]
+                df.columns = [dfID+" : Combination", dfID + ": Strategy"]
+                df.index = [x.replace("Scenario", "Scenario ").strip() for x in df.index]
+                mpl.pyplot.locator_params(axis='x', nbins=35)
+                df.plot.bar(ax=ax[c], legend=None)
+                for label in ax[c].get_xticklabels():
+                    label.set_fontsize(16)
+                    label.set_ha("right")
+                    label.set_rotation(40)
+                #ax[c].set_xlim(xmin=0.0, xmax=len(df) + 1)
+                ax[c].text(.5, .9, titleList[c], horizontalalignment='center', transform=ax[c].transAxes, fontsize=30)
+                ax[c].legend(loc=2, bbox_to_anchor=(1, 1), frameon=False, prop={'size': 20})
+                ax[c].margins(0, 0)
+                ax[c].grid()
+                c += 1
+            plt.subplots_adjust(top=0.95, bottom=0.1, right=0.8, left=0.1, hspace=0.1, wspace=0)
+            plt.show()
 
     elif mode == 'modelParams':
         gprDFList = []
@@ -1157,7 +1181,7 @@ def CrossValidateEmbeddings(manifoldIn, tw, mode):
         sl.cs(sl.rs(proj)).plot()
         plt.show()
 
-def Test():
+def Test0():
     selection = 'PCA_ExpWindow25_2'
     trainLength = 0.3
     tw = 250
@@ -1198,6 +1222,36 @@ def Test():
     out[2].plot()
     plt.show()
 
+def TestGH(mode):
+    df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates',drop=True)
+    #print("Data .......... ")
+    #print(df)
+
+    if mode == 0:
+        from diffusion_maps import (GeometricHarmonicsInterpolator, DiffusionMaps)
+        eps = 1e1
+        cut_off = 1e1 * eps
+        num_eigenpairs = 3
+
+        # points = make_strip(0, 0, 1, 1e-1, 3000)
+
+        dm = DiffusionMaps(df.T.values, eps, cut_off=cut_off, num_eigenpairs=num_eigenpairs)
+        ev = dm.eigenvectors
+        print("Eigenvectors .......... ")
+        print(pd.DataFrame(ev))
+
+        dmaps_opts = {'num_eigenpairs': num_eigenpairs, 'cut_off': cut_off}
+        ev1 = GeometricHarmonicsInterpolator(df.values, ev[1, :], eps, dmaps_opts)
+        ev2 = GeometricHarmonicsInterpolator(df.values, ev[2, :], eps, dmaps_opts)
+
+        print("[GH 1, GH 2] ......... ")
+        ghDF = pd.concat([pd.DataFrame(ev1(df.values)), pd.DataFrame(ev2(df.values))], axis=1)
+        ghDF.columns = ["GH1", "GH2"]
+        print(ghDF)
+
+    elif mode == 1:
+        out = sl.AI.gRollingManifold('DMAP_GH', df, 250, 5, [0,1,2,3,4], Scaler='Standard')
+
 #####################################################
 
 if __name__ == '__main__':
@@ -1224,7 +1278,7 @@ if __name__ == '__main__':
     #Trade_LLE_Temporal("EMA")
     #Trade_LLE_Temporal("ARIMA")
     #Trade_LLE_Temporal("GPR")
-    Trade_LLE_Temporal("RNN_R")
+    #Trade_LLE_Temporal("RNN_R")
 
     #StationarityOnProjections('PCA', 'build')
     #StationarityOnProjections('LLE', 'build')
@@ -1232,11 +1286,13 @@ if __name__ == '__main__':
     #StationarityOnProjections('LLE', 'plot')
 
     #Test()
+    #TestGH(0)
+    TestGH(1)
     #ContributionAnalysis()
 
-    #FinalModelPlot('PnL')
-    #FinalModelPlot('modelParams')
-    #FinalModelPlot('residuals')
+    #FinalModel('PnL')
+    #FinalModel('modelParams')
+    #FinalModel('residuals')
 
     #RollingStatistics('Assets', 'Exp', 'Sharpe')
     #RollingStatistics('Assets', 'Exp', 'Hurst')

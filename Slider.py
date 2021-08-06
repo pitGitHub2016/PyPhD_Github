@@ -43,15 +43,13 @@ import warnings, os, tensorflow as tf
 import math
 from tqdm import tqdm
 from sklearn.metrics import mean_squared_error
-try:
-    from pydiffmap import kernel
-    import pymc3 as pm
-    import arviz as az
-    from hurst import compute_Hc
-    import theano.tensor as tt
-    import pydiffmap
-except:
-    pass
+from pydiffmap import kernel
+import pydiffmap
+from diffusion_maps import (GeometricHarmonicsInterpolator, DiffusionMaps)
+from hurst import compute_Hc
+#import theano.tensor as tt
+#import pymc3 as pm
+#import arviz as az
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import logging
@@ -1928,6 +1926,10 @@ class Slider:
             else:
                 LLE_Method = 'standard'
 
+            print("Projection Mode : ", ProjectionMode)
+            print("st = ", st)
+            print("len(df0) = ", len(df0))
+
             Loadings_Target = [[] for j in range(len(eigsPC))]
             Loadings_First = [[] for j in range(len(eigsPC))]
             Loadings_Last = [[] for j in range(len(eigsPC))]
@@ -1936,25 +1938,25 @@ class Slider:
             sigmaList = []
             for i in tqdm(range(st, len(df0) + 1)):
 
-                #print("Step:", i, " of ", len(df0) + 1)
+                print("Step:", i, " of ", len(df0) + 1)
                 if RollMode == 'RollWindow':
                     df = df0.iloc[i - st:i, :]
                 else:
                     df = df0.iloc[0:i, :]
 
-                features = df.columns.values
-                x = df.loc[:, features].values
-
-                if Scaler == 'Standard':
-                    x = StandardScaler().fit_transform(x)
-                elif Scaler == 'SimpleImputer':
-                    x = SimpleImputer(missing_values=np.nan, strategy='constant').fit_transform(x)
-
                 #### SPACIAL PROJECTION ####
                 if ProjectionMode == 'Spacial':
-                    df = df.T
 
                     if manifoldIn == 'PCA':
+                        df = df.T
+                        features = df.columns.values
+                        x = df.loc[:, features].values
+
+                        if Scaler == 'Standard':
+                            x = StandardScaler().fit_transform(x)
+                        elif Scaler == 'SimpleImputer':
+                            x = SimpleImputer(missing_values=np.nan, strategy='constant').fit_transform(x)
+
                         pca = PCA(n_components=NumProjections)
                         X_pca = pca.fit_transform(x)
                         lambdasList.append(list(pca.singular_values_))
@@ -1966,6 +1968,15 @@ class Slider:
                             c += 1
 
                     elif manifoldIn == 'LLE':
+                        df = df.T
+                        features = df.columns.values
+                        x = df.loc[:, features].values
+
+                        if Scaler == 'Standard':
+                            x = StandardScaler().fit_transform(x)
+                        elif Scaler == 'SimpleImputer':
+                            x = SimpleImputer(missing_values=np.nan, strategy='constant').fit_transform(x)
+
                         lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
                                                               method=LLE_Method, n_jobs=-1)
                         X_lle = lle.fit_transform(x)
@@ -1974,6 +1985,34 @@ class Slider:
                         for eig in eigsPC:
                             Loadings_Target[c].append(list(X_lle[:, eig]))
                             c += 1
+
+                    elif manifoldIn == 'DMAP_GH':
+                        df = df.T
+                        features = df.columns.values
+                        x = df.loc[:, features].values
+
+                        eps = 1e-1
+                        cut_off = 1e-1 * eps
+
+                        lambdasList.append(1)
+                        sigmaList.append(1)
+
+                        dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': cut_off}
+                        dm = DiffusionMaps(x, eps, cut_off=cut_off, num_eigenpairs=NumProjections)
+                        ev = dm.eigenvectors
+
+                        c = 0
+                        for eig in eigsPC:
+                            Loadings_Target[c].append(ev[eig, :])
+
+                            evGH = GeometricHarmonicsInterpolator(x, ev[eig, :], eps, dmaps_opts)
+                            Loadings_First[c].append(evGH(x))
+                            Loadings_Last[c].append(evGH(x))
+                            c += 1
+
+                        #print(pd.DataFrame(Loadings_Target[0]))
+                        #print(pd.DataFrame(Loadings_First[0]))
+                        #time.sleep(3000)
 
                     elif manifoldIn == 'DMAP_gDmapsRun':
                         dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections)
@@ -1986,6 +2025,7 @@ class Slider:
                             c += 1
 
                     elif manifoldIn == 'DMAP_pyDmapsRun':
+                        df = df.T
                         dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
                         dMapsProjectionOut = dMapsOut[0]
                         eigFirst = dMapsOut[1]
@@ -2001,6 +2041,10 @@ class Slider:
 
                 else:
                     if manifoldIn == 'LLE': #Temporal --> paper
+
+                        features = df.columns.values
+                        x = df.loc[:, features].values
+
                         lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
                                                               method=LLE_Method, n_jobs=-1)
                         try:
@@ -2017,6 +2061,17 @@ class Slider:
 
                         lambdasList.append(1)
 
+                    elif manifoldIn == 'DMAP_gDmapsRun':
+                        dMapsOut = Slider.AI.gDmaps(df.T, nD=NumProjections)
+                        dmapsEigsOut = dMapsOut[0]
+                        lambdasList.append(list(dMapsOut[1]))
+                        sigmaList.append(dMapsOut[2])
+                        targetLoadings = dmapsEigsOut.iloc[-1,:].tolist()
+                        targetLoadings.append(dmapsEigsOut.index[-1])
+                        Loadings_Temporal.append(targetLoadings)
+
+            ##########################################################################################################
+            
             lambdasListDF = pd.DataFrame(lambdasList)
             lambdasDF = pd.concat(
                 [pd.DataFrame(np.zeros((st - 1, lambdasListDF.shape[1])), columns=lambdasListDF.columns),
@@ -2031,6 +2086,8 @@ class Slider:
             #            [pd.DataFrame(np.zeros((st - 1, len(Loadings_Target[0][0]))), columns=["TP"+"_"+str(x) for x in range(len(Loadings_Target[0][0]))]),
             #             pd.DataFrame(Loadings_Target[0], columns=["TP"+"_"+str(x) for x in range(len(Loadings_Target[0][0]))])], axis=0, ignore_index=True))
 
+            ##########################################################################################################
+
             if ProjectionMode == 'Spacial':
                 principalCompsDf_Target = [[] for j in range(len(Loadings_Target))]
                 principalCompsDf_First = [[] for j in range(len(Loadings_First))]
@@ -2044,7 +2101,7 @@ class Slider:
                     principalCompsDf_Target[k] = principalCompsDf_Target[k].ffill()
 
                     #### ONLY FOR DMAPS CASE ####
-                    if manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
+                    if manifoldIn in ['DMAP_GH', 'DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
                         principalCompsDf_First[k] = pd.concat(
                             [pd.DataFrame(np.zeros((st - 1, len(df0.columns))), columns=df0.columns),
                              pd.DataFrame(Loadings_First[k], columns=df0.columns)], axis=0, ignore_index=True)
@@ -2067,6 +2124,8 @@ class Slider:
                 aggDF = pd.concat([df0, sub_principalCompsDf_Target], axis=1).fillna(0)
                 principalCompsDf_Target = aggDF[sub_principalCompsDf_Target.columns]
 
+            ##########################################################################################################
+            
             if manifoldIn in ['PCA', 'LLE']:
                 if ProjectionMode == 'Spacial':
                     return [df0, principalCompsDf_Target, lambdasDF]
@@ -2074,15 +2133,14 @@ class Slider:
                     return [df0, [principalCompsDf_Target], lambdasDF]
                 else:
                     print("Please choose a proper ProjectionMode : Spacial or Temporal ... Sleeping on error ... ")
-            elif manifoldIn in ['DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
+            elif manifoldIn in ['DMAP_GH', 'DMAP_gDmapsRun', 'DMAP_pyDmapsRun']:
                 sigmaListDF = pd.DataFrame(sigmaList)
                 sigmaDF = pd.concat(
                     [pd.DataFrame(np.zeros((st - 1, sigmaListDF.shape[1])), columns=sigmaListDF.columns), sigmaListDF],
                     axis=0, ignore_index=True).fillna(0)
                 sigmaDF.index = df0.index
 
-                return [df0, [principalCompsDf_Target, principalCompsDf_First, principalCompsDf_Last], lambdasDF,
-                        sigmaDF]
+                return [df0, [principalCompsDf_Target, principalCompsDf_First, principalCompsDf_Last], lambdasDF, sigmaDF]
 
         def gRollingManifoldPyErb(manifoldIn, df0, st, NumProjections, eigsPC, **kwargs):
             if 'RollMode' in kwargs:
