@@ -24,8 +24,8 @@ warnings.filterwarnings('ignore')
 conn = sqlite3.connect('FXeodData_FxData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
-#twList = ['ExpWindow25']
-twList = [25, 100, 150, 250, 'ExpWindow25']
+twList = [25]
+#twList = [25, 100, 150, 250, 'ExpWindow25']
 
 def DataHandler(mode):
 
@@ -371,32 +371,38 @@ def RunManifold(argList):
     if tw != 'ExpWindow25':
         print(manifoldIn + " tw = ", tw)
         if manifoldIn == 'PCA':
-            out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard') #RollMode='ExpWindow'
-        elif manifoldIn == 'LLE':
-            out = sl.AI.gRollingManifold(manifoldIn, df, tw, 5, [0,1,2,3,4], LLE_n_neighbors=5, ProjectionMode='Temporal') # RollMode='ExpWindow', ProjectionMode='Transpose'
-
-        out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), localConn, if_exists='replace')
-        principalCompsDfList = out[1]
-        out[2].to_sql(manifoldIn + '_lambdasDf_tw_' + str(tw), localConn, if_exists='replace')
-        for k in range(len(principalCompsDfList)):
-            principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
-
+            out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard')
+        elif manifoldIn == 'LLE_Spacial':
+            out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0,1,2,3,4], LLE_n_neighbors=5)
+        elif manifoldIn == 'LLE_Temporal':
+            out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0,1,2,3,4], LLE_n_neighbors=5, ProjectionMode='Temporal')
+        elif manifoldIn == 'DMAP_GH_Spacial':
+            out = sl.AI.gRollingManifold("DMAP_GH", df, tw, 5, [0,1,2,3,4])
     else:
         if manifoldIn == 'PCA':
             out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard', RollMode='ExpWindow')
-        elif manifoldIn == 'LLE':
-            out = sl.AI.gRollingManifold(manifoldIn, df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, RollMode='ExpWindow', ProjectionMode='Temporal') # RollMode='ExpWindow', ProjectionMode='Transpose'
+        elif manifoldIn == 'LLE_Spacial':
+            out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, RollMode='ExpWindow')
+        elif manifoldIn == 'LLE_Temporal':
+            out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0,1,2,3,4], LLE_n_neighbors=5, RollMode='ExpWindow', ProjectionMode='Temporal')
+        elif manifoldIn == 'DMAP_GH_Spacial':
+            out = sl.AI.gRollingManifold("DMAP_GH", df, 25, 5, [0,1,2,3,4], RollMode='ExpWindow')
 
-        out[0].to_sql(manifoldIn + 'df_tw_' + str(tw), localConn, if_exists='replace')
-        principalCompsDfList = out[1]
-        out[2].to_sql(manifoldIn + '_lambdasDf_tw_' + str(tw), localConn, if_exists='replace')
-        for k in range(len(principalCompsDfList)):
-            principalCompsDfList[k].to_sql(manifoldIn + '_principalCompsDf_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
+    out[0].to_sql(manifoldIn + "_" + '_df_tw_' + str(tw), localConn, if_exists='replace')
+    principalCompsDfList_Target = out[1][0]
+    principalCompsDfList_First = out[1][1]
+    principalCompsDfList_Last = out[1][2]
+    out[2].to_sql(manifoldIn + "_" + '_lambdasDf_tw_' + str(tw), localConn, if_exists='replace')
+    out[3].to_sql(manifoldIn + "_" + '_sigmasDf_tw_' + str(tw), localConn, if_exists='replace')
+    for k in range(len(principalCompsDfList_Target)):
+        principalCompsDfList_Target[k].to_sql(manifoldIn + "_" + '_principalCompsDf_Target_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
+        principalCompsDfList_First[k].to_sql(manifoldIn + "_" + '_principalCompsDf_First_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
+        principalCompsDfList_Last[k].to_sql(manifoldIn + "_" + '_principalCompsDf_Last_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
 
 def RunManifoldLearningOnFXPairs():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
     processList = []
-    for manifoldIn in ['LLE']: #'PCA'
+    for manifoldIn in ['LLE_Spacial', 'DMAP_GH_Spacial']: #'PCA', 'LLE_Temporal', 'LLE_Spacial', 'DMAP_GH_Spacial'
         for tw in twList:
             print(manifoldIn, ",", tw)
             processList.append([df, manifoldIn, tw])
@@ -1250,7 +1256,10 @@ def TestGH(mode):
         print(ghDF)
 
     elif mode == 1:
-        out = sl.AI.gRollingManifold('DMAP_GH', df, 250, 5, [0,1,2,3,4], Scaler='Standard')
+        out = sl.AI.gRollingManifold('DMAP_GH', df.iloc[:300,:], 25, 5, [0,1,2,3,4], Scaler='Standard')
+
+    elif mode == 2:
+        out = sl.AI.gRollingManifold('LLE', df.iloc[:300,:], 25, 5, [0,1,2,3,4], Scaler='Standard')
 
 #####################################################
 
@@ -1268,7 +1277,7 @@ if __name__ == '__main__':
     #PlotGallery('PCA_Rolling_vs_Expanding_Loadings')
     #PlotGallery('PCA_vs_LO_and_RP')
 
-    #RunManifoldLearningOnFXPairs()
+    RunManifoldLearningOnFXPairs()
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
 
@@ -1287,7 +1296,8 @@ if __name__ == '__main__':
 
     #Test()
     #TestGH(0)
-    TestGH(1)
+    #TestGH(1)
+    #TestGH(2)
     #ContributionAnalysis()
 
     #FinalModel('PnL')
