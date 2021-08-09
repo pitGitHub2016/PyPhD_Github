@@ -25,7 +25,8 @@ conn = sqlite3.connect('FXeodData_FxData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
 #twList = [25]
-twList = [25, 100, 150, 250, 'ExpWindow25']
+twList = [25, 100, 150, 250]
+#twList = [25, 100, 150, 250, 'ExpWindow25']
 
 def DataHandler(mode):
 
@@ -366,6 +367,7 @@ def RunManifold(argList):
     manifoldIn = argList[1]
     tw = argList[2]
     runMode = argList[3]
+    liftingMode = argList[4]
 
     print([manifoldIn, tw])
 
@@ -375,27 +377,23 @@ def RunManifold(argList):
             print(manifoldIn + " tw = ", tw)
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard')
-            elif manifoldIn == 'LLE_Spacial':
-                out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5)
             elif manifoldIn == 'LLE_Temporal':
                 out = sl.AI.gRollingManifold("LLE", df, tw, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5,
                                              ProjectionMode='Temporal')
-            elif manifoldIn == 'DMAP_GH_Spacial':
-                out = sl.AI.gRollingManifold("DMAP_GH", df, tw, 5, [0, 1, 2, 3, 4])
             elif manifoldIn == 'DMAP_GH_Temporal':
-                out = sl.AI.gRollingManifold("DMAP_GH", df, tw, 5, [0, 1, 2, 3, 4], ProjectionMode='Temporal')
+                out = sl.AI.gRollingManifold('DMAP_GH', df, tw, 5, [0, 1, 2, 3, 4],
+                                             Scaler='Standard', ProjectionMode='Temporal',
+                                             LiftingMode=liftingMode, ProjectionPredictorsMode='OnTheFly')
         else:
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard',
                                              RollMode='ExpWindow')
-            elif manifoldIn == 'LLE_Spacial':
-                out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, RollMode='ExpWindow')
             elif manifoldIn == 'LLE_Temporal':
                 out = sl.AI.gRollingManifold("LLE", df, 25, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, RollMode='ExpWindow', ProjectionMode='Temporal')
-            elif manifoldIn == 'DMAP_GH_Spacial':
-                out = sl.AI.gRollingManifold("DMAP_GH", df, 25, 5, [0, 1, 2, 3, 4], RollMode='ExpWindow')
             elif manifoldIn == 'DMAP_GH_Temporal':
-                out = sl.AI.gRollingManifold("DMAP_GH", df, 25, 5, [0, 1, 2, 3, 4], RollMode='ExpWindow', ProjectionMode='Temporal')
+                out = sl.AI.gRollingManifold('DMAP_GH', df, 25, 5, [0, 1, 2, 3, 4], RollMode='ExpWindow',
+                                             Scaler='Standard', ProjectionMode='Temporal',
+                                             LiftingMode=liftingMode, ProjectionPredictorsMode='OnTheFly')
 
         pickle.dump(out, open("Repo\Embeddings\\" + manifoldIn + "_" + str(tw) + ".p", "wb"))
 
@@ -414,14 +412,14 @@ def RunManifold(argList):
             principalCompsDfList_First[k].to_sql(manifoldIn + "_" + '_principalCompsDf_First_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
             principalCompsDfList_Last[k].to_sql(manifoldIn + "_" + '_principalCompsDf_Last_tw_' + str(tw) + "_" + str(k), localConn, if_exists='replace')
 
-def RunManifoldLearningOnFXPairs(runMode):
+def RunManifoldLearningOnFXPairs(runMode, liftingMode):
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
     processList = []
-    for manifoldIn in ['LLE_Temporal', 'DMAP_GH_Temporal']: #'PCA', 'LLE_Temporal', 'LLE_Spacial', 'DMAP_GH_Spacial'
+    for manifoldIn in ['LLE_Temporal', 'DMAP_GH_Temporal']: #'PCA',
         for tw in twList:
             print(manifoldIn, ",", tw)
             if runMode == 'runPickle':
-                processList.append([df, manifoldIn, tw, runMode])
+                processList.append([df, manifoldIn, tw, runMode, liftingMode])
             elif runMode == 'readPickle':
                 RunManifold([df, manifoldIn, tw, 'readPickle'])
 
@@ -1298,12 +1296,117 @@ def TestGH(mode):
         print(ghDF)
 
     elif mode == 1:
-        #out = sl.AI.gRollingManifold('DMAP_GH', df.iloc[:300,:], 50, 5, [0,1,2,3,4], Scaler='Standard')
-        out = sl.AI.gRollingManifold('DMAP_GH', df.iloc[:300,:], 50, 5, [0,1,2,3,4], Scaler='Standard', ProjectionMode='Temporal')
+        #manifoldIn = 'DMAP_Lift'
+        manifoldIn = 'LLE_Lift'
+        #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 5, [0,1,2,3,4], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='GeometricHarmonics', ProjectionPredictorsMode='OnTheFly')
+        #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 5, [0,1,2,3,4], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='LaplacianPyramids', ProjectionPredictorsMode='OnTheFly')
+        #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 5, [0,1,2,3,4], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='RadialBasis', ProjectionPredictorsMode='OnTheFly')
+        out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 5, [0,1,2,3,4], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='Kriging_GP', ProjectionPredictorsMode='OnTheFly')
 
-    elif mode == 2:
-        #out = sl.AI.gRollingManifold('LLE', df.iloc[:300,:], 50, 5, [0,1,2,3,4], Scaler='Standard')
-        out = sl.AI.gRollingManifold("LLE", df.iloc[:300,:], 50, 5, [0, 1, 2, 3, 4], LLE_n_neighbors=5, ProjectionMode='Temporal')
+def TestRNN():
+    from keras.models import Sequential
+    from keras.layers import Dense, LSTM
+    from numpy import array
+    from numpy.random import uniform
+    from numpy import hstack
+    import matplotlib.pyplot as plt
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_squared_error
+
+    def create_data(n):
+        x1 = array([i / 100 + uniform(-1, 3) for i in range(n)]).reshape(n, 1)
+        x2 = array([i / 100 + uniform(-3, 5) + 2 for i in range(n)]).reshape(n, 1)
+        x3 = array([i / 100 + uniform(-6, 5) - 3 for i in range(n)]).reshape(n, 1)
+
+        y1 = [x1[i] - x2[i] + x3[i] + uniform(-2, 2) for i in range(n)]
+        y2 = [x1[i] + x2[i] - x3[i] + 5 + uniform(-1, 3) for i in range(n)]
+        X = hstack((x1, x2, x3))
+        Y = hstack((y1, y2))
+        return X, Y
+
+    x, y = create_data(n=400)
+    plt.plot(y)
+    plt.show()
+
+    print(x.shape)
+
+    x = x.reshape(x.shape[0], x.shape[1], 1)
+    print("x:", x.shape, "y:", y.shape)
+
+    in_dim = (x.shape[1], x.shape[2])
+    out_dim = y.shape[1]
+    print(in_dim)
+    print(out_dim)
+
+    xtrain, xtest, ytrain, ytest = train_test_split(x, y, test_size=0.15)
+    print("xtrain:", xtrain.shape, "ytrian:", ytrain.shape)
+
+    model = Sequential()
+    model.add(LSTM(64, input_shape=in_dim, activation="relu"))
+    model.add(Dense(out_dim))
+    model.compile(loss="mse", optimizer="adam")
+    model.summary()
+
+    model.fit(xtrain, ytrain, epochs=100, batch_size=12, verbose=0)
+
+    ypred = model.predict(xtest)
+    print("y1 MSE:%.4f" % mean_squared_error(ytest[:, 0], ypred[:, 0]))
+    print("y2 MSE:%.4f" % mean_squared_error(ytest[:, 1], ypred[:, 1]))
+
+    x_ax = range(len(xtest))
+    plt.title("LSTM multi-output prediction")
+    plt.scatter(x_ax, ytest[:, 0], s=6, label="y1-test")
+    plt.plot(x_ax, ypred[:, 0], label="y1-pred")
+    plt.scatter(x_ax, ytest[:, 1], s=6, label="y2-test")
+    plt.plot(x_ax, ypred[:, 1], label="y2-pred")
+    plt.legend()
+    plt.show()
+
+def TestKriging():
+    import sys
+
+    from sklearn.svm import SVR
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.linear_model import LinearRegression
+    from sklearn.datasets import fetch_california_housing
+    from sklearn.model_selection import train_test_split
+
+    from pykrige.rk import RegressionKriging
+
+    svr_model = SVR(C=0.1, gamma="auto")
+    rf_model = RandomForestRegressor(n_estimators=100)
+    lr_model = LinearRegression(normalize=True, copy_X=True, fit_intercept=False)
+
+    models = [svr_model, rf_model, lr_model]
+
+    try:
+        housing = fetch_california_housing()
+    except PermissionError:
+        # this dataset can occasionally fail to download on Windows
+        sys.exit(0)
+
+    print("housing[data].shape = ", housing["data"].shape)
+    print("###################################")
+    print("housing[target].shape = ", housing["target"].shape)
+    #time.sleep(3000)
+
+    # take the first 5000 as Kriging is memory intensive
+    p = housing["data"][:5000, :-2]
+    x = housing["data"][:5000, -2:]
+    target = housing["target"][:5000]
+
+    p_train, p_test, x_train, x_test, target_train, target_test = train_test_split(
+        p, x, target, test_size=0.3, random_state=42
+    )
+
+    for m in models:
+        print("=" * 40)
+        print("regression model:", m.__class__.__name__)
+        m_rk = RegressionKriging(regression_model=m, n_closest_points=10)
+        m_rk.fit(p_train, x_train, target_train)
+        print("Regression Score: ", m_rk.regression_model.score(p_test, target_test))
+        print("RK score: ", m_rk.score(p_test, x_test, target_test))
+
 #####################################################
 
 if __name__ == '__main__':
@@ -1317,8 +1420,9 @@ if __name__ == '__main__':
     #RiskParity('run')
     #RiskParity('plots')
 
-    RunManifoldLearningOnFXPairs('runPickle')
-    RunManifoldLearningOnFXPairs('readPickle')
+    #RunManifoldLearningOnFXPairs('runPickle', 'GeometricHarmonics')
+    #RunManifoldLearningOnFXPairs('runPickle', 'LaplacianPyramids')
+    #RunManifoldLearningOnFXPairs('readPickle')
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
 
@@ -1341,8 +1445,10 @@ if __name__ == '__main__':
 
     #Test()
     #TestGH(0)
-    #TestGH(1)
+    TestGH(1)
     #TestGH(2)
+    #TestRNN()
+    #TestKriging()
     #ContributionAnalysis()
 
     #FinalModel('PnL')

@@ -27,6 +27,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor, GaussianProcessCl
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import RepeatedStratifiedKFold
 from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.api import VAR
 from scipy.stats import skew, kurtosis, norm
 from scipy import stats as st
 from keras.models import Sequential
@@ -47,9 +48,16 @@ from pydiffmap import kernel
 import pydiffmap
 from diffusion_maps import (GeometricHarmonicsInterpolator, DiffusionMaps)
 from hurst import compute_Hc
-#import theano.tensor as tt
-#import pymc3 as pm
-#import arviz as az
+from sklearn.model_selection import cross_val_score, train_test_split
+from skopt import gp_minimize
+from skopt.searchcv import BayesSearchCV
+from skopt.space import Categorical, Integer, Real
+import datafold.dynfold as dfold
+import datafold.pcfold as pfold
+from datafold.dynfold import (
+    GeometricHarmonicsInterpolator as GHI, LaplacianPyramidsInterpolator as LPI, TSCRadialBasis,
+    LocalRegressionSelection,
+)
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import logging
@@ -1148,99 +1156,6 @@ class Slider:
 
         return [testDF, PredictionsDF, gpcparamList]
 
-    def GPR_Walk(df, start, Kernel, rw):
-
-        data_df_raw = df.reset_index()
-        data_df_raw['t'] = data_df_raw.index
-        data_df_raw['y'] = data_df_raw[df.name].fillna(0)
-        data_df = data_df_raw[['t', 'y']]
-        n = len(data_df_raw)
-
-        x = data_df['t'].values.reshape(n, 1)
-        y = data_df['y'].values.reshape(n, 1)
-        n_train = round(start * n)
-        x_train, x_test = x[:n_train], x[n_train:]
-        y_train, y_test = y[:n_train], y[n_train:]
-        idx_train, idx_test = df.index[:n_train], df.index[n_train:]
-
-        gpcparamList = []
-        test_price = []
-        predictions = []
-
-        c = 0
-        for t in tqdm(range(len(x_test))):
-
-            if c > 0:
-                subhistory_X = x_train[-rw:-1]
-                subhistory_y = y_train[-rw:-1]
-            else:
-                subhistory_X = x_train  # [-5:-1]
-                subhistory_y = y_train  # [-5:-1]
-
-            ##########################################################################################
-            newX = x_test[t].reshape(1, -1)
-
-            with pm.Model() as model:
-                # First seasonal component.
-                ls_1 = pm.Gamma(name='ls_1', alpha=2.0, beta=1.0)
-                period_1 = pm.Gamma(name='period_1', alpha=80, beta=2)
-                gp1 = pm.gp.Marginal(cov_func=pm.gp.cov.Periodic(input_dim=1, period=period_1, ls=ls_1))
-                c_3 = pm.Normal(name='c_3', mu=np.mean(x_train), sigma=np.std(x_train))
-                gp2 = pm.gp.Marginal(cov_func=pm.gp.cov.Linear(input_dim=1, c=c_3))
-                gp = gp1 + gp2
-                # Noise.
-                sigma = pm.HalfNormal(name='sigma', sigma=np.std(x_train))
-                # Likelihood.
-                y_pred = gp.marginal_likelihood('y_pred', X=subhistory_X, y=subhistory_y.flatten(), noise=sigma)
-                # Sample.
-                trace = pm.sample(draws=100, chains=3, tune=100)
-
-            with model:
-                #x_train_conditional = gp.conditional('x_train_conditional', subhistory_X)
-                #y_train_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_train_conditional], samples=1)
-
-                x_test_conditional = gp.conditional('x_test_conditional', newX)
-                y_test_pred_samples = pm.sample_posterior_predictive(trace, vars=[x_test_conditional], samples=1)
-
-            ##########################################################################################
-            # Train
-            #y_train_pred_samples_mean = y_train_pred_samples['x_train_conditional'].mean(axis=0)
-            #y_train_pred_samples_std = y_train_pred_samples['x_train_conditional'].std(axis=0)
-            #y_train_pred_samples_mean_plus = y_train_pred_samples_mean + 2 * y_train_pred_samples_std
-            #y_train_pred_samples_mean_minus = y_train_pred_samples_mean - 2 * y_train_pred_samples_std
-            # Test
-            y_test_pred_samples_mean = y_test_pred_samples['x_test_conditional'].mean(axis=0)
-            y_test_pred_samples_std = y_test_pred_samples['x_test_conditional'].std(axis=0)
-            #y_test_pred_samples_mean_plus = y_test_pred_samples_mean + 2 * y_test_pred_samples_std
-            #y_test_pred_samples_mean_minus = y_test_pred_samples_mean - 2 * y_test_pred_samples_std
-
-            #print(y_test_pred_samples_mean)
-            #print(len(y_test_pred_samples_mean))
-            #print(y_test_pred_samples_std)
-            #print(len(y_test_pred_samples_std))
-            #time.sleep(500)
-            ##########################################################################################
-            predictions.append(y_test_pred_samples_mean[0])
-            x_train = np.append(x_train, newX, axis=0)
-            y_train = np.append(y_train, [y_test[t]], axis=0)
-
-            test_price.append(y_test[t][0])
-
-            ###
-            gpcparamList.append(y_test_pred_samples_std)
-
-            c += 1
-
-        # print("len(X_test) = ", len(X_test), ", len(y_test) = ", len(y_test), ", len(idx_test) = ", len(idx_test))
-        # print("len(test_price) = ", len(test_price))
-        # print("len(predictions) = ", len(predictions))
-        # time.sleep(2000)
-
-        testDF = pd.DataFrame(test_price, index=idx_test)
-        PredictionsDF = pd.DataFrame(predictions, index=idx_test)
-
-        return [testDF, PredictionsDF, gpcparamList]
-
     'Arima Dataframe process'
     'Input: list of Dataframe, start: start/window, mode: rolling/expanding, opt: AIC, BIC, (p,d,q)'
 
@@ -1712,6 +1627,29 @@ class Slider:
 
             return data
 
+        def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
+            n_vars = 1 if type(data) is list else data.shape[1]
+            df = pd.DataFrame(data)
+            cols, names = list(), list()
+            # input sequence (t-n, ... t-1)
+            for i in range(n_in, 0, -1):
+                cols.append(df.shift(i))
+                names += [('var%d(t-%d)' % (j + 1, i)) for j in range(n_vars)]
+            # forecast sequence (t, t+1, ... t+n)
+            for i in range(0, n_out):
+                cols.append(df.shift(-i))
+                if i == 0:
+                    names += [('var%d(t)' % (j + 1)) for j in range(n_vars)]
+                else:
+                    names += [('var%d(t+%d)' % (j + 1, i)) for j in range(n_vars)]
+            # put it all together
+            agg = pd.concat(cols, axis=1)
+            agg.columns = names
+            # drop rows with NaN values
+            if dropnan:
+                agg.dropna(inplace=True)
+            return agg
+
         ## MODELS ##
 
         def Pca(df, **kwargs):
@@ -1916,6 +1854,16 @@ class Slider:
             else:
                 ProjectionMode = 'Spacial'
 
+            if 'LiftingMode' in kwargs:
+                LiftingMode = kwargs['LiftingMode']
+            else:
+                LiftingMode = 'GH'
+
+            if 'ProjectionPredictorsMode' in kwargs:
+                ProjectionPredictorsMode = kwargs['ProjectionPredictorsMode']
+            else:
+                ProjectionPredictorsMode = 'OnTheFly'
+
             if 'LLE_n_neighbors' in kwargs:
                 n_neighbors = kwargs['LLE_n_neighbors']
             else:
@@ -1929,11 +1877,16 @@ class Slider:
             print("Projection Mode : ", ProjectionMode)
             print("st = ", st)
             print("len(df0) = ", len(df0))
+            print("df0.columns = ", df0.columns)
 
             Loadings_Target = [[] for j in range(len(eigsPC))]
             Loadings_First = [[] for j in range(len(eigsPC))]
             Loadings_Last = [[] for j in range(len(eigsPC))]
-            Loadings_Temporal = []
+            Loadings_TemporalResidual = []
+            Loadings_Temporal0 = []
+            Loadings_Temporal1 = []
+            Loadings_Temporal2 = []
+            Loadings_Temporal3 = []
             lambdasList = []
             sigmaList = []
             for i in tqdm(range(st, len(df0) + 1)):
@@ -1981,8 +1934,9 @@ class Slider:
                                                               method=LLE_Method, n_jobs=-1)
                         X_lle = lle.fit_transform(x)
 
-                        eps = np.median(pd.DataFrame(squareform(pdist(df))))
-                        dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': 10 * eps}
+                        eps = 10*np.median(pd.DataFrame(squareform(pdist(df))))
+                        cut_off = 10 * eps
+                        dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': cut_off}
 
                         lambdasList.append(1)
                         sigmaList.append(1)
@@ -1996,130 +1950,181 @@ class Slider:
                             Loadings_Last[c].append(evGH(x))
                             c += 1
 
-                    elif manifoldIn == 'DMAP_GH':
-                        df = df.T
-
-                        features = df.columns.values
-                        x = df.loc[:, features].values
-
-                        eps = np.median(pd.DataFrame(squareform(pdist(df))))
-                        cut_off = 100 * eps
-
-                        dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': cut_off}
-                        dm = DiffusionMaps(x, eps, cut_off=cut_off, num_eigenpairs=NumProjections)
-                        ev = dm.eigenvectors
-                        #print(pd.DataFrame(ev))
-
-                        lambdasList.append(list(dm.eigenvalues))
-                        sigmaList.append([eps])
-
-                        c = 0
-                        for eig in eigsPC:
-                            Loadings_Target[c].append(ev[eig, :])
-
-                            evGH = GeometricHarmonicsInterpolator(x, ev[eig, :], eps, dmaps_opts)
-
-                            rel_err1 = (np.linalg.norm(ev[eig, :] - evGH(x), np.inf) / np.linalg.norm(ev[1, :], np.inf))
-                            print(rel_err1)
-
-                            Loadings_First[c].append(evGH(x))
-                            Loadings_Last[c].append(evGH(x))
-                            c += 1
-
-                        #print(pd.DataFrame(Loadings_Target[4]))
-                        #print(pd.DataFrame(Loadings_First[4]))
-                        #time.sleep(3000)
-
-                    elif manifoldIn == 'DMAP_gDmapsRun':
-                        dMapsOut = Slider.AI.gDmaps(df, nD=NumProjections)
-                        dmapsEigsOut = dMapsOut[0]
-                        lambdasList.append(list(dMapsOut[1]))
-                        sigmaList.append(dMapsOut[2])
-                        c = 0
-                        for eig in eigsPC:
-                            Loadings_Target[c].append(dmapsEigsOut.iloc[:, eig])
-                            Loadings_First[c].append(dmapsEigsOut.iloc[:, eig])
-                            Loadings_Last[c].append(dmapsEigsOut.iloc[:, eig])
-                            c += 1
-
-                    elif manifoldIn == 'DMAP_pyDmapsRun':
-                        df = df.T
-                        dMapsOut = Slider.AI.pyDmapsRun(df, nD=NumProjections)
-                        dMapsProjectionOut = dMapsOut[0]
-                        eigFirst = dMapsOut[1]
-                        eigLast = dMapsOut[2]
-                        lambdasList.append(list(dMapsOut[3]))
-                        sigmaList.append(dMapsOut[4])
-                        c = 0
-                        for eig in eigsPC:
-                            Loadings_Target[c].append(dMapsProjectionOut.iloc[:, eig])
-                            Loadings_First[c].append(eigFirst.iloc[:, eig])
-                            Loadings_Last[c].append(eigLast.iloc[:, eig])
-                            c += 1
-
                 elif ProjectionMode == 'Temporal':
 
-                    if manifoldIn == 'LLE': #Temporal --> paper
+                    if manifoldIn in ['DMAP_Lift', 'LLE_Lift']:
 
                         features = df.columns.values
-                        x = df.loc[:, features].values
+                        X_all = df.loc[:, features].values
+                        time_X = np.array(range(len(df))).reshape(len(df), 1)
 
-                        lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
-                                                              method=LLE_Method, n_jobs=-1)
-                        try:
-                            X_lle = lle.fit_transform(x)
-                            X_lle_DF = pd.DataFrame(X_lle)
-                            targetLoadings = X_lle_DF.iloc[-1,:].tolist()
-                            targetLoadings.append(df.index[-1])
-                            Loadings_Temporal.append(targetLoadings)
-                        except Exception as e:
-                            print(i, e)
-                            targetLoadings = [0] * NumProjections
-                            targetLoadings.append(df.index[-1])
-                            Loadings_Temporal.append(targetLoadings)
+                        #print("X_all.shape = ", X_all.shape)
 
-                        lambdasList.append(1)
-                        sigmaList.append(1)
+                        if manifoldIn == 'DMAP_Lift':
+                            pcm = pfold.PCManifold(X_all)
+                            pcm.optimize_parameters(random_state=1)
+                            dmap = dfold.DiffusionMaps(
+                                pfold.GaussianKernel(epsilon=pcm.kernel.epsilon),
+                                n_eigenpairs=len(features),
+                                dist_kwargs=dict(cut_off=pcm.cut_off),
+                            )
 
-                    elif manifoldIn == 'DMAP_GH':
+                            dmap = dmap.fit(pcm)
+                            evecs, evals = dmap.eigenvectors_, dmap.eigenvalues_
 
-                        features = df.columns.values
-                        x = df.loc[:, features].values
+                        elif manifoldIn == 'LLE_Lift':
+                            lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
+                                                                  method=LLE_Method, n_jobs=-1)
+                            evecs = lle.fit_transform(X_all)
 
-                        eps = np.median(pd.DataFrame(squareform(pdist(df))))
-                        cut_off = 100 * eps
+                        #print("evecs.shape = ", evecs.shape)
+                        #print("evals.shape = ", evals.shape)
 
-                        dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': cut_off}
-                        dm = DiffusionMaps(x, eps, cut_off=cut_off, num_eigenpairs=NumProjections)
-                        ev = dm.eigenvectors
+                        selection = LocalRegressionSelection(
+                            intrinsic_dim=NumProjections, n_subsample=len(X_all), strategy="dim"
+                        ).fit(evecs)
 
-                        evGH_List = []
-                        for eigCount in range(NumProjections):
-                            evGH = GeometricHarmonicsInterpolator(x, ev[eigCount, :], eps, dmaps_opts)
-                            evGH_List.append(pd.DataFrame(evGH(x), columns=["col"+str(eigCount)]))
-                        evGH_DF = pd.concat(evGH_List, axis=1)
+                        psi_all = evecs[:, selection.evec_indices_]
+                        #print("selection.evec_indices_ = ", selection.evec_indices_)
+                        #print("type(psi_all) : ", type(psi_all))
+                        #print("psi_all.shape = ", psi_all.shape)
 
-                        try:
-                            targetLoadings = evGH_DF.iloc[-1, :].tolist()
-                            targetLoadings.append(df.index[-1])
-                            Loadings_Temporal.append(targetLoadings)
-                        except Exception as e:
-                            print(i, e)
-                            targetLoadings = [0] * NumProjections
-                            targetLoadings.append(df.index[-1])
-                            Loadings_Temporal.append(targetLoadings)
+                        ################################# PREDICT PSIs ################################
+                        if ProjectionPredictorsMode == 'OnTheFly':
+                            ################################# ARIMA PREDICTOR #################################
+                            try:
+                                arima_model = VAR(psi_all)
+                                arima_model_fit = arima_model.fit()
+                                psi_all_hat_arima_array = arima_model_fit.forecast(arima_model_fit.y, steps=1)
+                                #print("psi_all_hat_arima_array = ", psi_all_hat_arima_array)
+                            except Exception as e:
+                                print(e)
+                                psi_all_hat_arima_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
 
-                        lambdasList.append(1)
-                        sigmaList.append(1)
+                            ################################# GPR PREDICTOR #################################
+                            try:
+                                mainKernel = 1 * Matern()
+                                gpr_model = GaussianProcessRegressor(kernel=mainKernel)
+                                gpr_model_fit = gpr_model.fit(time_X, psi_all)
+                                newX = (time_X[-1]+1).reshape(-1, 1)
+                                psi_all_hat_gpr_array, psi_all_hat_gpr_std_array = gpr_model_fit.predict(newX, return_std=True)
+                                #print("psi_all_hat_gpr_array = ", psi_all_hat_gpr_array)
+                                #print("psi_all_hat_gpr_std_array = ", psi_all_hat_gpr_std_array)
+                            except Exception as e:
+                                print(e)
+                                psi_all_hat_gpr_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
 
-                    elif manifoldIn == 'DMAP_gDmapsRun':
-                        dMapsOut = Slider.AI.gDmaps(df.T, nD=NumProjections)
-                        dmapsEigsOut = dMapsOut[0]
-                        lambdasList.append(list(dMapsOut[1]))
-                        sigmaList.append(dMapsOut[2])
-                        targetLoadings = dmapsEigsOut.iloc[-1,:].tolist()
-                        targetLoadings.append(dmapsEigsOut.index[-1])
-                        Loadings_Temporal.append(targetLoadings)
+                            ################################# RNN PREDICTOR #################################
+
+                            try:
+                                reframed = Slider.AI.series_to_supervised(psi_all)
+                                reframed_x = reframed.iloc[:, :NumProjections]
+                                reframed_y = reframed.iloc[:, NumProjections:]
+
+                                x = (reframed_x.values).reshape(reframed_x.shape[0], reframed_x.shape[1], 1)
+                                y = reframed_y.values
+
+                                in_dim = (x.shape[1], x.shape[2])
+                                out_dim = y.shape[1]
+
+                                xtrain, xtest = x[:-1], x[-1:]
+                                ytrain, ytest = y[:-1], y[-1:]
+                                #print("xtrain:", xtrain.shape, "ytrain:", ytrain.shape)
+                                #print("xtest:", xtest.shape, "ytest:", ytest.shape)
+
+                                model = Sequential()
+                                model.add(LSTM(5, input_shape=in_dim, activation="relu"))
+                                model.add(Dense(out_dim))
+                                model.compile(loss="mse", optimizer="adam")
+                                #model.summary()
+
+                                model.fit(xtrain, ytrain, epochs=1, batch_size=1, verbose=0)
+
+                                psi_all_hat_rnn_array = model.predict(xtest)
+                                #print("psi_all_hat_rnn_array = ", psi_all_hat_rnn_array)
+                            except Exception as e:
+                                print(e)
+                                psi_all_hat_rnn_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                        else:
+                            pass
+
+                        ########################################### LIFTING ###########################################
+                        if LiftingMode == "GeometricHarmonics":
+                            "Geometric Harmonics"
+                            pcm = pfold.PCManifold(psi_all)
+                            pcm.optimize_parameters(random_state=1)
+
+                            opt_epsilon = pcm.kernel.epsilon
+                            opt_cutoff = pcm.cut_off
+                            opt_n_eigenpairs = psi_all.shape[1]
+
+                            gh_interpolant_psi_to_X = GHI(
+                                pfold.GaussianKernel(epsilon=opt_epsilon),
+                                n_eigenpairs=opt_n_eigenpairs,
+                                dist_kwargs=dict(cut_off=opt_cutoff),
+                            )
+
+                            gh_interpolant_psi_to_X.fit(psi_all, X_all)
+
+                            residual = gh_interpolant_psi_to_X.score(psi_all, X_all)
+                            #print("residual = ", residual)
+
+                            #################################### NEXT STEP LIFTING #################################
+                            extrapolatedPsi_to_X_arima = gh_interpolant_psi_to_X.predict(psi_all_hat_arima_array)
+                            extrapolatedPsi_to_X_gpr = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
+                            extrapolatedPsi_to_X_rnn = gh_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)
+
+                        elif LiftingMode == "LaplacianPyramids":
+                            lpyr_interpolant_psi_to_X = LPI(auto_adaptive=True)
+                            lpyr_interpolant_psi_to_X.fit(psi_all, X_all)
+
+                            #################################### NEXT STEP LIFTING #################################
+                            extrapolatedPsi_to_X_arima = lpyr_interpolant_psi_to_X.predict(psi_all_hat_arima_array)
+                            extrapolatedPsi_to_X_gpr = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
+                            extrapolatedPsi_to_X_rnn = lpyr_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)
+
+                        elif LiftingMode == "RadialBasis":
+                            rb_interpolant_psi_to_X = TSCRadialBasis()
+                            rb_out = rb_interpolant_psi_to_X.fit_transform(psi_all, X_all)
+                            print("psi_all.shape = ", psi_all.shape, ", X_all.shape = ", X_all.shape, ", rb_out.shape = ", rb_out.shape)
+                            time.sleep(3000)
+
+                        elif LiftingMode == 'Kriging_GP':
+                            mainKernel_Kriging_GP = 1 * Matern()
+                            gpr_model = GaussianProcessRegressor(kernel=mainKernel_Kriging_GP)
+                            gpr_model_fit = gpr_model.fit(psi_all, X_all)
+
+                            extrapolatedPsi_to_X_arima = gpr_model_fit.predict(psi_all_hat_arima_array)
+                            extrapolatedPsi_to_X_gpr = gpr_model_fit.predict(psi_all_hat_gpr_array)
+                            extrapolatedPsi_to_X_rnn = gpr_model_fit.predict(psi_all_hat_rnn_array)
+
+                        print("extrapolatedPsi_to_X_arima.shape = ", extrapolatedPsi_to_X_arima.shape)
+                        print("extrapolatedPsi_to_X_gpr.shape = ", extrapolatedPsi_to_X_gpr.shape)
+                        print("extrapolatedPsi_to_X_rnn.shape = ", extrapolatedPsi_to_X_rnn.shape)
+                        time.sleep(3000)
+
+                        lambdasList.append(list(evals[selection.evec_indices_]))
+                        sigmaList.append(list(selection.evec_indices_))
+
+                        subOut_residual = list(residual)
+                        subOut_residual.append(df.index[-1])
+                        Loadings_TemporalResidual.append(subOut_residual)
+
+                        subOut0 = list(psi_all[-1,:])
+                        subOut0.append(df.index[-1])
+                        Loadings_Temporal0.append(subOut0)
+
+                        subOut1 = list(extrapolatedPsi_to_X_arima)
+                        subOut1.append(df.index[-1])
+                        Loadings_Temporal1.append(subOut1)
+
+                        subOut2 = list(extrapolatedPsi_to_X_gpr)
+                        subOut2.append(df.index[-1])
+                        Loadings_Temporal2.append(subOut2)
+
+                        subOut3 = list(extrapolatedPsi_to_X_rnn)
+                        subOut3.append(df.index[-1])
+                        Loadings_Temporal3.append(subOut3)
 
             ##########################################################################################################
             "////////////// Lambdas //////////////"
@@ -2170,28 +2175,35 @@ class Slider:
 
             elif ProjectionMode == 'Temporal':
 
-                sub_principalCompsDf_Target = pd.DataFrame(Loadings_Temporal)
-                sub_principalCompsDf_Target.columns = ["col_" + str(x) for x in sub_principalCompsDf_Target.columns]
-                sub_principalCompsDf_Target = sub_principalCompsDf_Target.rename(columns={"col_" + str(len(sub_principalCompsDf_Target.columns) - 1): "Dates"})
-                sub_principalCompsDf_Target = sub_principalCompsDf_Target.set_index('Dates', drop=True)
-                aggDF = pd.concat([df0, sub_principalCompsDf_Target], axis=1).fillna(0)
-                principalCompsDf_Target = aggDF[sub_principalCompsDf_Target.columns]
-                principalCompsDf_First = principalCompsDf_Target.copy()
-                principalCompsDf_Last = principalCompsDf_Target.copy()
+                allrincipalComps_List = []
+                for targetList in [Loadings_TemporalResidual, Loadings_Temporal0,Loadings_Temporal1,Loadings_Temporal2,Loadings_Temporal3]:
+
+                    sub_principalCompsDf = pd.DataFrame(targetList)
+                    sub_principalCompsDf.columns = ["col_" + str(x) for x in sub_principalCompsDf.columns]
+                    sub_principalCompsDf = sub_principalCompsDf.rename(columns={"col_" + str(len(sub_principalCompsDf.columns) - 1): "Dates"})
+                    sub_principalCompsDf = sub_principalCompsDf.set_index('Dates', drop=True)
+                    aggDF0 = pd.concat([df0, sub_principalCompsDf], axis=1).fillna(0)
+                    subOutDf = aggDF0[sub_principalCompsDf.columns]
+                    if len(subOutDf.columns) == len(features):
+                        subOutDf.columns = features
+
+                    allrincipalComps_List.append(subOutDf)
 
             ##########################################################################################################
 
-            #print(principalCompsDf_Target)
-            #print("##########################")
-            #print(principalCompsDf_First)
-            #print("##########################")
-            #print(principalCompsDf_Last)
+            print(lambdasDF)
+            print("##########################")
+            print(sigmaDF)
+            print("##########################")
+            print(allrincipalComps_List[0])
+            print("##########################")
+            print(allrincipalComps_List[1])
+            print("##########################")
+            print(allrincipalComps_List[2])
+            print("##########################")
+            print(allrincipalComps_List[3])
 
-            return [df0, [principalCompsDf_Target, principalCompsDf_First, principalCompsDf_Last], lambdasDF, sigmaDF]
-
-        def gRollingPredictGH(ghDF, st):
-            for i in tqdm(range(st, len(ghDF) + 1)):
-                pass
+            return [df0, allrincipalComps_List, lambdasDF, sigmaDF]
 
         def gANN(X_train, X_test, y_train, params):
             epochsIn = params[0]
