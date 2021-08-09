@@ -1972,22 +1972,28 @@ class Slider:
                             dmap = dmap.fit(pcm)
                             evecs, evals = dmap.eigenvectors_, dmap.eigenvalues_
 
+                            intrinsic_dim_In_LocalRegressionSelection = NumProjections
+
                         elif manifoldIn == 'LLE_Lift':
                             lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
                                                                   method=LLE_Method, n_jobs=-1)
                             evecs = lle.fit_transform(X_all)
 
+                            intrinsic_dim_In_LocalRegressionSelection = NumProjections-1
+
                         #print("evecs.shape = ", evecs.shape)
                         #print("evals.shape = ", evals.shape)
 
                         selection = LocalRegressionSelection(
-                            intrinsic_dim=NumProjections, n_subsample=len(X_all), strategy="dim"
+                            intrinsic_dim=intrinsic_dim_In_LocalRegressionSelection, n_subsample=len(X_all), strategy="dim"
                         ).fit(evecs)
 
                         psi_all = evecs[:, selection.evec_indices_]
                         #print("selection.evec_indices_ = ", selection.evec_indices_)
+                        #print("type(selection.evec_indices_) = ", type(selection.evec_indices_))
                         #print("type(psi_all) : ", type(psi_all))
                         #print("psi_all.shape = ", psi_all.shape)
+                        #time.sleep(3000)
 
                         ################################# PREDICT PSIs ################################
                         if ProjectionPredictorsMode == 'OnTheFly':
@@ -2003,7 +2009,8 @@ class Slider:
 
                             ################################# GPR PREDICTOR #################################
                             try:
-                                mainKernel = 1 * Matern()
+                                mainKernel = 1 * Matern(length_scale=1, nu=0.5) + 1 * DotProduct(sigma_0=1) + \
+                                     1 * RationalQuadratic(alpha=1, length_scale=1) + 1 * ConstantKernel()
                                 gpr_model = GaussianProcessRegressor(kernel=mainKernel)
                                 gpr_model_fit = gpr_model.fit(time_X, psi_all)
                                 newX = (time_X[-1]+1).reshape(-1, 1)
@@ -2038,10 +2045,12 @@ class Slider:
                                 model.compile(loss="mse", optimizer="adam")
                                 #model.summary()
 
-                                model.fit(xtrain, ytrain, epochs=1, batch_size=1, verbose=0)
+                                my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=20)]
+                                model.fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=my_callbacks)
 
                                 psi_all_hat_rnn_array = model.predict(xtest)
                                 #print("psi_all_hat_rnn_array = ", psi_all_hat_rnn_array)
+
                             except Exception as e:
                                 print(e)
                                 psi_all_hat_rnn_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
@@ -2070,18 +2079,20 @@ class Slider:
                             #print("residual = ", residual)
 
                             #################################### NEXT STEP LIFTING #################################
-                            extrapolatedPsi_to_X_arima = gh_interpolant_psi_to_X.predict(psi_all_hat_arima_array)
-                            extrapolatedPsi_to_X_gpr = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
-                            extrapolatedPsi_to_X_rnn = gh_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)
+                            extrapolatedPsi_to_X_arima = gh_interpolant_psi_to_X.predict(psi_all_hat_arima_array)[0]
+                            extrapolatedPsi_to_X_gpr = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)[0]
+                            extrapolatedPsi_to_X_rnn = gh_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)[0]
 
                         elif LiftingMode == "LaplacianPyramids":
                             lpyr_interpolant_psi_to_X = LPI(auto_adaptive=True)
                             lpyr_interpolant_psi_to_X.fit(psi_all, X_all)
 
+                            residual = lpyr_interpolant_psi_to_X.score(psi_all, X_all)
+
                             #################################### NEXT STEP LIFTING #################################
-                            extrapolatedPsi_to_X_arima = lpyr_interpolant_psi_to_X.predict(psi_all_hat_arima_array)
-                            extrapolatedPsi_to_X_gpr = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
-                            extrapolatedPsi_to_X_rnn = lpyr_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)
+                            extrapolatedPsi_to_X_arima = lpyr_interpolant_psi_to_X.predict(psi_all_hat_arima_array)[0]
+                            extrapolatedPsi_to_X_gpr = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)[0]
+                            extrapolatedPsi_to_X_rnn = lpyr_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)[0]
 
                         elif LiftingMode == "RadialBasis":
                             rb_interpolant_psi_to_X = TSCRadialBasis()
@@ -2090,39 +2101,49 @@ class Slider:
                             time.sleep(3000)
 
                         elif LiftingMode == 'Kriging_GP':
-                            mainKernel_Kriging_GP = 1 * Matern()
+                            mainKernel_Kriging_GP = 1 * Matern(length_scale=1, nu=0.5) + 1 * DotProduct(sigma_0=1) + \
+                                     1 * RationalQuadratic(alpha=1, length_scale=1) + 1 * ConstantKernel()
                             gpr_model = GaussianProcessRegressor(kernel=mainKernel_Kriging_GP)
                             gpr_model_fit = gpr_model.fit(psi_all, X_all)
+                            residual = gpr_model_fit.score(psi_all, X_all)
 
-                            extrapolatedPsi_to_X_arima = gpr_model_fit.predict(psi_all_hat_arima_array)
-                            extrapolatedPsi_to_X_gpr = gpr_model_fit.predict(psi_all_hat_gpr_array)
-                            extrapolatedPsi_to_X_rnn = gpr_model_fit.predict(psi_all_hat_rnn_array)
+                            #print("psi_all_hat_arima_array = ", psi_all_hat_arima_array)
+                            #print("psi_all_hat_gpr_array = ", psi_all_hat_gpr_array)
+                            #print("psi_all_hat_rnn_array = ", psi_all_hat_rnn_array)
 
-                        print("extrapolatedPsi_to_X_arima.shape = ", extrapolatedPsi_to_X_arima.shape)
-                        print("extrapolatedPsi_to_X_gpr.shape = ", extrapolatedPsi_to_X_gpr.shape)
-                        print("extrapolatedPsi_to_X_rnn.shape = ", extrapolatedPsi_to_X_rnn.shape)
-                        time.sleep(3000)
+                            extrapolatedPsi_to_X_arima = gpr_model_fit.predict(psi_all_hat_arima_array)[0]
+                            extrapolatedPsi_to_X_gpr = gpr_model_fit.predict(psi_all_hat_gpr_array)[0]
+                            extrapolatedPsi_to_X_rnn = gpr_model_fit.predict(psi_all_hat_rnn_array)[0]
 
-                        lambdasList.append(list(evals[selection.evec_indices_]))
-                        sigmaList.append(list(selection.evec_indices_))
+                        #print("extrapolatedPsi_to_X_arima.shape = ", extrapolatedPsi_to_X_arima.shape)
+                        #print("extrapolatedPsi_to_X_gpr.shape = ", extrapolatedPsi_to_X_gpr.shape)
+                        #print("extrapolatedPsi_to_X_rnn.shape = ", extrapolatedPsi_to_X_rnn.shape)
+                        #time.sleep(3000)
 
-                        subOut_residual = list(residual)
-                        subOut_residual.append(df.index[-1])
-                        Loadings_TemporalResidual.append(subOut_residual)
+                        lambdasList.append(evals[selection.evec_indices_].tolist())
+                        sigmaList.append(selection.evec_indices_.tolist())
 
-                        subOut0 = list(psi_all[-1,:])
+                        #print("isinstance(residual, float) = ", isinstance(residual, float))
+                        if isinstance(residual, float):
+                            Loadings_TemporalResidual.append([residual, df.index[-1]])
+                        else:
+                            subOut_residual = residual.tolist()
+                            subOut_residual.append(df.index[-1])
+                            Loadings_TemporalResidual.append(subOut_residual)
+
+                        subOut0 = psi_all[-1,:].tolist()
                         subOut0.append(df.index[-1])
                         Loadings_Temporal0.append(subOut0)
 
-                        subOut1 = list(extrapolatedPsi_to_X_arima)
+                        subOut1 = extrapolatedPsi_to_X_arima.tolist()
                         subOut1.append(df.index[-1])
                         Loadings_Temporal1.append(subOut1)
 
-                        subOut2 = list(extrapolatedPsi_to_X_gpr)
+                        subOut2 = extrapolatedPsi_to_X_gpr.tolist()
                         subOut2.append(df.index[-1])
                         Loadings_Temporal2.append(subOut2)
 
-                        subOut3 = list(extrapolatedPsi_to_X_rnn)
+                        subOut3 = extrapolatedPsi_to_X_rnn.tolist()
                         subOut3.append(df.index[-1])
                         Loadings_Temporal3.append(subOut3)
 
@@ -2176,7 +2197,7 @@ class Slider:
             elif ProjectionMode == 'Temporal':
 
                 allrincipalComps_List = []
-                for targetList in [Loadings_TemporalResidual, Loadings_Temporal0,Loadings_Temporal1,Loadings_Temporal2,Loadings_Temporal3]:
+                for targetList in [Loadings_TemporalResidual, Loadings_Temporal0, Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3]:
 
                     sub_principalCompsDf = pd.DataFrame(targetList)
                     sub_principalCompsDf.columns = ["col_" + str(x) for x in sub_principalCompsDf.columns]
@@ -2186,6 +2207,7 @@ class Slider:
                     subOutDf = aggDF0[sub_principalCompsDf.columns]
                     if len(subOutDf.columns) == len(features):
                         subOutDf.columns = features
+                    #print("targetList = ", targetList, ", subOutDf = ",subOutDf)
 
                     allrincipalComps_List.append(subOutDf)
 
@@ -2202,6 +2224,8 @@ class Slider:
             print(allrincipalComps_List[2])
             print("##########################")
             print(allrincipalComps_List[3])
+            print("##########################")
+            print(allrincipalComps_List[4])
 
             return [df0, allrincipalComps_List, lambdasDF, sigmaDF]
 
