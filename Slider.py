@@ -1864,6 +1864,11 @@ class Slider:
             else:
                 ProjectionPredictorsMode = 'OnTheFly'
 
+            if 'ProjectionPredictorsActivations' in kwargs:
+                ProjectionPredictorsActivations = kwargs['ProjectionPredictorsActivations']
+            else:
+                ProjectionPredictorsActivations = [1,1,1]
+
             if 'LLE_n_neighbors' in kwargs:
                 n_neighbors = kwargs['LLE_n_neighbors']
             else:
@@ -1883,10 +1888,8 @@ class Slider:
             Loadings_First = [[] for j in range(len(eigsPC))]
             Loadings_Last = [[] for j in range(len(eigsPC))]
             Loadings_TemporalResidual = []
-            Loadings_Temporal0 = []
-            Loadings_Temporal1 = []
-            Loadings_Temporal2 = []
-            Loadings_Temporal3 = []
+            Loadings_Temporal0, Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3 = [], [], [], []
+            Loadings_Temporal4, Loadings_Temporal5, Loadings_Temporal6, Loadings_Temporal7 = [], [], [], []
             lambdasList = []
             sigmaList = []
             for i in tqdm(range(st, len(df0) + 1)):
@@ -1956,7 +1959,6 @@ class Slider:
 
                         features = df.columns.values
                         X_all = df.loc[:, features].values
-                        time_X = np.array(range(len(df))).reshape(len(df), 1)
 
                         #print("X_all.shape = ", X_all.shape)
 
@@ -1996,64 +1998,118 @@ class Slider:
                         #time.sleep(3000)
 
                         ################################# PREDICT PSIs ################################
+                        psi_all_hat_var_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                        psi_all_hat_var_pvals_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
                         if ProjectionPredictorsMode == 'OnTheFly':
                             ################################# ARIMA PREDICTOR #################################
-                            try:
-                                arima_model = VAR(psi_all)
-                                arima_model_fit = arima_model.fit()
-                                psi_all_hat_arima_array = arima_model_fit.forecast(arima_model_fit.y, steps=1)
-                                #print("psi_all_hat_arima_array = ", psi_all_hat_arima_array)
-                            except Exception as e:
-                                print(e)
-                                psi_all_hat_arima_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-
+                            if ProjectionPredictorsActivations[0] == 1:
+                                try:
+                                    var_model = VAR(psi_all)
+                                    var_model_fit = var_model.fit(1)
+                                    psi_all_hat_var_array = var_model_fit.forecast(var_model_fit.y, steps=1)
+                                    #print("psi_all_hat_var_array = ", psi_all_hat_var_array)
+                                    #print("psi_all_hat_var_array[0] = ", psi_all_hat_var_array[0])
+                                    var_pvalues = [x[1] for x in var_model_fit.pvalues[1:]]
+                                    psi_all_hat_var_pvals_array = np.array(var_pvalues)
+                                except Exception as e:
+                                    print(e)
                             ################################# GPR PREDICTOR #################################
-                            try:
-                                mainKernel = 1 * Matern(length_scale=1, nu=0.5) + 1 * DotProduct(sigma_0=1) + \
-                                     1 * RationalQuadratic(alpha=1, length_scale=1) + 1 * ConstantKernel()
-                                gpr_model = GaussianProcessRegressor(kernel=mainKernel)
-                                gpr_model_fit = gpr_model.fit(time_X, psi_all)
-                                newX = (time_X[-1]+1).reshape(-1, 1)
-                                psi_all_hat_gpr_array, psi_all_hat_gpr_std_array = gpr_model_fit.predict(newX, return_std=True)
-                                #print("psi_all_hat_gpr_array = ", psi_all_hat_gpr_array)
-                                #print("psi_all_hat_gpr_std_array = ", psi_all_hat_gpr_std_array)
-                            except Exception as e:
-                                print(e)
-                                psi_all_hat_gpr_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                            psi_all_hat_gpr_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                            psi_all_hat_gpr_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                            if ProjectionPredictorsActivations[1] == 1:
+                                try:
 
-                            ################################# RNN PREDICTOR #################################
+                                    reframed = Slider.AI.series_to_supervised(psi_all)
+                                    #print("reframed = ", reframed.tail(5))
+                                    reframed_x = reframed.loc[:, ["var1(t-1)","var2(t-1)", "var3(t-1)"]]
+                                    xtrain, xtest = (reframed_x.iloc[:-1]).values, (reframed_x.iloc[-1]).values.reshape(1, -1)
 
-                            try:
-                                reframed = Slider.AI.series_to_supervised(psi_all)
-                                reframed_x = reframed.iloc[:, :NumProjections]
-                                reframed_y = reframed.iloc[:, NumProjections:]
+                                    #print(reframed_x.iloc[:-1].tail(5))
+                                    #print(reframed_x.iloc[-1].tail(5))
 
-                                x = (reframed_x.values).reshape(reframed_x.shape[0], reframed_x.shape[1], 1)
-                                y = reframed_y.values
+                                    psi_all_hat_gpr_List = []
+                                    psi_all_hat_gpr_score_List = []
+                                    for targetPsi in ["var1(t)", "var2(t)", "var3(t)"]:
+                                        reframed_y = reframed.loc[:, targetPsi]
+                                        ytrain = (reframed_y.iloc[:-1]).values.reshape(-1, 1)
+                                        #print(targetPsi, ", ytrain = ", ytrain)
 
-                                in_dim = (x.shape[1], x.shape[2])
-                                out_dim = y.shape[1]
+                                        mainKernel = 1 * RBF()
+                                        gpr_model = GaussianProcessRegressor(kernel=mainKernel)
+                                        gpr_model_fit = gpr_model.fit(xtrain, ytrain)
 
-                                xtrain, xtest = x[:-1], x[-1:]
-                                ytrain, ytest = y[:-1], y[-1:]
-                                #print("xtrain:", xtrain.shape, "ytrain:", ytrain.shape)
-                                #print("xtest:", xtest.shape, "ytest:", ytest.shape)
+                                        psi_all_hat_gpr, psi_all_hat_gpr_std = gpr_model_fit.predict(xtest, return_std=True)
+                                        psi_all_hat_gpr_List.append(psi_all_hat_gpr[0][0])
+                                        #psi_all_hat_gpr_std_List.append(psi_all_hat_gpr_std[0])
+                                        #print("gpr_model_fit.score = ", gpr_model_fit.score(xtrain, ytrain))
+                                        psi_all_hat_gpr_score_List.append(gpr_model_fit.score(xtrain, ytrain))
 
-                                model = Sequential()
-                                model.add(LSTM(5, input_shape=in_dim, activation="relu"))
-                                model.add(Dense(out_dim))
-                                model.compile(loss="mse", optimizer="adam")
-                                #model.summary()
+                                    #print(psi_all_hat_gpr_List)
+                                    psi_all_hat_gpr_array = np.array(psi_all_hat_gpr_List)
+                                    psi_all_hat_gpr_score_array = np.array(psi_all_hat_gpr_score_List)
+                                    #print("psi_all_hat_gpr_array = ", psi_all_hat_gpr_array)
+                                    #print("psi_all_hat_gpr_score_array = ", psi_all_hat_gpr_score_array)
+                                    #time.sleep(3000)
+                                except Exception as e:
+                                    print(e)
+                            ################################# NN PREDICTOR #################################
+                            psi_all_hat_rnn_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                            psi_all_hat_rnn_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                            if ProjectionPredictorsActivations[2] == 1:
+                                try:
+                                    reframed = Slider.AI.series_to_supervised(psi_all)
+                                    # print("reframed = ", reframed.tail(5))
+                                    reframed_x = reframed.loc[:, ["var1(t-1)", "var2(t-1)", "var3(t-1)"]]
+                                    xtrain, xtest = (reframed_x.iloc[:-1]).values, (reframed_x.iloc[-1]).values.reshape(1, -1)
 
-                                my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=20)]
-                                model.fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=my_callbacks)
+                                    ### Scale the inputs ###
+                                    #sc_X = StandardScaler()
+                                    #xtrain = sc_X.fit_transform(xtrain)
 
-                                psi_all_hat_rnn_array = model.predict(xtest)
-                                #print("psi_all_hat_rnn_array = ", psi_all_hat_rnn_array)
+                                    # print(reframed_x.iloc[:-1].tail(5))
+                                    # print(reframed_x.iloc[-1].tail(5))
 
-                            except Exception as e:
-                                print(e)
-                                psi_all_hat_rnn_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                                    psi_all_hat_nn_List = []
+                                    psi_all_hat_nn_score_List = []
+                                    for targetPsi in ["var1(t)", "var2(t)", "var3(t)"]:
+                                        reframed_y = reframed.loc[:, targetPsi]
+                                        ytrain = (reframed_y.iloc[:-1]).values.reshape(-1, 1)
+
+                                        #sc_Y = StandardScaler()
+                                        #ytrain = sc_Y.fit_transform(ytrain)
+                                        #print(targetPsi, ", xtrain = ", xtrain, ", ytrain = ", ytrain)
+
+                                        model = Sequential()
+                                        #model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
+                                        model.add(Dense(3, input_shape=xtrain.shape, activation="relu"))
+                                        model.add(Dense(1))
+                                        model.compile(loss="mse", optimizer="adam")
+                                        #model.summary()
+
+                                        my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=20)]
+                                        model.fit(xtrain, ytrain, epochs=2, batch_size=5, verbose=0, callbacks=my_callbacks)
+
+                                        nn_pred = model.predict(xtest)[0][0]
+                                        #inv_nn_pred = sc_Y.inverse_transform(nn_pred)
+                                        #print("nn_pred = ", nn_pred)
+                                        #print("inv_nn_pred = ", inv_nn_pred)
+                                        nn_evaluation = model.evaluate(xtrain, ytrain, verbose=0)
+                                        #print("nn_evaluation = ", nn_evaluation)
+                                        psi_all_hat_nn_List.append(nn_pred)
+                                        psi_all_hat_nn_score_List.append(nn_evaluation)
+
+                                    psi_all_hat_rnn_array = np.array(psi_all_hat_nn_List)
+                                    psi_all_hat_rnn_score_array = np.array(psi_all_hat_nn_score_List)
+                                    #print("psi_all_hat_rnn_array = ", psi_all_hat_rnn_array)
+                                    #print("psi_all_hat_rnn_score_array = ", psi_all_hat_rnn_score_array)
+                                    #time.sleep(3000)
+                                except Exception as e:
+                                    print(e)
+
+                            psi_all_hat_var_array = psi_all_hat_var_array.reshape(1, -1)
+                            psi_all_hat_gpr_array = psi_all_hat_gpr_array.reshape(1, -1)
+                            psi_all_hat_rnn_array = psi_all_hat_rnn_array.reshape(1, -1)
+
                         else:
                             pass
 
@@ -2062,47 +2118,41 @@ class Slider:
                             "Geometric Harmonics"
                             pcm = pfold.PCManifold(psi_all)
                             pcm.optimize_parameters(random_state=1)
-
                             opt_epsilon = pcm.kernel.epsilon
                             opt_cutoff = pcm.cut_off
                             opt_n_eigenpairs = psi_all.shape[1]
-
                             gh_interpolant_psi_to_X = GHI(
                                 pfold.GaussianKernel(epsilon=opt_epsilon),
                                 n_eigenpairs=opt_n_eigenpairs,
                                 dist_kwargs=dict(cut_off=opt_cutoff),
                             )
-
                             gh_interpolant_psi_to_X.fit(psi_all, X_all)
-
                             residual = gh_interpolant_psi_to_X.score(psi_all, X_all)
-                            #print("residual = ", residual)
 
                             #################################### NEXT STEP LIFTING #################################
-                            extrapolatedPsi_to_X_arima = gh_interpolant_psi_to_X.predict(psi_all_hat_arima_array)[0]
-                            extrapolatedPsi_to_X_gpr = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)[0]
-                            extrapolatedPsi_to_X_rnn = gh_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)[0]
-
+                            extrapolatedPsi_to_X_arima = gh_interpolant_psi_to_X.predict(psi_all_hat_var_array)
+                            extrapolatedPsi_to_X_gpr = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
+                            extrapolatedPsi_to_X_rnn = gh_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)
                         elif LiftingMode == "LaplacianPyramids":
                             lpyr_interpolant_psi_to_X = LPI(auto_adaptive=True)
                             lpyr_interpolant_psi_to_X.fit(psi_all, X_all)
-
                             residual = lpyr_interpolant_psi_to_X.score(psi_all, X_all)
 
                             #################################### NEXT STEP LIFTING #################################
-                            extrapolatedPsi_to_X_arima = lpyr_interpolant_psi_to_X.predict(psi_all_hat_arima_array)[0]
-                            extrapolatedPsi_to_X_gpr = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)[0]
-                            extrapolatedPsi_to_X_rnn = lpyr_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)[0]
-
+                            extrapolatedPsi_to_X_arima = lpyr_interpolant_psi_to_X.predict(psi_all_hat_var_array)
+                            extrapolatedPsi_to_X_gpr = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
+                            extrapolatedPsi_to_X_rnn = lpyr_interpolant_psi_to_X.predict(psi_all_hat_rnn_array)
                         elif LiftingMode == "RadialBasis":
                             rb_interpolant_psi_to_X = TSCRadialBasis()
                             rb_out = rb_interpolant_psi_to_X.fit_transform(psi_all, X_all)
-                            print("psi_all.shape = ", psi_all.shape, ", X_all.shape = ", X_all.shape, ", rb_out.shape = ", rb_out.shape)
-                            time.sleep(3000)
+                            rb_out_ivnerse = rb_interpolant_psi_to_X.inverse_transform(X_all)
 
+                            print("psi_all.shape = ", psi_all.shape, ", X_all.shape = ", X_all.shape, ", rb_out.shape = ", rb_out.shape,
+                                  ", rb_out_ivnerse.shape = ", rb_out_ivnerse.shape)
+                            print("rb_interpolant_psi_to_X.inv_coeff_matrix_.shape = ", rb_interpolant_psi_to_X.inv_coeff_matrix_.shape)
+                            time.sleep(3000)
                         elif LiftingMode == 'Kriging_GP':
-                            mainKernel_Kriging_GP = 1 * Matern(length_scale=1, nu=0.5) + 1 * DotProduct(sigma_0=1) + \
-                                     1 * RationalQuadratic(alpha=1, length_scale=1) + 1 * ConstantKernel()
+                            mainKernel_Kriging_GP = 1 * RBF()
                             gpr_model = GaussianProcessRegressor(kernel=mainKernel_Kriging_GP)
                             gpr_model_fit = gpr_model.fit(psi_all, X_all)
                             residual = gpr_model_fit.score(psi_all, X_all)
@@ -2111,10 +2161,19 @@ class Slider:
                             #print("psi_all_hat_gpr_array = ", psi_all_hat_gpr_array)
                             #print("psi_all_hat_rnn_array = ", psi_all_hat_rnn_array)
 
-                            extrapolatedPsi_to_X_arima = gpr_model_fit.predict(psi_all_hat_arima_array)[0]
+                            extrapolatedPsi_to_X_arima = gpr_model_fit.predict(psi_all_hat_var_array)[0]
                             extrapolatedPsi_to_X_gpr = gpr_model_fit.predict(psi_all_hat_gpr_array)[0]
                             extrapolatedPsi_to_X_rnn = gpr_model_fit.predict(psi_all_hat_rnn_array)[0]
 
+                        #print("psi_all_hat_var_array = ", psi_all_hat_var_array)
+                        #print("psi_all_hat_gpr_array = ", psi_all_hat_gpr_array)
+                        #print("psi_all_hat_rnn_array = ", psi_all_hat_rnn_array)
+                        #print("var_pvalues = ", var_pvalues)
+                        #print("psi_all_hat_gpr_score_array = ", psi_all_hat_gpr_score_array)
+                        #print("psi_all_hat_rnn_score_array = ", psi_all_hat_rnn_score_array)
+                        #print("extrapolatedPsi_to_X_arima = ", extrapolatedPsi_to_X_arima)
+                        #print("extrapolatedPsi_to_X_gpr = ", extrapolatedPsi_to_X_gpr)
+                        #print("extrapolatedPsi_to_X_rnn = ", extrapolatedPsi_to_X_rnn)
                         #print("extrapolatedPsi_to_X_arima.shape = ", extrapolatedPsi_to_X_arima.shape)
                         #print("extrapolatedPsi_to_X_gpr.shape = ", extrapolatedPsi_to_X_gpr.shape)
                         #print("extrapolatedPsi_to_X_rnn.shape = ", extrapolatedPsi_to_X_rnn.shape)
@@ -2135,17 +2194,33 @@ class Slider:
                         subOut0.append(df.index[-1])
                         Loadings_Temporal0.append(subOut0)
 
-                        subOut1 = extrapolatedPsi_to_X_arima.tolist()
+                        subOut1 = psi_all_hat_var_pvals_array.tolist()
                         subOut1.append(df.index[-1])
-                        Loadings_Temporal1.append(subOut1)
+                        Loadings_Temporal1.append(subOut1) # Do not manage the dates
 
-                        subOut2 = extrapolatedPsi_to_X_gpr.tolist()
+                        subOut2 = psi_all_hat_gpr_score_array.tolist()
                         subOut2.append(df.index[-1])
                         Loadings_Temporal2.append(subOut2)
 
-                        subOut3 = extrapolatedPsi_to_X_rnn.tolist()
+                        subOut3 = psi_all_hat_rnn_score_array.tolist()
                         subOut3.append(df.index[-1])
                         Loadings_Temporal3.append(subOut3)
+
+                        subOut4 = extrapolatedPsi_to_X_arima.tolist()
+                        subOut4.append(df.index[-1])
+                        Loadings_Temporal4.append(subOut4)
+
+                        subOut5 = extrapolatedPsi_to_X_gpr.tolist()
+                        subOut5.append(df.index[-1])
+                        Loadings_Temporal5.append(subOut5)
+
+                        subOut6 = extrapolatedPsi_to_X_rnn.tolist()
+                        subOut6.append(df.index[-1])
+                        Loadings_Temporal6.append(subOut6)
+
+                        ###############################################################################################
+                        #Loadings_Temporal7.append(subOut7)
+                        ###############################################################################################
 
             ##########################################################################################################
             "////////////// Lambdas //////////////"
@@ -2197,7 +2272,8 @@ class Slider:
             elif ProjectionMode == 'Temporal':
 
                 allrincipalComps_List = []
-                for targetList in [Loadings_TemporalResidual, Loadings_Temporal0, Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3]:
+                for targetList in [Loadings_TemporalResidual, Loadings_Temporal0, Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3,
+                                   Loadings_Temporal4, Loadings_Temporal5, Loadings_Temporal6]:
 
                     sub_principalCompsDf = pd.DataFrame(targetList)
                     sub_principalCompsDf.columns = ["col_" + str(x) for x in sub_principalCompsDf.columns]
@@ -2226,6 +2302,12 @@ class Slider:
             print(allrincipalComps_List[3])
             print("##########################")
             print(allrincipalComps_List[4])
+            print("##########################")
+            print(allrincipalComps_List[5])
+            print("##########################")
+            print(allrincipalComps_List[6])
+            print("##########################")
+            print(allrincipalComps_List[7])
 
             return [df0, allrincipalComps_List, lambdasDF, sigmaDF]
 
