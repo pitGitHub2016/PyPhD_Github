@@ -1458,7 +1458,7 @@ if __name__ == '__main__':
     #RiskParity('run')
     #RiskParity('plots')
 
-    #RunManifoldLearningOnFXPairs('runPickle')
+    RunManifoldLearningOnFXPairs('runPickle')
     #RunManifoldLearningOnFXPairs('readPickle')
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
@@ -1484,7 +1484,7 @@ if __name__ == '__main__':
 
     #Test()
     #TestGH(0)
-    TestGH(1)
+    #TestGH(1)
     #TestGH(2)
     #TestRNN()
     #TestKriging()
