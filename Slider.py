@@ -1905,11 +1905,8 @@ class Slider:
             Loadings_Last = [[] for j in range(len(eigsPC))]
             Loadings_TemporalResidual = []
             Loadings_Temporal0, Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3, \
-            Loadings_Temporal4, Loadings_Temporal5, Loadings_Temporal6 = [], [], [], [], [], [], []
-            NN_SYSTEMS = ['NN0', 'NN1']
-            Loadings_Temporal_NN_PSI_PREDICTIONS = [[] for j in range(len(NN_SYSTEMS))]
-            Loadings_Temporal_NN_PSI_PREDICTIONS_SCORES = [[] for j in range(len(NN_SYSTEMS))]
-            Loadings_Temporal_extrapolatedPsi_to_X_NN = [[] for j in range(len(NN_SYSTEMS))]
+            Loadings_Temporal4, Loadings_Temporal5, Loadings_Temporal6, Loadings_Temporal7, \
+            Loadings_Temporal8, Loadings_Temporal9, Loadings_Temporal10, Loadings_Temporal11, Loadings_Temporal12 = [], [], [], [], [], [], [], [], [], [], [], [], []
             lambdasList = []
             sigmaList = []
             for i in tqdm(range(st, len(df0) + 1)):
@@ -2014,9 +2011,7 @@ class Slider:
                         ################################# PREDICT PSIs ################################
                         psi_all_hat_var_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
                         psi_all_hat_var_pvals_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                        ###################################################################################
                         ################################# ARIMA PREDICTOR #################################
-                        ###################################################################################
                         if ProjectionPredictorsActivations[0] == 1:
                             try:
                                 varTrainData = psi_all[-ProjectionPredictorsMemory:]
@@ -2027,9 +2022,7 @@ class Slider:
                                 psi_all_hat_var_pvals_array = np.array(var_pvalues)
                             except Exception as e:
                                 print(e)
-                        ###################################################################################
                         ################################# GPR PREDICTOR ###################################
-                        ###################################################################################
                         psi_all_hat_gpr_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
                         psi_all_hat_gpr_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
                         if ProjectionPredictorsActivations[1] == 1:
@@ -2064,14 +2057,9 @@ class Slider:
 
                                 psi_all_hat_gpr_array = np.array(psi_all_hat_gpr_List).reshape(1, -1)
                                 psi_all_hat_gpr_score_array = np.array(psi_all_hat_gpr_score_List)
-
                             except Exception as e:
                                 print("GPR Error : ", e)
-                        ###################################################################################
-                        ################################# NN PREDICTORS ###################################
-                        ###################################################################################
-
-                        #try:
+                        ################################# NN PREDICTORs ###################################
                         nnTrainData = psi_all[-ProjectionPredictorsMemory:]
                         reframed = Slider.AI.series_to_supervised(nnTrainData)
                         reframed_x = reframed.loc[:, ["var1(t-1)", "var2(t-1)", "var3(t-1)"]]
@@ -2079,66 +2067,82 @@ class Slider:
                         y_Names = ["var1(t)", "var2(t)", "var3(t)"]
                         reframed_y = reframed.loc[:, y_Names]
 
-                        "NN Initialising"
-                        if i == st:
-                            nn_model_List = []
-                            for nnSys in NN_SYSTEMS:
+                        latest_xtest_entry_is_the_latest_y = reframed_y.values[-1].reshape(1, -1)
+
+                        if ProjectionPredictorsActivations[2] == 1:
+                            psi_all_hat_nn1_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                            psi_all_hat_nn1_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+
+                            "NN Initialising"
+                            if i == st:
+                                nn1_model_List = []
                                 for targetPsi in y_Names:
-                                    if nnSys == NN_SYSTEMS[0]:
-                                        subModel = Sequential()
-                                        # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(3, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(1))
-                                        subModel.compile(loss="mse", optimizer="adam")
-                                    elif nnSys == NN_SYSTEMS[1]:
-                                        subModel = Sequential()
-                                        # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(5, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(3))
-                                        subModel.add(Dense(1))
-                                        subModel.compile(loss="mse", optimizer="adam")
+                                    subModel = Sequential()
+                                    # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(3, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(1))
+                                    subModel.compile(loss="mse", optimizer="adam")
+                                    nn1_model_List.append([targetPsi, subModel])
 
-                                    nn_model_List.append([nnSys, targetPsi, subModel])
+                            ##########################################################################################
+                            #try:
 
-                        ##########################################################################################
-                        NN_PSI_PREDICTORS_LIST = []
-                        for nnSys in NN_SYSTEMS:
-                            sub_nn_model_List = [x for x in nn_model_List if x[0] == nnSys]
+                            psi_all_hat_nn1_List = []
+                            psi_all_hat_nn1_score_List = []
+                            for nn1_model_data in nn1_model_List:
 
-                            psi_all_hat_nn_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                            psi_all_hat_nn_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                                ytrain = reframed.loc[:, nn1_model_data[0]].values.reshape(-1, 1)
 
-                            psi_all_hat_nn_List = []
-                            psi_all_hat_nn_score_List = []
-                            for nn_model_data in sub_nn_model_List:
+                                nn1_model_data[1].fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=[tf.keras.callbacks.EarlyStopping(patience=20)])
 
-                                #try:
-                                single_reframed_y = reframed.loc[:, nn_model_data[1]]
-                                ytrain = single_reframed_y.values.reshape(-1, 1)
-                                latest_xtest_entry_is_the_latest_y = reframed_y.values[-1].reshape(1, -1)
+                                nn1_pred = nn1_model_data[1].predict(latest_xtest_entry_is_the_latest_y)[0][0]
+                                nn1_evaluation = nn1_model_data[1].evaluate(xtrain, ytrain, verbose=0)
+                                psi_all_hat_nn1_List.append(nn1_pred)
+                                psi_all_hat_nn1_score_List.append(nn1_evaluation)
 
-                                my_callbacks = [tf.keras.callbacks.EarlyStopping(patience=20)]
-                                nn_model_data[2].fit(xtrain, ytrain, epochs=2, batch_size=5, verbose=0, callbacks=my_callbacks)
+                                psi_all_hat_nn1_array = np.array(psi_all_hat_nn1_List).reshape(1, -1)
+                                psi_all_hat_nn1_score_array = np.array(psi_all_hat_nn1_score_List)
 
-                                nn_pred = nn_model_data[2].predict(latest_xtest_entry_is_the_latest_y)[0][0]
-                                nn_evaluation = nn_model_data[2].evaluate(xtrain, ytrain, verbose=0)
-                                psi_all_hat_nn_List.append(nn_pred)
-                                psi_all_hat_nn_score_List.append(nn_evaluation)
+                            #except Exception as e:
+                            #    print("NN1 Error : ", e)
+                        if ProjectionPredictorsActivations[3] == 1:
+                            psi_all_hat_nn2_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                            psi_all_hat_nn2_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
 
-                                psi_all_hat_nn_array = np.array(psi_all_hat_nn_List).reshape(1, -1)
-                                psi_all_hat_nn_score_array = np.array(psi_all_hat_nn_score_List)
-                                #except Exception as e:
-                                #    print("nnSys = ", nnSys, " (NN Error) : ", e)
+                            #try:
 
-                            "get predictions to final list"
-                            NN_PSI_PREDICTORS_LIST.append([nnSys, psi_all_hat_nn_array, psi_all_hat_nn_score_array])
+                            "NN Initialising"
+                            if i == st:
+                                nn2_model_List = []
+                                for targetPsi in y_Names:
+                                    subModel = Sequential()
+                                    # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(5, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(3))
+                                    subModel.add(Dense(1))
+                                    subModel.compile(loss="mse", optimizer="adam")
+                                    nn2_model_List.append([targetPsi, subModel])
 
-                        ############################## print for checking ################################
-                        #print("psi_all_hat_var_array = ", psi_all_hat_var_array)
-                        #print("psi_all_hat_gpr_array = ", psi_all_hat_gpr_array)
-                        #for jn in range(len(NN_PSI_PREDICTORS_LIST)):
-                        #    print("(NN_PSI_PREDICTORS_LIST["+str(jn)+"]), ", NN_PSI_PREDICTORS_LIST[jn])
-                        #time.sleep(3000)
+                            ##########################################################################################
+
+                            psi_all_hat_nn2_List = []
+                            psi_all_hat_nn2_score_List = []
+                            for nn2_model_data in nn2_model_List:
+
+                                ytrain = reframed.loc[:, nn2_model_data[0]].values.reshape(-1, 1)
+
+                                nn2_model_data[1].fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=[tf.keras.callbacks.EarlyStopping(patience=20)])
+
+                                nn2_pred = nn2_model_data[1].predict(latest_xtest_entry_is_the_latest_y)[0][0]
+                                nn2_evaluation = nn2_model_data[1].evaluate(xtrain, ytrain, verbose=0)
+                                psi_all_hat_nn2_List.append(nn2_pred)
+                                psi_all_hat_nn2_score_List.append(nn2_evaluation)
+
+                                psi_all_hat_nn2_array = np.array(psi_all_hat_nn2_List).reshape(1, -1)
+                                psi_all_hat_nn2_score_array = np.array(psi_all_hat_nn2_score_List)
+
+                            #except Exception as e:
+                            #    print("NN2 Error : ", e)
 
                         ########################################### LIFTING ###########################################
                         if LiftingMode == "GeometricHarmonics":
@@ -2159,10 +2163,8 @@ class Slider:
                             #################################### NEXT STEP LIFTING #################################
                             extrapolatedPsi_to_X_var = gh_interpolant_psi_to_X.predict(psi_all_hat_var_array)
                             extrapolatedPsi_to_X_gpr = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
-                            extrapolatedPsi_to_X_NN_List = []
-                            for nnPredictData in NN_PSI_PREDICTORS_LIST:
-                                extrapolatedPsi_to_X_nn = gh_interpolant_psi_to_X.predict(nnPredictData[1])
-                                extrapolatedPsi_to_X_NN_List.append([nnPredictData[0], extrapolatedPsi_to_X_nn])
+                            extrapolatedPsi_to_X_nn1 = gh_interpolant_psi_to_X.predict(psi_all_hat_nn1_array)
+                            extrapolatedPsi_to_X_nn2 = gh_interpolant_psi_to_X.predict(psi_all_hat_nn2_array)
                         elif LiftingMode == "LaplacianPyramids":
                             lpyr_interpolant_psi_to_X = LPI(auto_adaptive=True)
                             lpyr_interpolant_psi_to_X.fit(psi_all, X_all)
@@ -2171,10 +2173,8 @@ class Slider:
                             #################################### NEXT STEP LIFTING #################################
                             extrapolatedPsi_to_X_var = lpyr_interpolant_psi_to_X.predict(psi_all_hat_var_array)
                             extrapolatedPsi_to_X_gpr = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
-                            extrapolatedPsi_to_X_NN_List = []
-                            for nnPredictData in NN_PSI_PREDICTORS_LIST:
-                                extrapolatedPsi_to_X_nn = lpyr_interpolant_psi_to_X.predict(nnPredictData[1])
-                                extrapolatedPsi_to_X_NN_List.append([nnPredictData[0], extrapolatedPsi_to_X_nn])
+                            extrapolatedPsi_to_X_nn1 = lpyr_interpolant_psi_to_X.predict(psi_all_hat_nn1_array)
+                            extrapolatedPsi_to_X_nn2 = lpyr_interpolant_psi_to_X.predict(psi_all_hat_nn2_array)
                         elif LiftingMode == 'Kriging_GP':
                             mainKernel_Kriging_GP = 1 * RBF()
                             gpr_model = GaussianProcessRegressor(kernel=mainKernel_Kriging_GP)
@@ -2183,24 +2183,25 @@ class Slider:
 
                             extrapolatedPsi_to_X_var = gpr_model_fit.predict(psi_all_hat_var_array)[0]
                             extrapolatedPsi_to_X_gpr = gpr_model_fit.predict(psi_all_hat_gpr_array)[0]
-                            extrapolatedPsi_to_X_NN_List = []
-                            for nnPredictData in NN_PSI_PREDICTORS_LIST:
-                                extrapolatedPsi_to_X_nn = gpr_model_fit.predict(nnPredictData[1])
-                                extrapolatedPsi_to_X_NN_List.append([nnPredictData[0], extrapolatedPsi_to_X_nn])
+                            extrapolatedPsi_to_X_nn1 = gpr_model_fit.predict(psi_all_hat_nn1_array)[0]
+                            extrapolatedPsi_to_X_nn2 = gpr_model_fit.predict(psi_all_hat_nn2_array)[0]
 
-                        #print("psi_all_hat_var_array = ", psi_all_hat_var_array)
-                        #print("var_pvalues = ", var_pvalues)
-                        #print("psi_all_hat_gpr_score_array = ", psi_all_hat_gpr_score_array)
-                        #print("extrapolatedPsi_to_X_var = ", extrapolatedPsi_to_X_var)
-                        #print("extrapolatedPsi_to_X_gpr = ", extrapolatedPsi_to_X_gpr)
-                        #print("extrapolatedPsi_to_X_var.shape = ", extrapolatedPsi_to_X_var.shape)
-                        #print("extrapolatedPsi_to_X_gpr.shape = ", extrapolatedPsi_to_X_gpr.shape)
+                        print("psi_all_hat_var_array = ", psi_all_hat_var_array)
+                        print("var_pvalues = ", var_pvalues)
+                        print("psi_all_hat_gpr_score_array = ", psi_all_hat_gpr_score_array)
+                        print("extrapolatedPsi_to_X_var = ", extrapolatedPsi_to_X_var)
+                        print("extrapolatedPsi_to_X_gpr = ", extrapolatedPsi_to_X_gpr)
+                        print("extrapolatedPsi_to_X_nn1 = ", extrapolatedPsi_to_X_nn1)
+                        print("extrapolatedPsi_to_X_nn2 = ", extrapolatedPsi_to_X_nn2)
+                        print("extrapolatedPsi_to_X_var.shape = ", extrapolatedPsi_to_X_var.shape)
+                        print("extrapolatedPsi_to_X_gpr.shape = ", extrapolatedPsi_to_X_gpr.shape)
+                        print("extrapolatedPsi_to_X_nn1.shape = ", extrapolatedPsi_to_X_nn1.shape)
+                        print("extrapolatedPsi_to_X_nn2.shape = ", extrapolatedPsi_to_X_nn2.shape)
                         #time.sleep(3000)
 
                         lambdasList.append(evals[selection.evec_indices_].tolist())
                         sigmaList.append(selection.evec_indices_.tolist())
 
-                        #print("isinstance(residual, float) = ", isinstance(residual, float))
                         if isinstance(residual, float):
                             Loadings_TemporalResidual.append([residual, latestDate_index])
                         else:
@@ -2213,7 +2214,7 @@ class Slider:
                         Loadings_Temporal0.append(subOut0)
 
                         ######## VAR ########
-                        subOut1 = psi_all_hat_var_array.tolist()
+                        subOut1 = psi_all_hat_var_array[0].tolist()
                         subOut1.append(latestDate_index)
                         Loadings_Temporal1.append(subOut1)
 
@@ -2227,7 +2228,7 @@ class Slider:
 
                         ######## GPR ########
 
-                        subOut4 = psi_all_hat_gpr_array.tolist()
+                        subOut4 = psi_all_hat_gpr_array[0].tolist()
                         subOut4.append(latestDate_index)
                         Loadings_Temporal4.append(subOut4)
 
@@ -2239,23 +2240,33 @@ class Slider:
                         subOut6.append(latestDate_index)
                         Loadings_Temporal6.append(subOut6)
 
-                        ######## NNs ########
+                        ######## NN1 ########
 
-                        for nndata_i in range(len(NN_PSI_PREDICTORS_LIST)):
-                            subOut_nn_Psi_Preds = NN_PSI_PREDICTORS_LIST[nndata_i][1].tolist()
-                            subOut_nn_Psi_Preds.append(latestDate_index)
+                        subOut7 = psi_all_hat_nn1_array[0].tolist()
+                        subOut7.append(latestDate_index)
+                        Loadings_Temporal7.append(subOut7)
 
-                            subOut_nn_Psi_Preds_Scores = NN_PSI_PREDICTORS_LIST[nndata_i][2].tolist()
-                            subOut_nn_Psi_Preds_Scores.append(latestDate_index)
+                        subOut8 = psi_all_hat_nn1_score_array.tolist()
+                        subOut8.append(latestDate_index)
+                        Loadings_Temporal8.append(subOut8)
 
-                            Loadings_Temporal_NN_PSI_PREDICTIONS[nndata_i] = subOut_nn_Psi_Preds
-                            Loadings_Temporal_NN_PSI_PREDICTIONS_SCORES[nndata_i] = subOut_nn_Psi_Preds_Scores
+                        subOut9 = extrapolatedPsi_to_X_nn1.tolist()
+                        subOut9.append(latestDate_index)
+                        Loadings_Temporal9.append(subOut9)
 
-                        for extrapolated_nndata_i in range(len(extrapolatedPsi_to_X_NN_List)):
-                            subOut_extrapolated_nn_Psi_Preds = extrapolatedPsi_to_X_NN_List[extrapolated_nndata_i][1].tolist()
-                            subOut_extrapolated_nn_Psi_Preds.append(latestDate_index)
+                        ######## NN2 ########
 
-                            Loadings_Temporal_extrapolatedPsi_to_X_NN[extrapolated_nndata_i] = subOut_extrapolated_nn_Psi_Preds
+                        subOut10 = psi_all_hat_nn2_array[0].tolist()
+                        subOut10.append(latestDate_index)
+                        Loadings_Temporal10.append(subOut10)
+
+                        subOut11 = psi_all_hat_nn2_score_array.tolist()
+                        subOut11.append(latestDate_index)
+                        Loadings_Temporal11.append(subOut11)
+
+                        subOut12 = extrapolatedPsi_to_X_nn2.tolist()
+                        subOut12.append(latestDate_index)
+                        Loadings_Temporal12.append(subOut12)
 
                         #print("len(NN_PSI_PREDICTORS_LIST) = ", len(NN_PSI_PREDICTORS_LIST))
                         #print("len(extrapolatedPsi_to_X_NN_List) = ", len(extrapolatedPsi_to_X_NN_List))
@@ -2312,31 +2323,26 @@ class Slider:
 
             elif ProjectionMode == 'Temporal':
 
-                allprincipalComps_List = []
-                for targetList in [[Loadings_TemporalResidual, "Loadings_TemporalResidual"], [Loadings_Temporal0, "Loadings_Temporal0"], [Loadings_Temporal1, "Loadings_Temporal1"],
-                    [Loadings_Temporal2, "Loadings_Temporal2"], [Loadings_Temporal3, "Loadings_Temporal3"], [Loadings_Temporal4, "Loadings_Temporal4"], [Loadings_Temporal5, "Loadings_Temporal5"],
-                    [Loadings_Temporal6, "Loadings_Temporal6"]]:
+                allData_List = []
+                for targetList in [[Loadings_TemporalResidual, "Loadings_TemporalResidual"], [Loadings_Temporal0, "psi_all"],
+                                   [Loadings_Temporal1, "psi_all_hat_var_array"], [Loadings_Temporal2, "psi_all_hat_var_pvals_array"], [Loadings_Temporal3, "extrapolatedPsi_to_X_var"],
+                                   [Loadings_Temporal4, "psi_all_hat_gpr_array"], [Loadings_Temporal5, "psi_all_hat_gpr_score_array"], [Loadings_Temporal6, "extrapolatedPsi_to_X_gpr"],
+                                   [Loadings_Temporal7, "psi_all_hat_nn1_array"], [Loadings_Temporal8, "psi_all_hat_nn1_score_array"], [Loadings_Temporal9, "extrapolatedPsi_to_X_nn1"],
+                                   [Loadings_Temporal10, "psi_all_hat_nn2_array"], [Loadings_Temporal11, "psi_all_hat_nn2_score_array"], [Loadings_Temporal12, "extrapolatedPsi_to_X_nn2"]]:
                     print(targetList[1])
                     med_df = MakeDatedDF(targetList[0], df0, features)
-                    allprincipalComps_List.append([targetList[1], med_df])
+                    allData_List.append([targetList[1], med_df])
 
-                for targetList in [[Loadings_Temporal_NN_PSI_PREDICTIONS, "Loadings_Temporal_NN_PSI_PREDICTIONS"],
-                                   [Loadings_Temporal_NN_PSI_PREDICTIONS_SCORES, "Loadings_Temporal_NN_PSI_PREDICTIONS_SCORES"],
-                                   [Loadings_Temporal_extrapolatedPsi_to_X_NN, "Loadings_Temporal_extrapolatedPsi_to_X_NN"]]:
-                    print(targetList[1])
-                    for subi in range(len(targetList[0])):
-                        med_df = MakeDatedDF(targetList[0][subi], df0, features)
-                        allprincipalComps_List.append([targetList[1], subi, med_df])
             ##########################################################################################################
 
             print(lambdasDF)
             print("##########################")
             print(sigmaDF)
             print("##########################")
-            for ci in range(len(allprincipalComps_List)):
-                print(allprincipalComps_List[ci])
+            for subList in allData_List:
+                print(subList)
 
-            return [df0, allprincipalComps_List, lambdasDF, sigmaDF]
+            return [df0, allData_List, lambdasDF, sigmaDF]
 
         def gANN(X_train, X_test, y_train, params):
             epochsIn = params[0]
