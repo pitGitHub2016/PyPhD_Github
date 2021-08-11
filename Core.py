@@ -375,7 +375,7 @@ def RunManifold(argList):
             elif manifoldIn in ['DMAP_Lift', 'LLE_Lift']:
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 3, [0, 1, 2], Scaler='Standard',
                                              ProjectionMode='Temporal', LiftingMode=liftingMode,
-                                             ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsMemory=125, ProjectionPredictorsActivations=[1,1,1,1])
+                                             ProjectionPredictorsMemory=125, ProjectionPredictorsActivations=[1,1,1,1])
         else:
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard',
@@ -383,7 +383,7 @@ def RunManifold(argList):
             elif manifoldIn in ['DMAP_Lift', 'LLE_Lift']:
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 3, [0, 1, 2], Scaler='Standard',
                                              ProjectionMode='Temporal', LiftingMode=liftingMode,
-                                             ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsMemory=125, RollMode='ExpWindow', ProjectionPredictorsActivations=[1,1,1,1])
+                                             ProjectionPredictorsMemory=125, RollMode='ExpWindow', ProjectionPredictorsActivations=[1,1,1,1])
 
         pickle.dump(out, open("Repo\Embeddings\\" + manifoldIn + "_" + liftingMode + "_" + str(tw) + ".p", "wb"))
 
@@ -1336,7 +1336,7 @@ def TestGH(mode):
         manifoldIn = 'DMAP_Lift'
         #manifoldIn = 'LLE_Lift'
         out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1555,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',
-                                     LiftingMode='GeometricHarmonics', ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsActivations=[1,1,1,1])
+                                     LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='LaplacianPyramids', ProjectionPredictorsMode='OnTheFly')
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='RadialBasis', ProjectionPredictorsMode='OnTheFly')
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='Kriging_GP', ProjectionPredictorsMode='OnTheFly')
