@@ -1335,7 +1335,7 @@ def TestGH(mode):
     elif mode == 1:
         manifoldIn = 'DMAP_Lift'
         #manifoldIn = 'LLE_Lift'
-        out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1555,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',
+        out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',
                                      LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='LaplacianPyramids', ProjectionPredictorsMode='OnTheFly')
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='RadialBasis', ProjectionPredictorsMode='OnTheFly')
