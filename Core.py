@@ -24,9 +24,7 @@ warnings.filterwarnings('ignore')
 conn = sqlite3.connect('FXeodData_FxData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
-twList = [25]
-#twList = [25, 100, 150, 250]
-#twList = [25, 100, 150, 250, 'ExpWindow25']
+twList = [500] # 500, 10000
 
 def DataHandler(mode):
 
@@ -369,18 +367,15 @@ def RunManifold(argList):
     runMode = argList[3]
     liftingMode = argList[4]
 
-    print([manifoldIn, tw, liftingMode])
-
     if runMode == 'runPickle':
 
         if tw != 'ExpWindow25':
-            print(manifoldIn + " tw = ", tw)
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard')
             elif manifoldIn in ['DMAP_Lift', 'LLE_Lift']:
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 3, [0, 1, 2], Scaler='Standard',
                                              ProjectionMode='Temporal', LiftingMode=liftingMode,
-                                             ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsActivations=[1,1,1])
+                                             ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsMemory=125, ProjectionPredictorsActivations=[1,1,1,1])
         else:
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard',
@@ -388,7 +383,7 @@ def RunManifold(argList):
             elif manifoldIn in ['DMAP_Lift', 'LLE_Lift']:
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 3, [0, 1, 2], Scaler='Standard',
                                              ProjectionMode='Temporal', LiftingMode=liftingMode,
-                                             ProjectionPredictorsMode='OnTheFly', RollMode='ExpWindow')
+                                             ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsMemory=125, RollMode='ExpWindow', ProjectionPredictorsActivations=[1,1,1,1])
 
         pickle.dump(out, open("Repo\Embeddings\\" + manifoldIn + "_" + liftingMode + "_" + str(tw) + ".p", "wb"))
 
@@ -417,7 +412,7 @@ def RunManifoldLearningOnFXPairs(runMode):
                 if runMode == 'runPickle':
                     processList.append([df, manifoldIn, tw, runMode, liftingMode])
                 elif runMode == 'readPickle':
-                    RunManifold([df, manifoldIn, tw, 'readPickle'])
+                    RunManifold([df, manifoldIn, tw, 'readPickle', liftingMode])
 
     print("Total Processes = ", len(processList))
 
@@ -1340,8 +1335,8 @@ def TestGH(mode):
     elif mode == 1:
         manifoldIn = 'DMAP_Lift'
         #manifoldIn = 'LLE_Lift'
-        out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1050,:], 25, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',
-                                     LiftingMode='GeometricHarmonics', ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsActivations=[1,1,1])
+        out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1555,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',
+                                     LiftingMode='GeometricHarmonics', ProjectionPredictorsMode='OnTheFly', ProjectionPredictorsActivations=[1,1,1,1])
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='LaplacianPyramids', ProjectionPredictorsMode='OnTheFly')
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='RadialBasis', ProjectionPredictorsMode='OnTheFly')
         #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='Kriging_GP', ProjectionPredictorsMode='OnTheFly')
@@ -1463,7 +1458,7 @@ if __name__ == '__main__':
     #RiskParity('run')
     #RiskParity('plots')
 
-    RunManifoldLearningOnFXPairs('runPickle')
+    #RunManifoldLearningOnFXPairs('runPickle')
     #RunManifoldLearningOnFXPairs('readPickle')
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
@@ -1489,7 +1484,7 @@ if __name__ == '__main__':
 
     #Test()
     #TestGH(0)
-    #TestGH(1)
+    TestGH(1)
     #TestGH(2)
     #TestRNN()
     #TestKriging()
