@@ -46,7 +46,6 @@ from tqdm import tqdm
 from sklearn.metrics import mean_squared_error
 from pydiffmap import kernel
 import pydiffmap
-from diffusion_maps import (GeometricHarmonicsInterpolator, DiffusionMaps)
 from hurst import compute_Hc
 from sklearn.model_selection import cross_val_score, train_test_split
 from skopt import gp_minimize
@@ -1941,7 +1940,6 @@ class Slider:
                             Loadings_First[c].append(list(pca.components_[eig]))
                             Loadings_Last[c].append(list(pca.components_[eig]))
                             c += 1
-
                     elif manifoldIn == 'LLE':
                         df = df.T
                         features = df.columns.values
@@ -1972,176 +1970,195 @@ class Slider:
                             Loadings_Last[c].append(evGH(x))
                             c += 1
                 elif ProjectionMode == 'Temporal':
-                    if manifoldIn in ['DMAP_Lift', 'LLE_Lift']:
 
-                        features = df.columns.values
-                        X_all = df.loc[:, features].values
+                    features = df.columns.values
+                    X_all = df.loc[:, features].values
 
-                        #print("X_all.shape = ", X_all.shape)
+                    #print("X_all.shape = ", X_all.shape)
 
-                        if manifoldIn == 'DMAP_Lift':
-                            pcm = pfold.PCManifold(X_all)
-                            pcm.optimize_parameters(random_state=1)
-                            dmap = dfold.DiffusionMaps(
-                                pfold.GaussianKernel(epsilon=pcm.kernel.epsilon),
-                                n_eigenpairs=len(features),
-                                dist_kwargs=dict(cut_off=pcm.cut_off),
-                            )
+                    if manifoldIn == 'PCA_Lift':
+                        pca = PCA(n_components=NumProjections)
+                        evecs = pca.fit_transform(X_all)
+                        evals = pca.singular_values_
+                        explainedVariance = pca.explained_variance_
+                        explainedVarianceRatio = pca.explained_variance_ratio_
+                        PCAcomponents = pca.components_
+                        #print("evecs.shape",evecs.shape)
+                        #print("evals.shape",evals.shape)
+                        #print("explainedVariance.shape",explainedVariance.shape)
+                        #print("explainedVarianceRatio.shape",explainedVarianceRatio.shape)
+                        #print("PCAcomponents.shape",PCAcomponents.shape)
+                        #print("PCAcomponents[1,:].shape",PCAcomponents[1,:].shape)
+                        #time.sleep(3000)
 
-                            dmap = dmap.fit(pcm)
-                            evecs, evals = dmap.eigenvectors_, dmap.eigenvalues_
+                    elif manifoldIn == 'DMAP_Lift':
+                        pcm = pfold.PCManifold(X_all)
+                        pcm.optimize_parameters(random_state=1)
+                        dmap = dfold.DiffusionMaps(
+                            pfold.GaussianKernel(epsilon=pcm.kernel.epsilon),
+                            n_eigenpairs=len(features),
+                            dist_kwargs=dict(cut_off=pcm.cut_off),
+                        )
 
-                            intrinsic_dim_In_LocalRegressionSelection = NumProjections
-                        elif manifoldIn == 'LLE_Lift':
-                            lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
-                                                                  method=LLE_Method, n_jobs=-1)
-                            evecs = lle.fit_transform(X_all)
+                        dmap = dmap.fit(pcm)
+                        evecs, evals = dmap.eigenvectors_, dmap.eigenvalues_
 
-                            intrinsic_dim_In_LocalRegressionSelection = NumProjections-1
+                        intrinsic_dim_In_LocalRegressionSelection = NumProjections
+                    elif manifoldIn == 'LLE_Lift':
+                        lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
+                                                              method=LLE_Method, n_jobs=-1)
+                        evecs = lle.fit_transform(X_all)
 
-                        #print("evecs.shape = ", evecs.shape)
-                        #print("evals.shape = ", evals.shape)
+                        intrinsic_dim_In_LocalRegressionSelection = NumProjections-1
 
+                    #print("evecs.shape = ", evecs.shape)
+                    #print("evals.shape = ", evals.shape)
+
+                    if manifoldIn not in ['PCA_Lift']:
                         selection = LocalRegressionSelection(
                             intrinsic_dim=intrinsic_dim_In_LocalRegressionSelection, n_subsample=len(X_all), strategy="dim"
                         ).fit(evecs)
 
                         psi_all = evecs[:, selection.evec_indices_]
+                    else:
+                        psi_all = evecs
 
-                        ################################# PREDICT PSIs ################################
-                        psi_all_hat_var_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                        psi_all_hat_var_pvals_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                        ################################# ARIMA PREDICTOR #################################
-                        if ProjectionPredictorsActivations[0] == 1:
-                            try:
-                                varTrainData = psi_all[-ProjectionPredictorsMemory:]
-                                var_model = VAR(varTrainData)
-                                var_model_fit = var_model.fit(1)
-                                psi_all_hat_var_array = var_model_fit.forecast(var_model_fit.y, steps=1).reshape(1, -1)
-                                var_pvalues = [x[1] for x in var_model_fit.pvalues[1:]]
-                                psi_all_hat_var_pvals_array = np.array(var_pvalues)
-                            except Exception as e:
-                                print("VAR Error : ")
-                                print(e)
-                        ################################# GPR PREDICTOR ###################################
-                        psi_all_hat_gpr_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                        psi_all_hat_gpr_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                        if ProjectionPredictorsActivations[1] == 1:
-                            try:
-                                gprTrainData = psi_all[-ProjectionPredictorsMemory:]
-                                reframed = Slider.AI.series_to_supervised(gprTrainData)
-                                reframed_x = reframed.loc[:, ["var1(t-1)", "var2(t-1)", "var3(t-1)"]]
-                                xtrain = reframed_x.values
-                                y_Names = ["var1(t)", "var2(t)", "var3(t)"]
-                                reframed_y = reframed.loc[:, y_Names]
+                    ################################# PREDICT PSIs ################################
+                    psi_all_hat_var_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                    psi_all_hat_var_pvals_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                    ################################# ARIMA PREDICTOR #################################
+                    if ProjectionPredictorsActivations[0] == 1:
+                        try:
+                            varTrainData = psi_all[-ProjectionPredictorsMemory:]
+                            var_model = VAR(varTrainData)
+                            var_model_fit = var_model.fit(1)
+                            psi_all_hat_var_array = var_model_fit.forecast(var_model_fit.y, steps=1).reshape(1, -1)
+                            var_pvalues = [x[1] for x in var_model_fit.pvalues[1:]]
+                            psi_all_hat_var_pvals_array = np.array(var_pvalues)
+                        except Exception as e:
+                            print("VAR Error : ")
+                            print(e)
+                    ################################# GPR PREDICTOR ###################################
+                    psi_all_hat_gpr_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                    psi_all_hat_gpr_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                    if ProjectionPredictorsActivations[1] == 1:
+                        try:
+                            gprTrainData = psi_all[-ProjectionPredictorsMemory:]
+                            reframed = Slider.AI.series_to_supervised(gprTrainData)
+                            reframed_x = reframed.loc[:, ["var1(t-1)", "var2(t-1)", "var3(t-1)"]]
+                            xtrain = reframed_x.values
+                            y_Names = ["var1(t)", "var2(t)", "var3(t)"]
+                            reframed_y = reframed.loc[:, y_Names]
 
-                                if i == st:
-                                    gpr_model_List = []
-                                    mainKernel = 1 * RBF()
-                                    for targetPsi in y_Names:
-                                        subModel = GaussianProcessRegressor(kernel=mainKernel)
-                                        gpr_model_List.append([targetPsi, subModel])
+                            if i == st:
+                                gpr_model_List = []
+                                mainKernel = 1 * RBF()
+                                for targetPsi in y_Names:
+                                    subModel = GaussianProcessRegressor(kernel=mainKernel)
+                                    gpr_model_List.append([targetPsi, subModel])
 
-                                psi_all_hat_gpr_List = []
-                                psi_all_hat_gpr_score_List = []
-                                for gpr_model_data in gpr_model_List:
-                                    "gpr_model_data = [targetpsi, gpr_model]"
-                                    single_reframed_y = reframed.loc[:, gpr_model_data[0]]
-                                    ytrain = single_reframed_y.values.reshape(-1, 1)
-                                    latest_xtest_entry_is_the_latest_y = reframed_y.values[-1].reshape(1, -1)
+                            psi_all_hat_gpr_List = []
+                            psi_all_hat_gpr_score_List = []
+                            for gpr_model_data in gpr_model_List:
+                                "gpr_model_data = [targetpsi, gpr_model]"
+                                single_reframed_y = reframed.loc[:, gpr_model_data[0]]
+                                ytrain = single_reframed_y.values.reshape(-1, 1)
+                                latest_xtest_entry_is_the_latest_y = reframed_y.values[-1].reshape(1, -1)
 
-                                    gpr_model_fit = gpr_model_data[1].fit(xtrain, ytrain)
+                                gpr_model_fit = gpr_model_data[1].fit(xtrain, ytrain)
 
-                                    psi_all_hat_gpr, psi_all_hat_gpr_std_1 = gpr_model_fit.predict(latest_xtest_entry_is_the_latest_y, return_std=True)
-                                    psi_all_hat_gpr_List.append(psi_all_hat_gpr[0][0])
-                                    psi_all_hat_gpr_score_List.append(gpr_model_fit.score(xtrain, ytrain))
+                                psi_all_hat_gpr, psi_all_hat_gpr_std_1 = gpr_model_fit.predict(latest_xtest_entry_is_the_latest_y, return_std=True)
+                                psi_all_hat_gpr_List.append(psi_all_hat_gpr[0][0])
+                                psi_all_hat_gpr_score_List.append(gpr_model_fit.score(xtrain, ytrain))
 
-                                psi_all_hat_gpr_array = np.array(psi_all_hat_gpr_List).reshape(1, -1)
-                                psi_all_hat_gpr_score_array = np.array(psi_all_hat_gpr_score_List)
-                            except Exception as e:
-                                print("GPR Error : ")
-                                print(e)
-                        ################################# NN PREDICTORs ###################################
-                        nnTrainData = psi_all[-ProjectionPredictorsMemory:]
-                        reframed = Slider.AI.series_to_supervised(nnTrainData)
-                        reframed_x = reframed.loc[:, ["var1(t-1)", "var2(t-1)", "var3(t-1)"]]
-                        xtrain = reframed_x.values
-                        y_Names = ["var1(t)", "var2(t)", "var3(t)"]
-                        reframed_y = reframed.loc[:, y_Names]
+                            psi_all_hat_gpr_array = np.array(psi_all_hat_gpr_List).reshape(1, -1)
+                            psi_all_hat_gpr_score_array = np.array(psi_all_hat_gpr_score_List)
+                        except Exception as e:
+                            print("GPR Error : ")
+                            print(e)
+                    ################################# NN PREDICTORs ###################################
+                    nnTrainData = psi_all[-ProjectionPredictorsMemory:]
+                    reframed = Slider.AI.series_to_supervised(nnTrainData)
+                    reframed_x = reframed.loc[:, ["var1(t-1)", "var2(t-1)", "var3(t-1)"]]
+                    xtrain = reframed_x.values
+                    y_Names = ["var1(t)", "var2(t)", "var3(t)"]
+                    reframed_y = reframed.loc[:, y_Names]
 
-                        latest_xtest_entry_is_the_latest_y = reframed_y.values[-1].reshape(1, -1)
+                    latest_xtest_entry_is_the_latest_y = reframed_y.values[-1].reshape(1, -1)
 
-                        if ProjectionPredictorsActivations[2] == 1:
-                            psi_all_hat_nn1_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                            psi_all_hat_nn1_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                            try:
+                    if ProjectionPredictorsActivations[2] == 1:
+                        psi_all_hat_nn1_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                        psi_all_hat_nn1_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                        try:
 
-                                "NN Initialising"
-                                if i == st:
-                                    nn1_model_List = []
-                                    for targetPsi in y_Names:
-                                        subModel = Sequential()
-                                        # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(3, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(1))
-                                        subModel.compile(loss="mse", optimizer="adam")
-                                        nn1_model_List.append([targetPsi, subModel])
+                            "NN Initialising"
+                            if i == st:
+                                nn1_model_List = []
+                                for targetPsi in y_Names:
+                                    subModel = Sequential()
+                                    # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(3, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(1))
+                                    subModel.compile(loss="mse", optimizer="adam")
+                                    nn1_model_List.append([targetPsi, subModel])
 
-                                psi_all_hat_nn1_List = []
-                                psi_all_hat_nn1_score_List = []
-                                for nn1_model_data in nn1_model_List:
+                            psi_all_hat_nn1_List = []
+                            psi_all_hat_nn1_score_List = []
+                            for nn1_model_data in nn1_model_List:
 
-                                    ytrain = reframed.loc[:, nn1_model_data[0]].values.reshape(-1, 1)
+                                ytrain = reframed.loc[:, nn1_model_data[0]].values.reshape(-1, 1)
 
-                                    nn1_model_data[1].fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=[tf.keras.callbacks.EarlyStopping(patience=20)])
+                                nn1_model_data[1].fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=[tf.keras.callbacks.EarlyStopping(patience=20)])
 
-                                    nn1_pred = nn1_model_data[1].predict(latest_xtest_entry_is_the_latest_y)[0][0]
-                                    nn1_evaluation = nn1_model_data[1].evaluate(xtrain, ytrain, verbose=0)
-                                    psi_all_hat_nn1_List.append(nn1_pred)
-                                    psi_all_hat_nn1_score_List.append(nn1_evaluation)
+                                nn1_pred = nn1_model_data[1].predict(latest_xtest_entry_is_the_latest_y)[0][0]
+                                nn1_evaluation = nn1_model_data[1].evaluate(xtrain, ytrain, verbose=0)
+                                psi_all_hat_nn1_List.append(nn1_pred)
+                                psi_all_hat_nn1_score_List.append(nn1_evaluation)
 
-                                    psi_all_hat_nn1_array = np.array(psi_all_hat_nn1_List).reshape(1, -1)
-                                    psi_all_hat_nn1_score_array = np.array(psi_all_hat_nn1_score_List)
-                            except Exception as e:
-                                print("NN1 Error : ")
-                                print(e)
-                        if ProjectionPredictorsActivations[3] == 1:
-                            psi_all_hat_nn2_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                            psi_all_hat_nn2_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
-                            try:
-                                "NN Initialising"
-                                if i == st:
-                                    nn2_model_List = []
-                                    for targetPsi in y_Names:
-                                        subModel = Sequential()
-                                        # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(5, input_shape=xtrain.shape, activation="relu"))
-                                        subModel.add(Dense(3))
-                                        subModel.add(Dense(1))
-                                        subModel.compile(loss="mse", optimizer="adam")
-                                        nn2_model_List.append([targetPsi, subModel])
+                                psi_all_hat_nn1_array = np.array(psi_all_hat_nn1_List).reshape(1, -1)
+                                psi_all_hat_nn1_score_array = np.array(psi_all_hat_nn1_score_List)
+                        except Exception as e:
+                            print("NN1 Error : ")
+                            print(e)
+                    if ProjectionPredictorsActivations[3] == 1:
+                        psi_all_hat_nn2_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                        psi_all_hat_nn2_score_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
+                        try:
+                            "NN Initialising"
+                            if i == st:
+                                nn2_model_List = []
+                                for targetPsi in y_Names:
+                                    subModel = Sequential()
+                                    # model.add(LSTM(3, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(5, input_shape=xtrain.shape, activation="relu"))
+                                    subModel.add(Dense(3))
+                                    subModel.add(Dense(1))
+                                    subModel.compile(loss="mse", optimizer="adam")
+                                    nn2_model_List.append([targetPsi, subModel])
 
-                                ##########################################################################################
+                            ##########################################################################################
 
-                                psi_all_hat_nn2_List = []
-                                psi_all_hat_nn2_score_List = []
-                                for nn2_model_data in nn2_model_List:
+                            psi_all_hat_nn2_List = []
+                            psi_all_hat_nn2_score_List = []
+                            for nn2_model_data in nn2_model_List:
 
-                                    ytrain = reframed.loc[:, nn2_model_data[0]].values.reshape(-1, 1)
+                                ytrain = reframed.loc[:, nn2_model_data[0]].values.reshape(-1, 1)
 
-                                    nn2_model_data[1].fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=[tf.keras.callbacks.EarlyStopping(patience=20)])
+                                nn2_model_data[1].fit(xtrain, ytrain, epochs=50, batch_size=1, verbose=0, callbacks=[tf.keras.callbacks.EarlyStopping(patience=20)])
 
-                                    nn2_pred = nn2_model_data[1].predict(latest_xtest_entry_is_the_latest_y)[0][0]
-                                    nn2_evaluation = nn2_model_data[1].evaluate(xtrain, ytrain, verbose=0)
-                                    psi_all_hat_nn2_List.append(nn2_pred)
-                                    psi_all_hat_nn2_score_List.append(nn2_evaluation)
+                                nn2_pred = nn2_model_data[1].predict(latest_xtest_entry_is_the_latest_y)[0][0]
+                                nn2_evaluation = nn2_model_data[1].evaluate(xtrain, ytrain, verbose=0)
+                                psi_all_hat_nn2_List.append(nn2_pred)
+                                psi_all_hat_nn2_score_List.append(nn2_evaluation)
 
-                                    psi_all_hat_nn2_array = np.array(psi_all_hat_nn2_List).reshape(1, -1)
-                                    psi_all_hat_nn2_score_array = np.array(psi_all_hat_nn2_score_List)
-                            except Exception as e:
-                                print("NN2 Error : ")
-                                print(e)
-                        ########################################### LIFTING ###########################################
+                                psi_all_hat_nn2_array = np.array(psi_all_hat_nn2_List).reshape(1, -1)
+                                psi_all_hat_nn2_score_array = np.array(psi_all_hat_nn2_score_List)
+                        except Exception as e:
+                            print("NN2 Error : ")
+                            print(e)
+
+                    ########################################### LIFTING ###########################################
+                    if manifoldIn not in ['PCA_Lift']:
                         if LiftingMode == "GeometricHarmonics":
                             try:
                                 "Geometric Harmonics"
@@ -2194,19 +2211,6 @@ class Slider:
                             except Exception as e:
                                 print("Kriging_GP : ")
                                 print(e)
-
-                        #print("psi_all_hat_var_array = ", psi_all_hat_var_array)
-                        #print("var_pvalues = ", var_pvalues)
-                        #print("psi_all_hat_gpr_score_array = ", psi_all_hat_gpr_score_array)
-                        #print("extrapolatedPsi_to_X_var = ", extrapolatedPsi_to_X_var)
-                        #print("extrapolatedPsi_to_X_gpr = ", extrapolatedPsi_to_X_gpr)
-                        #print("extrapolatedPsi_to_X_nn1 = ", extrapolatedPsi_to_X_nn1)
-                        #print("extrapolatedPsi_to_X_nn2 = ", extrapolatedPsi_to_X_nn2)
-                        #print("extrapolatedPsi_to_X_var.shape = ", extrapolatedPsi_to_X_var.shape)
-                        #print("extrapolatedPsi_to_X_gpr.shape = ", extrapolatedPsi_to_X_gpr.shape)
-                        #print("extrapolatedPsi_to_X_nn1.shape = ", extrapolatedPsi_to_X_nn1.shape)
-                        #print("extrapolatedPsi_to_X_nn2.shape = ", extrapolatedPsi_to_X_nn2.shape)
-                        #time.sleep(3000)
 
                         try:
                             lambdasList.append(evals[selection.evec_indices_].tolist())
@@ -2280,12 +2284,76 @@ class Slider:
                         except Exception as e:
                             print("List Appends Error : ", latestDate_index)
                             print(e)
+                    else:
+                        try:
+                            lambdasList.append(evals.tolist())
+                            sigmaList.append(explainedVariance.tolist())
 
-                        #print("len(NN_PSI_PREDICTORS_LIST) = ", len(NN_PSI_PREDICTORS_LIST))
-                        #print("len(extrapolatedPsi_to_X_NN_List) = ", len(extrapolatedPsi_to_X_NN_List))
-                        #print("len(Loadings_Temporal_NN_PSI_PREDICTIONS) = ", len(Loadings_Temporal_NN_PSI_PREDICTIONS))
-                        #print("len(Loadings_Temporal_extrapolatedPsi_to_X_NN) = ", len(Loadings_Temporal_extrapolatedPsi_to_X_NN))
-                        #time.sleep(3000)
+                            subOut_residual = explainedVarianceRatio.tolist()
+                            subOut_residual.append(df.index[-1])
+                            Loadings_TemporalResidual.append(subOut_residual)
+
+                            subOut0 = psi_all[-1,:].tolist()
+                            subOut0.append(latestDate_index)
+                            Loadings_Temporal0.append(subOut0)
+
+                            ######## VAR ########
+                            subOut1 = psi_all_hat_var_array[0].tolist()
+                            subOut1.append(latestDate_index)
+                            Loadings_Temporal1.append(subOut1)
+
+                            subOut2 = psi_all_hat_var_pvals_array.tolist()
+                            subOut2.append(latestDate_index)
+                            Loadings_Temporal2.append(subOut2)
+
+                            subOut3 = PCAcomponents[0,:].tolist()
+                            subOut3.append(latestDate_index)
+                            Loadings_Temporal3.append(subOut3)
+
+                            ######## GPR ########
+
+                            subOut4 = psi_all_hat_gpr_array[0].tolist()
+                            subOut4.append(latestDate_index)
+                            Loadings_Temporal4.append(subOut4)
+
+                            subOut5 = psi_all_hat_gpr_score_array.tolist()
+                            subOut5.append(latestDate_index)
+                            Loadings_Temporal5.append(subOut5)
+
+                            subOut6 = PCAcomponents[1,:].tolist()
+                            subOut6.append(latestDate_index)
+                            Loadings_Temporal6.append(subOut6)
+
+                            ######## NN1 ########
+
+                            subOut7 = psi_all_hat_nn1_array[0].tolist()
+                            subOut7.append(latestDate_index)
+                            Loadings_Temporal7.append(subOut7)
+
+                            subOut8 = psi_all_hat_nn1_score_array.tolist()
+                            subOut8.append(latestDate_index)
+                            Loadings_Temporal8.append(subOut8)
+
+                            subOut9 = PCAcomponents[2,:].tolist()
+                            subOut9.append(latestDate_index)
+                            Loadings_Temporal9.append(subOut9)
+
+                            ######## NN2 ########
+
+                            subOut10 = psi_all_hat_nn2_array[0].tolist()
+                            subOut10.append(latestDate_index)
+                            Loadings_Temporal10.append(subOut10)
+
+                            subOut11 = psi_all_hat_nn2_score_array.tolist()
+                            subOut11.append(latestDate_index)
+                            Loadings_Temporal11.append(subOut11)
+
+                            subOut12 = PCAcomponents[0,:].tolist()
+                            subOut12.append(latestDate_index)
+                            Loadings_Temporal12.append(subOut12)
+                        except Exception as e:
+                            print("List Appends Error : ", latestDate_index)
+                            print(e)
 
             ##########################################################################################################
             try:
@@ -2345,7 +2413,6 @@ class Slider:
                     else:
                         principalCompsDf_First[k] = principalCompsDf_Target[k].copy()
                         principalCompsDf_Last[k] = principalCompsDf_Target[k].copy()
-
             elif ProjectionMode == 'Temporal':
 
                 allData_List = []
