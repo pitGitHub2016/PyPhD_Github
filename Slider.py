@@ -2142,10 +2142,6 @@ class Slider:
                                 print("NN2 Error : ")
                                 print(e)
                         ########################################### LIFTING ###########################################
-                        extrapolatedPsi_to_X_var = np.resize([np.nan] * len(features), (1, features))
-                        extrapolatedPsi_to_X_gpr = np.resize([np.nan] * len(features), (1, features))
-                        extrapolatedPsi_to_X_nn1 = np.resize([np.nan] * len(features), (1, features))
-                        extrapolatedPsi_to_X_nn2 = np.resize([np.nan] * len(features), (1, features))
                         if LiftingMode == "GeometricHarmonics":
                             try:
                                 "Geometric Harmonics"
@@ -2298,7 +2294,7 @@ class Slider:
                                        [Loadings_Temporal4, "psi_all_hat_gpr_array"], [Loadings_Temporal5, "psi_all_hat_gpr_score_array"], [Loadings_Temporal6, "extrapolatedPsi_to_X_gpr"],
                                        [Loadings_Temporal7, "psi_all_hat_nn1_array"], [Loadings_Temporal8, "psi_all_hat_nn1_score_array"], [Loadings_Temporal9, "extrapolatedPsi_to_X_nn1"],
                                        [Loadings_Temporal10, "psi_all_hat_nn2_array"], [Loadings_Temporal11, "psi_all_hat_nn2_score_array"], [Loadings_Temporal12, "extrapolatedPsi_to_X_nn2"]]
-                pickle.dump(outBrokenSimulation, open("D:\Dropbox\VM_Backup\RollingManifoldLearning\Repo\ClassifiersData\\BrokenSimulation.p", "wb"))
+                pickle.dump(outBrokenSimulation, open("D:\Dropbox\VM_Backup\RollingManifoldLearning\Repo\ClassifiersData\\BrokenSimulation_" + manifoldIn + "_" + LiftingMode + "_" + str(st) + ".p", "wb"))
             except Exception as e:
                 print("Broker Simulation Pickling Error : ")
                 print(e)
