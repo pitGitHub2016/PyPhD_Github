@@ -1868,11 +1868,6 @@ class Slider:
             else:
                 ProjectionMode = 'Spacial'
 
-            if 'LiftingMode' in kwargs:
-                LiftingMode = kwargs['LiftingMode']
-            else:
-                LiftingMode = 'GH'
-
             if 'ProjectionPredictorsMemory' in kwargs:
                 ProjectionPredictorsMemory = kwargs['ProjectionPredictorsMemory']
             else:
@@ -1905,7 +1900,10 @@ class Slider:
             Loadings_TemporalResidual = []
             Loadings_Temporal0, Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3, \
             Loadings_Temporal4, Loadings_Temporal5, Loadings_Temporal6, Loadings_Temporal7, \
-            Loadings_Temporal8, Loadings_Temporal9, Loadings_Temporal10, Loadings_Temporal11, Loadings_Temporal12 = [], [], [], [], [], [], [], [], [], [], [], [], []
+            Loadings_Temporal8, Loadings_Temporal9, Loadings_Temporal10, Loadings_Temporal11,\
+            Loadings_Temporal12, = [], [], [], [], [], [], [], [], [], [], [], [], []
+            Loadings_Temporal13,Loadings_Temporal14,Loadings_Temporal15,Loadings_Temporal16 = [], [], [], []
+            Loadings_Temporal17,Loadings_Temporal18,Loadings_Temporal19,Loadings_Temporal20 = [], [], [], []
             lambdasList = []
             sigmaList = []
             for i in tqdm(range(st, len(df0) + 1)):
@@ -1940,35 +1938,6 @@ class Slider:
                             Loadings_First[c].append(list(pca.components_[eig]))
                             Loadings_Last[c].append(list(pca.components_[eig]))
                             c += 1
-                    elif manifoldIn == 'LLE':
-                        df = df.T
-                        features = df.columns.values
-                        x = df.loc[:, features].values
-
-                        if Scaler == 'Standard':
-                            x = StandardScaler().fit_transform(x)
-                        elif Scaler == 'SimpleImputer':
-                            x = SimpleImputer(missing_values=np.nan, strategy='constant').fit_transform(x)
-
-                        lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
-                                                              method=LLE_Method, n_jobs=-1)
-                        X_lle = lle.fit_transform(x)
-
-                        eps = 10*np.median(pd.DataFrame(squareform(pdist(df))))
-                        cut_off = 10 * eps
-                        dmaps_opts = {'num_eigenpairs': NumProjections, 'cut_off': cut_off}
-
-                        lambdasList.append(1)
-                        sigmaList.append(1)
-
-                        c = 0
-                        for eig in eigsPC:
-                            Loadings_Target[c].append(list(X_lle[:, eig]))
-
-                            evGH = GeometricHarmonicsInterpolator(x, X_lle[:, eig], eps, dmaps_opts)
-                            Loadings_First[c].append(evGH(x))
-                            Loadings_Last[c].append(evGH(x))
-                            c += 1
                 elif ProjectionMode == 'Temporal':
 
                     features = df.columns.values
@@ -1983,13 +1952,6 @@ class Slider:
                         explainedVariance = pca.explained_variance_
                         explainedVarianceRatio = pca.explained_variance_ratio_
                         PCAcomponents = pca.components_
-                        #print("evecs.shape",evecs.shape)
-                        #print("evals.shape",evals.shape)
-                        #print("explainedVariance.shape",explainedVariance.shape)
-                        #print("explainedVarianceRatio.shape",explainedVarianceRatio.shape)
-                        #print("PCAcomponents.shape",PCAcomponents.shape)
-                        #print("PCAcomponents[1,:].shape",PCAcomponents[1,:].shape)
-                        #time.sleep(3000)
 
                     elif manifoldIn == 'DMAP_Lift':
                         pcm = pfold.PCManifold(X_all)
@@ -2004,6 +1966,7 @@ class Slider:
                         evecs, evals = dmap.eigenvectors_, dmap.eigenvalues_
 
                         intrinsic_dim_In_LocalRegressionSelection = NumProjections
+
                     elif manifoldIn == 'LLE_Lift':
                         lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections,
                                                               method=LLE_Method, n_jobs=-1)
@@ -2022,6 +1985,9 @@ class Slider:
                         psi_all = evecs[:, selection.evec_indices_]
                     else:
                         psi_all = evecs
+
+                    #print("psi_all.shape = ", psi_all.shape)
+                    #time.sleep(3000)
 
                     ################################# PREDICT PSIs ################################
                     psi_all_hat_var_array = np.resize([np.nan] * NumProjections, (1, NumProjections))
@@ -2159,55 +2125,55 @@ class Slider:
 
                     ########################################### LIFTING ###########################################
                     if manifoldIn not in ['PCA_Lift']:
-                        if LiftingMode == "GeometricHarmonics":
-                            try:
-                                "Geometric Harmonics"
-                                pcm = pfold.PCManifold(psi_all)
-                                pcm.optimize_parameters(random_state=1)
-                                opt_epsilon = pcm.kernel.epsilon
-                                opt_cutoff = pcm.cut_off
-                                opt_n_eigenpairs = psi_all.shape[1]
-                                gh_interpolant_psi_to_X = GHI(
-                                    pfold.GaussianKernel(epsilon=opt_epsilon),
-                                    n_eigenpairs=opt_n_eigenpairs,
-                                    dist_kwargs=dict(cut_off=opt_cutoff),
-                                )
-                                gh_interpolant_psi_to_X.fit(psi_all, X_all)
-                                residual = gh_interpolant_psi_to_X.score(psi_all, X_all)
 
-                                #################################### NEXT STEP LIFTING #################################
-                                extrapolatedPsi_to_X_var = gh_interpolant_psi_to_X.predict(psi_all_hat_var_array)
-                                extrapolatedPsi_to_X_gpr = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
-                                extrapolatedPsi_to_X_nn1 = gh_interpolant_psi_to_X.predict(psi_all_hat_nn1_array)
-                                extrapolatedPsi_to_X_nn2 = gh_interpolant_psi_to_X.predict(psi_all_hat_nn2_array)
-                            except Exception as e:
-                                print("GH : ")
-                                print(e)
-                        elif LiftingMode == "LaplacianPyramids":
+                        try:
+                            "Geometric Harmonics"
+                            pcm = pfold.PCManifold(psi_all)
+                            pcm.optimize_parameters(random_state=1)
+                            opt_epsilon = pcm.kernel.epsilon
+                            opt_cutoff = pcm.cut_off
+                            opt_n_eigenpairs = psi_all.shape[1]
+                            gh_interpolant_psi_to_X = GHI(
+                                pfold.GaussianKernel(epsilon=opt_epsilon),
+                                n_eigenpairs=opt_n_eigenpairs,
+                                dist_kwargs=dict(cut_off=opt_cutoff),
+                            )
+                            gh_interpolant_psi_to_X.fit(psi_all, X_all)
+                            residual = gh_interpolant_psi_to_X.score(psi_all, X_all)
+
+                            #################################### NEXT STEP LIFTING #################################
+                            extrapolatedPsi_to_X_var_GH = gh_interpolant_psi_to_X.predict(psi_all_hat_var_array)
+                            extrapolatedPsi_to_X_gpr_GH = gh_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
+                            extrapolatedPsi_to_X_nn1_GH = gh_interpolant_psi_to_X.predict(psi_all_hat_nn1_array)
+                            extrapolatedPsi_to_X_nn2_GH = gh_interpolant_psi_to_X.predict(psi_all_hat_nn2_array)
+                        except Exception as e:
+                            print("GH : ")
+                            print(e)
+                        ################################# LAPLACIAN PYRAMIDS #####################################
                             try:
                                 lpyr_interpolant_psi_to_X = LPI(auto_adaptive=True)
                                 lpyr_interpolant_psi_to_X.fit(psi_all, X_all)
                                 residual = lpyr_interpolant_psi_to_X.score(psi_all, X_all)
 
                                 #################################### NEXT STEP LIFTING #################################
-                                extrapolatedPsi_to_X_var = lpyr_interpolant_psi_to_X.predict(psi_all_hat_var_array)
-                                extrapolatedPsi_to_X_gpr = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
-                                extrapolatedPsi_to_X_nn1 = lpyr_interpolant_psi_to_X.predict(psi_all_hat_nn1_array)
-                                extrapolatedPsi_to_X_nn2 = lpyr_interpolant_psi_to_X.predict(psi_all_hat_nn2_array)
+                                extrapolatedPsi_to_X_var_LP = lpyr_interpolant_psi_to_X.predict(psi_all_hat_var_array)
+                                extrapolatedPsi_to_X_gpr_LP = lpyr_interpolant_psi_to_X.predict(psi_all_hat_gpr_array)
+                                extrapolatedPsi_to_X_nn1_LP = lpyr_interpolant_psi_to_X.predict(psi_all_hat_nn1_array)
+                                extrapolatedPsi_to_X_nn2_LP = lpyr_interpolant_psi_to_X.predict(psi_all_hat_nn2_array)
                             except Exception as e:
                                 print("LP : ")
                                 print(e)
-                        elif LiftingMode == 'Kriging_GP':
+                        ################################# KRIGING #####################################
                             try:
                                 mainKernel_Kriging_GP = 1 * RBF()
                                 gpr_model = GaussianProcessRegressor(kernel=mainKernel_Kriging_GP)
                                 gpr_model_fit = gpr_model.fit(psi_all, X_all)
                                 residual = gpr_model_fit.score(psi_all, X_all)
 
-                                extrapolatedPsi_to_X_var = gpr_model_fit.predict(psi_all_hat_var_array)[0]
-                                extrapolatedPsi_to_X_gpr = gpr_model_fit.predict(psi_all_hat_gpr_array)[0]
-                                extrapolatedPsi_to_X_nn1 = gpr_model_fit.predict(psi_all_hat_nn1_array)[0]
-                                extrapolatedPsi_to_X_nn2 = gpr_model_fit.predict(psi_all_hat_nn2_array)[0]
+                                extrapolatedPsi_to_X_var_KR = gpr_model_fit.predict(psi_all_hat_var_array)[0]
+                                extrapolatedPsi_to_X_gpr_KR = gpr_model_fit.predict(psi_all_hat_gpr_array)[0]
+                                extrapolatedPsi_to_X_nn1_KR = gpr_model_fit.predict(psi_all_hat_nn1_array)[0]
+                                extrapolatedPsi_to_X_nn2_KR = gpr_model_fit.predict(psi_all_hat_nn2_array)[0]
                             except Exception as e:
                                 print("Kriging_GP : ")
                                 print(e)
@@ -2236,55 +2202,84 @@ class Slider:
                             subOut2.append(latestDate_index)
                             Loadings_Temporal2.append(subOut2)
 
-                            subOut3 = extrapolatedPsi_to_X_var.tolist()
+                            subOut3 = extrapolatedPsi_to_X_var_GH.tolist()
                             subOut3.append(latestDate_index)
                             Loadings_Temporal3.append(subOut3)
-
-                            ######## GPR ########
-
-                            subOut4 = psi_all_hat_gpr_array[0].tolist()
+                            ###
+                            subOut4 = extrapolatedPsi_to_X_var_LP.tolist()
                             subOut4.append(latestDate_index)
                             Loadings_Temporal4.append(subOut4)
-
-                            subOut5 = psi_all_hat_gpr_score_array.tolist()
+                            ###
+                            subOut5 = extrapolatedPsi_to_X_var_KR.tolist()
                             subOut5.append(latestDate_index)
                             Loadings_Temporal5.append(subOut5)
-
-                            subOut6 = extrapolatedPsi_to_X_gpr.tolist()
+                            ######## GPR ########
+                            subOut6 = psi_all_hat_gpr_array[0].tolist()
                             subOut6.append(latestDate_index)
                             Loadings_Temporal6.append(subOut6)
 
-                            ######## NN1 ########
-
-                            subOut7 = psi_all_hat_nn1_array[0].tolist()
+                            subOut7 = psi_all_hat_gpr_score_array.tolist()
                             subOut7.append(latestDate_index)
                             Loadings_Temporal7.append(subOut7)
 
-                            subOut8 = psi_all_hat_nn1_score_array.tolist()
+                            subOut8 = extrapolatedPsi_to_X_gpr_GH.tolist()
                             subOut8.append(latestDate_index)
                             Loadings_Temporal8.append(subOut8)
-
-                            subOut9 = extrapolatedPsi_to_X_nn1.tolist()
+                            ###
+                            subOut9 = extrapolatedPsi_to_X_gpr_LP.tolist()
                             subOut9.append(latestDate_index)
                             Loadings_Temporal9.append(subOut9)
-
-                            ######## NN2 ########
-
-                            subOut10 = psi_all_hat_nn2_array[0].tolist()
+                            ###
+                            subOut10 = extrapolatedPsi_to_X_gpr_KR.tolist()
                             subOut10.append(latestDate_index)
                             Loadings_Temporal10.append(subOut10)
-
-                            subOut11 = psi_all_hat_nn2_score_array.tolist()
+                            ######## NN1 ########
+                            subOut11 = psi_all_hat_nn1_array[0].tolist()
                             subOut11.append(latestDate_index)
                             Loadings_Temporal11.append(subOut11)
 
-                            subOut12 = extrapolatedPsi_to_X_nn2.tolist()
+                            subOut12 = psi_all_hat_nn1_score_array.tolist()
                             subOut12.append(latestDate_index)
                             Loadings_Temporal12.append(subOut12)
+
+                            subOut13 = extrapolatedPsi_to_X_nn1_GH.tolist()
+                            subOut13.append(latestDate_index)
+                            Loadings_Temporal13.append(subOut13)
+                            ###
+                            subOut14 = extrapolatedPsi_to_X_nn1_LP.tolist()
+                            subOut14.append(latestDate_index)
+                            Loadings_Temporal14.append(subOut14)
+                            ###
+                            subOut15 = extrapolatedPsi_to_X_nn1_KR.tolist()
+                            subOut15.append(latestDate_index)
+                            Loadings_Temporal15.append(subOut15)
+                            ######## NN2 ########
+                            subOut16 = psi_all_hat_nn2_array[0].tolist()
+                            subOut16.append(latestDate_index)
+                            Loadings_Temporal16.append(subOut16)
+
+                            subOut17 = psi_all_hat_nn2_score_array.tolist()
+                            subOut17.append(latestDate_index)
+                            Loadings_Temporal17.append(subOut17)
+
+                            subOut18 = extrapolatedPsi_to_X_nn2_GH.tolist()
+                            subOut18.append(latestDate_index)
+                            Loadings_Temporal18.append(subOut18)
+                            ###
+                            subOut19 = extrapolatedPsi_to_X_nn2_LP.tolist()
+                            subOut19.append(latestDate_index)
+                            Loadings_Temporal19.append(subOut19)
+                            ###
+                            subOut20 = extrapolatedPsi_to_X_nn2_KR.tolist()
+                            subOut20.append(latestDate_index)
+                            Loadings_Temporal20.append(subOut20)
+
                         except Exception as e:
                             print("List Appends Error : ", latestDate_index)
                             print(e)
+
                     else:
+
                         try:
                             lambdasList.append(evals.tolist())
                             sigmaList.append(explainedVariance.tolist())
@@ -2357,12 +2352,16 @@ class Slider:
 
             ##########################################################################################################
             try:
-                outBrokenSimulation = [[Loadings_TemporalResidual, "Loadings_TemporalResidual"], [Loadings_Temporal0, "psi_all"],
-                                       [Loadings_Temporal1, "psi_all_hat_var_array"], [Loadings_Temporal2, "psi_all_hat_var_pvals_array"], [Loadings_Temporal3, "extrapolatedPsi_to_X_var"],
-                                       [Loadings_Temporal4, "psi_all_hat_gpr_array"], [Loadings_Temporal5, "psi_all_hat_gpr_score_array"], [Loadings_Temporal6, "extrapolatedPsi_to_X_gpr"],
-                                       [Loadings_Temporal7, "psi_all_hat_nn1_array"], [Loadings_Temporal8, "psi_all_hat_nn1_score_array"], [Loadings_Temporal9, "extrapolatedPsi_to_X_nn1"],
-                                       [Loadings_Temporal10, "psi_all_hat_nn2_array"], [Loadings_Temporal11, "psi_all_hat_nn2_score_array"], [Loadings_Temporal12, "extrapolatedPsi_to_X_nn2"]]
-                pickle.dump(outBrokenSimulation, open("D:\Dropbox\VM_Backup\RollingManifoldLearning\Repo\ClassifiersData\\BrokenSimulation_" + manifoldIn + "_" + LiftingMode + "_" + str(st) + ".p", "wb"))
+                outBrokenSimulation = [Loadings_TemporalResidual, Loadings_Temporal0,
+                                       Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3,
+                                       Loadings_Temporal4, Loadings_Temporal5, Loadings_Temporal6,
+                                       Loadings_Temporal7, Loadings_Temporal8, Loadings_Temporal9,
+                                       Loadings_Temporal10, Loadings_Temporal11, Loadings_Temporal12,
+                                       Loadings_Temporal13, Loadings_Temporal14, Loadings_Temporal15,
+                                       Loadings_Temporal16, Loadings_Temporal17, Loadings_Temporal18,
+                                       Loadings_Temporal19, Loadings_Temporal20,
+                                       ]
+                pickle.dump(outBrokenSimulation, open("Repo\Embeddings\\BrokenSimulation_" + manifoldIn + "_" + str(st) + ".p", "wb"))
             except Exception as e:
                 print("Broker Simulation Pickling Error : ")
                 print(e)
@@ -2415,15 +2414,24 @@ class Slider:
                         principalCompsDf_Last[k] = principalCompsDf_Target[k].copy()
             elif ProjectionMode == 'Temporal':
 
+                printCount = 0
                 allData_List = []
-                for targetList in [[Loadings_TemporalResidual, "Loadings_TemporalResidual"], [Loadings_Temporal0, "psi_all"],
-                                   [Loadings_Temporal1, "psi_all_hat_var_array"], [Loadings_Temporal2, "psi_all_hat_var_pvals_array"], [Loadings_Temporal3, "extrapolatedPsi_to_X_var"],
-                                   [Loadings_Temporal4, "psi_all_hat_gpr_array"], [Loadings_Temporal5, "psi_all_hat_gpr_score_array"], [Loadings_Temporal6, "extrapolatedPsi_to_X_gpr"],
-                                   [Loadings_Temporal7, "psi_all_hat_nn1_array"], [Loadings_Temporal8, "psi_all_hat_nn1_score_array"], [Loadings_Temporal9, "extrapolatedPsi_to_X_nn1"],
-                                   [Loadings_Temporal10, "psi_all_hat_nn2_array"], [Loadings_Temporal11, "psi_all_hat_nn2_score_array"], [Loadings_Temporal12, "extrapolatedPsi_to_X_nn2"]]:
-                    print(targetList[1])
-                    med_df = MakeDatedDF(targetList[0], df0, features)
-                    allData_List.append([targetList[1], med_df])
+                for targetList in [Loadings_TemporalResidual, Loadings_Temporal0,
+                                       Loadings_Temporal1, Loadings_Temporal2, Loadings_Temporal3,
+                                       Loadings_Temporal4, Loadings_Temporal5, Loadings_Temporal6,
+                                       Loadings_Temporal7, Loadings_Temporal8, Loadings_Temporal9,
+                                       Loadings_Temporal10, Loadings_Temporal11, Loadings_Temporal12,
+                                       Loadings_Temporal13, Loadings_Temporal14, Loadings_Temporal15,
+                                       Loadings_Temporal16, Loadings_Temporal17, Loadings_Temporal18,
+                                       Loadings_Temporal19, Loadings_Temporal20]:
+                    print(printCount)
+                    try:
+                        med_df = MakeDatedDF(targetList, df0, features)
+                        allData_List.append(med_df)
+                    except Exception as e:
+                        print(e)
+                        allData_List.append(targetList)
+                    printCount+=1
 
             ##########################################################################################################
 

@@ -24,7 +24,7 @@ warnings.filterwarnings('ignore')
 conn = sqlite3.connect('FXeodData_FxData.db')
 GraphsFolder = '/home/gekko/Desktop/PyPhD/RollingManifoldLearning/Graphs/'
 
-twList = [500] # 250, 500, 1000
+twList = [500, 1000] # 250, 500, 1000
 
 def DataHandler(mode):
 
@@ -365,27 +365,26 @@ def RunManifold(argList):
     manifoldIn = argList[1]
     tw = argList[2]
     runMode = argList[3]
-    liftingMode = argList[4]
 
     if runMode == 'runPickle':
 
         if tw != 'ExpWindow25':
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 20, range(len(df.columns)), Scaler='Standard')
-            elif manifoldIn in ['PCA_Lift', 'DMAP_Lift', 'LLE_Lift']:
+            elif manifoldIn in ['PCA_Lift','DMAP_Lift', 'LLE_Lift']:
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 3, [0, 1, 2], Scaler='Standard',
-                                             ProjectionMode='Temporal', LiftingMode=liftingMode,
+                                             ProjectionMode='Temporal',
                                              ProjectionPredictorsMemory=125, ProjectionPredictorsActivations=[1,1,1,1])
         else:
             if manifoldIn == 'PCA':
                 out = sl.AI.gRollingManifold(manifoldIn, df, 25, 20, range(len(df.columns)), Scaler='Standard',
                                              RollMode='ExpWindow')
-            elif manifoldIn in ['PCA_Lift', 'DMAP_Lift', 'LLE_Lift']:
+            elif manifoldIn in ['PCA_Lift','DMAP_Lift', 'LLE_Lift']:
                 out = sl.AI.gRollingManifold(manifoldIn, df, tw, 3, [0, 1, 2], Scaler='Standard',
-                                             ProjectionMode='Temporal', LiftingMode=liftingMode,
+                                             ProjectionMode='Temporal',
                                              ProjectionPredictorsMemory=125, RollMode='ExpWindow', ProjectionPredictorsActivations=[1,1,1,1])
 
-        pickle.dump(out, open("Repo\Embeddings\\" + manifoldIn + "_" + liftingMode + "_" + str(tw) + ".p", "wb"))
+        pickle.dump(out, open("Repo\Embeddings\\" + manifoldIn + "_" + str(tw) + ".p", "wb"))
 
     elif runMode == 'readPickle':
 
@@ -406,13 +405,12 @@ def RunManifoldLearningOnFXPairs(runMode):
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates', drop=True)
     processList = []
     for manifoldIn in ['PCA_Lift']: #'PCA_Lift', 'LLE_Lift', 'DMAP_Lift'
-        for liftingMode in ['GeometricHarmonics', 'LaplacianPyramids']:
-            for tw in twList:
-                print(manifoldIn, ",", tw, ", ", liftingMode)
-                if runMode == 'runPickle':
-                    processList.append([df, manifoldIn, tw, runMode, liftingMode])
-                elif runMode == 'readPickle':
-                    RunManifold([df, manifoldIn, tw, 'readPickle', liftingMode])
+        for tw in twList:
+            print(manifoldIn, ",", tw)
+            if runMode == 'runPickle':
+                processList.append([df, manifoldIn, tw, runMode])
+            elif runMode == 'readPickle':
+                RunManifold([df, manifoldIn, tw, 'readPickle'])
 
     print("Total Processes = ", len(processList))
 
@@ -1305,42 +1303,19 @@ def Test0():
     out[2].plot()
     plt.show()
 
-def TestGH(mode):
+def TestGH():
     df = pd.read_sql('SELECT * FROM FxDataAdjRets', sqlite3.connect('FXeodData_FxData.db')).set_index('Dates',drop=True)
     #print("Data .......... ")
     #print(df)
 
-    if mode == 0:
-        from diffusion_maps import (GeometricHarmonicsInterpolator, DiffusionMaps)
-        eps = 1e1
-        cut_off = 1e1 * eps
-        num_eigenpairs = 3
-
-        # points = make_strip(0, 0, 1, 1e-1, 3000)
-
-        dm = DiffusionMaps(df.T.values, eps, cut_off=cut_off, num_eigenpairs=num_eigenpairs)
-        ev = dm.eigenvectors
-        print("Eigenvectors .......... ")
-        print(pd.DataFrame(ev))
-
-        dmaps_opts = {'num_eigenpairs': num_eigenpairs, 'cut_off': cut_off}
-        ev1 = GeometricHarmonicsInterpolator(df.values, ev[1, :], eps, dmaps_opts)
-        ev2 = GeometricHarmonicsInterpolator(df.values, ev[2, :], eps, dmaps_opts)
-
-        print("[GH 1, GH 2] ......... ")
-        ghDF = pd.concat([pd.DataFrame(ev1(df.values)), pd.DataFrame(ev2(df.values))], axis=1)
-        ghDF.columns = ["GH1", "GH2"]
-        print(ghDF)
-
-    elif mode == 1:
-        manifoldIn = 'PCA_Lift'
-        #manifoldIn = 'DMAP_Lift'
-        #manifoldIn = 'LLE_Lift'
-        out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
-        #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
-        #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='LaplacianPyramids', ProjectionPredictorsMode='OnTheFly')
-        #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='RadialBasis', ProjectionPredictorsMode='OnTheFly')
-        #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='Kriging_GP', ProjectionPredictorsMode='OnTheFly')
+    manifoldIn = 'PCA_Lift'
+    #manifoldIn = 'DMAP_Lift'
+    #manifoldIn = 'LLE_Lift'
+    out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
+    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
+    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='LaplacianPyramids', ProjectionPredictorsMode='OnTheFly')
+    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='RadialBasis', ProjectionPredictorsMode='OnTheFly')
+    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='Kriging_GP', ProjectionPredictorsMode='OnTheFly')
 
 def TestRNN():
     from keras.models import Sequential
@@ -1484,9 +1459,7 @@ if __name__ == '__main__':
     #StationarityOnProjections('LLE', 'plot')
 
     #Test()
-    #TestGH(0)
-    #TestGH(1)
-    #TestGH(2)
+    #TestGH()
     #TestRNN()
     #TestKriging()
     #ContributionAnalysis()
