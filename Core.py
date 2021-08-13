@@ -1308,14 +1308,11 @@ def TestGH():
     #print("Data .......... ")
     #print(df)
 
-    manifoldIn = 'PCA_Lift'
-    #manifoldIn = 'DMAP_Lift'
+    #manifoldIn = 'PCA_Lift'
+    manifoldIn = 'DMAP_Lift'
     #manifoldIn = 'LLE_Lift'
-    out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
-    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal',LiftingMode='GeometricHarmonics', ProjectionPredictorsActivations=[1,1,1,1])
-    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='LaplacianPyramids', ProjectionPredictorsMode='OnTheFly')
-    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='RadialBasis', ProjectionPredictorsMode='OnTheFly')
-    #out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1070,:], 50, 3, [0,1,2], Scaler='Standard', ProjectionMode='Temporal', LiftingMode='Kriging_GP', ProjectionPredictorsMode='OnTheFly')
+    out = sl.AI.gRollingManifold(manifoldIn, df.iloc[1000:1503,:], 500, 3, [0,1,2], Scaler='Standard',
+                                 ProjectionMode='Temporal', ProjectionPredictorsActivations=[1,1,1,1])
 
 def TestRNN():
     from keras.models import Sequential
@@ -1434,7 +1431,7 @@ if __name__ == '__main__':
     #RiskParity('run')
     #RiskParity('plots')
 
-    RunManifoldLearningOnFXPairs('runPickle')
+    #RunManifoldLearningOnFXPairs('runPickle')
     #RunManifoldLearningOnFXPairs('readPickle')
     #CrossValidateEmbeddings("PCA", 250, "run")
     #CrossValidateEmbeddings("PCA", 250, "Test0")
@@ -1459,7 +1456,7 @@ if __name__ == '__main__':
     #StationarityOnProjections('LLE', 'plot')
 
     #Test()
-    #TestGH()
+    TestGH()
     #TestRNN()
     #TestKriging()
     #ContributionAnalysis()
