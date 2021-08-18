@@ -99,23 +99,30 @@ def RunWithMatlabData(mode):
             'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\FinEngineering_Application\Lifting_GG\\Dynamic_DM_Matlab_Data_TS.mat')
         data = mat['Dynamic_DM_Matlab_Data_TS']
 
-        liftMethod = "LP"
+        liftMethod = "GH"
 
         lift_out_Preds_list = []
         real_x_list = []
-        for i in range(10):#range(data.shape[0]):
+        for i in range(data.shape[0]):
             print(i, ", ", data[i].shape)
-
+            ################################################
             rowData = data[i]
             y_intv = rowData[0]
             obj_evecs = rowData[1]
             Preds = rowData[2]
             CI_Lower_Band = rowData[3]
             CI_Upper_Band = rowData[4]
+            ################################################
             varSet = [[] for varN in range(Preds.shape[1])]
+            varSetLabels = [[] for varN in range(Preds.shape[1])]
             for varN in range(Preds.shape[1]):
                 varSet[varN] = [Preds[0][varN], CI_Lower_Band[0][varN], CI_Upper_Band[0][varN]]
+                if i == 0:
+                    varSetLabels[varN] = ["Mean_Var"+str(varN), "CI_Lower_Band_Var"+str(varN), "CI_Upper_Band_Var"+str(varN)]
             allStatsCombos = [[x[0], x[1]] for x in itertools.product(*varSet)]
+            if i == 0:
+                allStatsCombos_Labels = [[x[0]+"-"+x[1]] for x in itertools.product(*varSetLabels)]
+            ################################################
             y_i = rowData[5]
             real_x_list.append(y_i[0])
 
@@ -127,25 +134,26 @@ def RunWithMatlabData(mode):
 
                 if liftMethod not in ["GH"]:
                     lift_out_Preds = lift_out_Preds[0]
-                liftedCombos[countCombo].append(lift_out_Preds)
+                liftedCombos[countCombo].append(lift_out_Preds.tolist())
                 countCombo += 1
 
             lift_out_Preds_list.append(liftedCombos)
 
-        print(len(lift_out_Preds_list))
-        time.sleep(3000)
+        liftedCombos_TS = [[] for tsCount in range(len(allStatsCombos))]
+        MSE_List = []
+        for tsCount in range(len(allStatsCombos)):
+            for t in range(len(lift_out_Preds_list)):
+                t_sub_lift_out_Preds_list = lift_out_Preds_list[t]
+                liftedCombos_TS[tsCount].append(t_sub_lift_out_Preds_list[tsCount][0])
 
-        extrapolatedPsi_to_X_Preds = np.array(lift_out_Preds_list)
-        extrapolatedPsi_to_X_CI_Lower_Band = np.array(lift_out_CI_Lower_Band_list)
-        extrapolatedPsi_to_X_CI_Upper_Band = np.array(lift_out_CI_Upper_Band_list)
-        X_testSet = np.array(real_x_list)
-        print("extrapolatedPsi_to_X_Preds.shape = ", extrapolatedPsi_to_X_Preds.shape)
-        print("extrapolatedPsi_to_X_CI_Lower_Band.shape = ", extrapolatedPsi_to_X_CI_Lower_Band.shape)
-        print("extrapolatedPsi_to_X_CI_Upper_Band.shape = ", extrapolatedPsi_to_X_CI_Upper_Band.shape)
-        print("X_testSet.shape = ", X_testSet.shape)
+            extrapolatedPsi_to_X_Preds = np.array(liftedCombos_TS[tsCount])
+            X_testSet = np.array(real_x_list)
 
-        mse = (np.square(extrapolatedPsi_to_X_Preds - X_testSet)).mean(axis=None)
-        print("MSE = ", mse)
+            mse = (np.square(extrapolatedPsi_to_X_Preds - X_testSet)).mean(axis=None)
+            MSE_List.append([allStatsCombos_Labels[tsCount], mse])
+
+        MSE_df = pd.DataFrame(MSE_List, columns=["StatsCombo", "MSE"])
+        print(MSE_df)
 
 #PyRun()
 #RunWithMatlabData('static')
