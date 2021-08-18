@@ -49,51 +49,30 @@ def RunWithMatlabData(RunMode, TimeConfiguration, liftMethod):
         if TimeConfiguration == 'static':
             mat = scipy.io.loadmat('D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\FinEngineering_Application\Lifting_GG\\Static_DM_Matlab_Data.mat')
             data = mat['Static_DM_Matlab_Data'][0]
-            #print(data)
+
             X_trainingSet = data[0]
             X_testSet = data[1]
             eig_trainingSet = data[2]
-            eig_Simulation = data[3]
-            MeanSim = data[4]
-            eig_Simulation_Lower_Band = data[5]
-            eig_Simulation_Upper_Band = data[6]
-            CI_manifold = data[7]
+            elem = data[3]
             print("X_trainingSet.shape = ", X_trainingSet.shape)
             print("X_testSet.shape = ", X_testSet.shape)
             print("eig_trainingSet.shape = ", eig_trainingSet.shape)
-            print("eig_Simulation.shape = ", eig_Simulation.shape)
-            print("MeanSim.shape = ", MeanSim.shape)
-            print("eig_Simulation_Lower_Band.shape = ", eig_Simulation_Lower_Band.shape)
-            print("eig_Simulation_Upper_Band.shape = ", eig_Simulation_Upper_Band.shape)
-            print("CI_manifold.shape = ", CI_manifold.shape)
-
+            print("elem.shape = ", elem.shape)
             mse_eig_Simulation_standalone = (np.square(0 - X_testSet)).mean(axis=None)
             print("mse_eig_Simulation_standalone = ", mse_eig_Simulation_standalone)
 
-            for liftMethod in ["GH", "LP", "KR"]:
-                lift_out_eig_Simulation = Lift(liftMethod, X_trainingSet, X_testSet, eig_trainingSet, eig_Simulation)
-                mse_eig_Simulation = np.round(lift_out_eig_Simulation[1],4)
-                print(liftMethod, ", lift_out_eig_Simulation[0].shape = ", lift_out_eig_Simulation[0].shape, ", mse_eig_Simulation = ", mse_eig_Simulation)
+            print("elem[0][0].shape = ", elem[0][0].shape)
 
-                lift_out_MeanSim = Lift(liftMethod, X_trainingSet, X_testSet, eig_trainingSet, MeanSim)
-                mse_MeanSim = np.round(lift_out_MeanSim[1],4)
-                print(liftMethod, ", ", lift_out_MeanSim[0], ", mse_MeanSim = ", mse_MeanSim)
+            MSE_List = []
+            for subElem in range(elem.shape[1]):
+                lift_out_eig_Simulation = Lift(liftMethod, X_trainingSet, X_testSet, eig_trainingSet, elem[0][subElem])
+                mse = lift_out_eig_Simulation[1]
+                #print("lift_out_eig_Simulation[0].shape = ", lift_out_eig_Simulation[0].shape)
+                #print("lift_out_eig_Simulation[1] (mse) = ", mse)
+                MSE_List.append(mse)
 
-                lift_out_eig_Simulation_Lower_Band = Lift(liftMethod, X_trainingSet, X_testSet, eig_trainingSet, eig_Simulation_Lower_Band)
-                mse_eig_Simulation_Lower_Band = np.round(lift_out_eig_Simulation_Lower_Band[1],4)
-                print(liftMethod, ", ", lift_out_eig_Simulation_Lower_Band[0], ", mse_eig_Simulation_Lower_Band = ", mse_eig_Simulation_Lower_Band)
+            print(MSE_List)
 
-                lift_out_eig_Simulation_Upper_Band = Lift(liftMethod, X_trainingSet, X_testSet, eig_trainingSet, eig_Simulation_Upper_Band)
-                mse_eig_Simulation_Upper_Band = np.round(lift_out_eig_Simulation_Upper_Band[1],4)
-                print(liftMethod, ", ", lift_out_eig_Simulation_Upper_Band[0], ", mse_eig_Simulation_Upper_Band = ", mse_eig_Simulation_Upper_Band)
-
-                lift_out_CI_manifold_Lower_Band = Lift(liftMethod, X_trainingSet, X_testSet, eig_trainingSet, CI_manifold[0,:].reshape(1,-1))
-                mse_CI_manifold_Lower_Band = np.round(lift_out_CI_manifold_Lower_Band[1],4)
-                print(liftMethod, ", ", lift_out_CI_manifold_Lower_Band[0], ", mse_CI_manifold_Lower_Band = ", mse_CI_manifold_Lower_Band)
-
-                lift_out_CI_manifold_Upper_Band = Lift(liftMethod, X_trainingSet, X_testSet, eig_trainingSet, CI_manifold[1,:].reshape(1,-1))
-                mse_CI_manifold_Upper_Band = np.round(lift_out_CI_manifold_Upper_Band[1],4)
-                print(liftMethod, ", ", lift_out_CI_manifold_Upper_Band[0], ", mse_CI_manifold_Upper_Band = ", mse_CI_manifold_Upper_Band)
         else:
             mat = scipy.io.loadmat(
                 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\FinEngineering_Application\Lifting_GG\\Dynamic_DM_Matlab_Data_TS.mat')
@@ -154,8 +133,17 @@ def RunWithMatlabData(RunMode, TimeConfiguration, liftMethod):
             print(MSE_df)
             pickle.dump(MSE_df, open("MSE_df_" + str(TimeConfiguration) + "_" + liftMethod + ".p", "wb"))
     elif RunMode == 'Read':
-        MSE_df = pickle.load(open("MSE_df_" + str(TimeConfiguration) + "_" + liftMethod + ".p", "rb"))
+        MSE_df = pickle.load(open("MSE_df_" + str(TimeConfiguration) + "_" + liftMethod + ".p", "rb")).set_index("StatsCombo", drop=True)
+        #print(MSE_df)
+        print([np.round(x[0],5) for x in MSE_df.values.tolist()])
 
 #PyRun()
-#RunWithMatlabData('Run', 'static')
-RunWithMatlabData('Run', 'dynamic', "GH")
+RunWithMatlabData('Run', 'static', "GH")
+
+#RunWithMatlabData('Run', 'dynamic', "GH")
+#RunWithMatlabData('Run', 'dynamic', "LP")
+#RunWithMatlabData('Run', 'dynamic', "KR")
+#RunWithMatlabData('Read', 'dynamic', "GH")
+#RunWithMatlabData('Read', 'dynamic', "LP")
+#RunWithMatlabData('Read', 'dynamic', "KR")
+
