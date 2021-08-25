@@ -36,6 +36,8 @@ pd.set_option('display.max_rows',200)
 from sklearn.datasets import load_digits
 from sklearn.manifold import LocallyLinearEmbedding
 
+RollingRunnersPath = "D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners\\"
+
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
@@ -53,25 +55,31 @@ def reframeData(dataIn, reframeStep, varSelect):
 
     df_List = []
     for i in range(reframeStep+1):
-        print(i)
         if i == 0:
-            subDF = baseDF
-            subDF.columns = ["base_" + str(x) for x in subDF.columns]
+            subDF_i0 = baseDF.copy()
+            subDF_i0.columns = ["base_" + str(x) for x in subDF_i0.columns]
+            df_List.append(subDF_i0)
         else:
             subDF = baseDF.shift(i).fillna(0)
             subDF.columns = ["s_"+str(x) for x in subDF.columns]
-        df_List.append(subDF)
+            df_List.append(subDF)
     df = pd.concat(df_List, axis=1)
-    Yvar = df.loc[:, "base_"+str(varSelect)]
-    Xvar = df.loc[:,[x for x in subDF.columns if "s_" in x]]
+    if varSelect == "all":
+        Y_DF = df.loc[:, [x for x in df.columns if "base_" in x]]
+    else:
+        Y_DF = df.loc[:, "base_"+str(varSelect)]
+    X_DF = df.loc[:, [x for x in df.columns if "s_" in x]]
+    lastY_test_point = df.loc[df.index[-1], [x for x in df.columns if "base_" in x]]
 
     print(df)
-    print(Yvar)
-    print(Xvar)
+    print("X_DF = ", X_DF.tail(5))
+    print("Y_DF = ", Y_DF.tail(5))
+    print(lastY_test_point.values)
     time.sleep(3000)
-    #X_all_gpr, y_all_gpr = np.array(X_all_list), np.array(y_all_list)
 
-    return [X_all_gpr, y_all_gpr]
+    X_all_gpr, y_all_gpr, lastY_test_point_gpr = X_DF.values, Y_DF.values, lastY_test_point.values
+
+    return [X_all_gpr, y_all_gpr, lastY_test_point_gpr]
 
 def getTargetMapping(X_train_local, target_intrinsic_dim):
     X_pcm = pfold.PCManifold(X_train_local)
@@ -254,7 +262,7 @@ def RollingRunProcess(params):
 
     #out = PaperizePreds(Preds, CI_Lower_Band, CI_Upper_Band, X_test)
     out = Preds
-    pickle.dump(out, open("D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners\\"+processName + "_Preds.p", "wb"))
+    pickle.dump(out, open(RollingRunnersPath+processName + "_Preds.p", "wb"))
 
 random_state = 1
 
@@ -531,40 +539,35 @@ def RunPythonDM(label, mode):
             #CI_Lower_Band = FullModel_VAR_Preds[1]
             #CI_Upper_Band = FullModel_VAR_Preds[2]
         elif modeSplit[1] == "GPR":
-            reframedData = reframeData(X_train, 1, 0)
-            X_train_gpr = reframedData[0]
-            y_train_gpr = reframedData[1]
-            print("X_train_gpr.shape = ", X_train_gpr)
-            print("y_train_gpr.shape = ", y_train_gpr)
-            time.sleep(3000)
+            #print("X_train_gpr.shape = ", X_train_gpr.shape)
+            #print("y_train_gpr.shape = ", y_train_gpr.shape)
+            #print("lastY_test_point.shape = ", lastY_test_point.shape)
+            #time.sleep(3000)
             # Create a new GPR each time!!! no memory is retained
-            mainKernel = 1 * RBF()
-            gprModelList = [GaussianProcessRegressor(kernel=mainKernel, random_state=0) for var in X_train.shape[1]]
 
-            model_GPR_Static = 0
+            #train_dataPackLists = [[] for var in range(X_train.shape[1])]
+            #for varNum in range(X_train.shape[1]):
+            #    reframedDataTrain = reframeData(X_train, 1, varNum)
+            #    X_train_gpr = reframedDataTrain[0]
+            #    y_train_gpr = reframedDataTrain[1].reshape(-1, 1)
+            #    entry_train_points = reframedDataTrain[2].reshape(1, X_train.shape[1])
+            #    train_dataPackLists[varNum].append([X_train_gpr, y_train_gpr, entry_train_points])
 
-            model_GPR_Static.fit(X_train_gpr, y_train_gpr)
+            reframedDataTrain = reframeData(X_train, 2, "all")
 
-            static_gpr_pred_List = []
-            for gpr_static_step in tqdm(range(X_test.shape[0])):
-                #print(gpr_static_step)
-                if gpr_static_step == 0:
-                    indPrediction, indPrediction_Std = model_GPR_Static.predict(y_train_gpr[-1].reshape(1, -1),return_std=True)
-                    print(indPrediction)
-                    time.sleep(3000)
-                else:
-                    indPrediction, indPrediction_Std = model_GPR_Static.predict(indPrediction.reshape(1, -1),return_std=True)
-                    #print("indPrediction.shape = ", indPrediction.shape, ", len(static_gpr_pred_List) = ",len(static_gpr_pred_List))
-                    #time.sleep(3000)
+            model_gpr = GaussianProcessRegressor(kernel=1 * RBF(), random_state=0)
+            print(reframedDataTrain[0].shape)
+            print(reframedDataTrain[1].shape)
+            time.sleep(3000)
+            model_gpr.fit(reframedDataTrain[0], reframedDataTrain[1])
 
-                static_gpr_pred_List.append(indPrediction[0])
-
-            Preds = np.array(static_gpr_pred_List)
-            pd.DataFrame(Preds).plot()
-            plt.show()
-            print("len(static_gpr_pred_List) = ", len(static_gpr_pred_List))
+            Preds, sub_indPrediction_Std = model_gpr.predict(reframeData(X_test, 1, 0)[0], return_std=True)
+            #pd.DataFrame(Preds).plot()
+            #plt.show()
             print("Preds.shape = ", Preds.shape)
+            #time.sleep(3000)
 
+        pickle.dump(Preds, open(RollingRunnersPath + label + "_" + mode.replace(",","_") + "_Preds.p", "wb"))
         FullModel_Static_PaperText = PaperizePreds(Preds, X_test) #, CI_Lower_Band, CI_Upper_Band
         print("FullModel_Static_PaperText = ", FullModel_Static_PaperText)
 
@@ -677,7 +680,7 @@ def RunPythonDM(label, mode):
                     statsList.append([modelID, paperText])  # , pnl_sh
 
         statsDF = pd.DataFrame(statsList, columns=["modelID", "paperText"]).set_index("modelID", drop=True)
-        statsDF.to_excel(mode.replace(",", "_")+".xlsx")
+        statsDF.to_excel(label + "_" + mode.replace(",", "_")+".xlsx")
 
         """
         "Build Combinations of the several CIs"
@@ -822,7 +825,7 @@ if __name__ == '__main__':
 
     #PyRun()
 
-    label = "EEGdataNonLinear" # "EEGdatanew", "EEGdataNonLinear", "FxDataAdjRets"
+    label = "EEGdatanew" # "EEGdatanew", "EEGdataNonLinear", "FxDataAdjRets"
 
     #RunPythonDM(label, "StaticFullEigvalPlot")
     #RunPythonDM(label, "FullModel_Static,VAR")
