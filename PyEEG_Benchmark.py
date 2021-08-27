@@ -37,8 +37,6 @@ pd.set_option('display.max_rows',200)
 from sklearn.datasets import load_digits
 from sklearn.manifold import LocallyLinearEmbedding
 
-RollingRunnersPath = "D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners\\"
-
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
@@ -524,13 +522,22 @@ def RunWithMatlabData(RunMode, TimeConfiguration, liftMethod, label):
         MSE_df_MIN.to_excel("MSE_List_" + str(TimeConfiguration) + "_" + liftMethod + "_" + label + ".xlsx")
         print("TimeConfiguration = ", TimeConfiguration, ", label = ", label, ", liftMethod = ", liftMethod, " ... ", ", MSE_df_MIN['perfText'] = ", MSE_df_MIN['perfText'])
 
+try:
+    alreadyRunProcessesExcel = pd.read_excel("Reporter_dataDF_raw.xlsx")
+    alreadyRunProcesses = alreadyRunProcessesExcel["file_name"].tolist()
+except Exception as e:
+    print(e)
+
 def RunPythonDM(paramList):
 
     label = paramList[0]
     mode = paramList[1]
     simulationNumber = paramList[2]
+    datasetsPath = paramList[3]
+    RollingRunnersPath = paramList[4]
 
-    matFileName = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets\\' + label + "_" + str(simulationNumber) + '.mat'
+    #matFileName = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets\\' + label + "_" + str(simulationNumber) + '.mat'
+    matFileName = datasetsPath + label + "_" + str(simulationNumber) + '.mat'
     mat = scipy.io.loadmat(matFileName)
     data = mat['y']
     forecastHorizon = 500
@@ -687,7 +694,13 @@ def RunPythonDM(paramList):
                                 'kernelIn':kernelIn, 'degreeIn':degreeIn, 'neighborsIn':neighborsIn, 'epsilonIn':epsilonIn
                             }
                             #processList.append(params)
-                            RollingRunProcess(params)
+                            "Check if process already processed (alreadyRunProcesses list above)!"
+                            CheckedProcessName = '_'.join([str(x) for x in list(params.values())[2:]])+"_Preds.p"
+                            if CheckedProcessName not in alreadyRunProcesses:
+                                RollingRunProcess(params)
+                            else:
+                                print("Process ", CheckedProcessName, " has beed already processed !!!")
+                                print("###############################################################")
 
         #p = mp.Pool(mp.cpu_count())
         #result = p.map(RollingRunProcess, tqdm(processList))
@@ -713,7 +726,6 @@ def RunPythonDM(paramList):
 
 def Reporter(mode):
 
-    datasetsPath = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets\\'
     forecastHorizon = 500
 
     if mode == "RunRandomWalks":
@@ -731,7 +743,6 @@ def Reporter(mode):
 
         dataDFRW = pd.DataFrame(allDataListRW, columns=["file_name", "rmseVars"]).set_index("file_name", drop=True)
         dataDFRW.to_excel("Reporter_dataDF_RW_raw.xlsx")
-
     elif mode == "Run":
 
         allDataList = []
@@ -754,7 +765,6 @@ def Reporter(mode):
 
         dataDF = pd.DataFrame(allDataList, columns=["file_name", "rmseVars"]).set_index("file_name", drop=True)
         dataDF.to_excel("Reporter_dataDF_raw.xlsx")
-
     elif mode == "Read":
 
         dataDF = pd.concat([pd.read_excel("Reporter_dataDF_RW_raw.xlsx"), pd.read_excel("Reporter_dataDF_raw.xlsx")])
@@ -778,8 +788,10 @@ def Reporter(mode):
             "Calculate RMSE(variables), Medians and CIs"
             rmseVarsDF = subDF['rmseVars'].apply(lambda x: x.split(",")).apply(pd.Series).reset_index(drop=True).astype(float)
             rmseVarsDF_median = rmseVarsDF.median().tolist()
-            conf = sms.DescrStatsW(rmseVarsDF.values).tconfint_mean()
-            reportText = ' & '.join([str(np.round(rmseVarsDF_median[c],4)) + '(' + str(np.round(conf[0][c],4)) + ',' + str(np.round(conf[1][c],4)) +')' for c in range(len(rmseVarsDF_median))])
+            #conf = sms.DescrStatsW(rmseVarsDF.values).tconfint_mean()
+            percentile5 = np.percentile(rmseVarsDF.values, 5, axis=0)
+            percentile95 = np.percentile(rmseVarsDF.values, 95, axis=0)
+            reportText = ' & '.join([str(np.round(rmseVarsDF_median[c],4)) + ' (' + str(np.round(percentile5[c],4)) + ',' + str(np.round(percentile95[c],4)) +')' for c in range(len(rmseVarsDF_median))])
 
             ReportList.append([elem, reportText, subDF.shape[0]])
 
@@ -787,14 +799,24 @@ def Reporter(mode):
         ReportDF.to_excel("Reporter.xlsx")
 
 def Test():
-    pass
+    siettos_rmse_Mat_data = scipy.io.loadmat("D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\siettos_Example_Dataset.mat")
+    data = siettos_rmse_Mat_data['rmserw'][0]
+    siettos_df = pd.DataFrame(data)
+    print("np.percentile5 = ", np.percentile(siettos_df.values, 5, axis=0))
+    print("np.percentile95 = ", np.percentile(siettos_df.values, 95, axis=0))
+    print("median = ", siettos_df.median())
+    print(type(data))
 
 if __name__ == '__main__':
 
-    label = "EEGdataNonLinear" # "EEGdatanew", "EEGdataNonLinear", "FxDataAdjRets"
+    label = "EEGsynthetic2nonlin" # "EEGdatanew", "EEGdataNonLinear", "FxDataAdjRets", "EEGsynthetic2nonlin" (second approach)
+    #datasetsPath = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets\\'; simulNum = 100
+    datasetsPath = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_Siettos_SecondApproach\\'; simulNum = 5
 
-    #processToRun = "FullModel_Static,VAR" # 1 done(100), 2 done(100)
-    #processToRun = "FullModel_Static,GPR_Single" #
+    RollingRunnersPath = "D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners\\"
+
+    #processToRun = "FullModel_Static,VAR" # 1 done(100), 2 done(100),
+    processToRun = "FullModel_Static,GPR_Single" #
     #processToRun = "Static_run,VAR" # 1 done(10), 2 done(10)
     #processToRun = "Static_run,GPR_Single" #
     ##### ROLLING ####
@@ -804,28 +826,25 @@ if __name__ == '__main__':
     #processToRun = "Rolling_run,GPR_Single"
 
     #simulList = []
-    #for simul in range(100):
-    #    simulList.append([label, processToRun, simul])
+    #for simul in range(simulNum):
+    #    try:
+    #        simulList.append([label, processToRun, simul, datasetsPath, RollingRunnersPath])
+    #    except Exception as e:
+    #        print(simul)
+    #        print(e)
 
     #p = mp.Pool(mp.cpu_count())
     #result = p.map(RunPythonDM, tqdm(simulList))
     #p.close()
     #p.join()
 
-    #RunPythonDM([label, "StaticFullEigvalPlot", 0])
     #RunPythonDM([label, "FullModel_Static,VAR", 0])
-    #RunPythonDM([label, "FullModel_Static,GPR_Multi", 0]) ### another approach ....
-    #RunPythonDM([label, "FullModel_Static,GPR_Single", 0])
-    #RunPythonDM([label, "FullModel_Rolling,VAR", 0])
-    #RunPythonDM([label, "FullModel_Rolling,GPR_Single", 0])
-    #RunPythonDM([label, "Static_run,VAR", 0])
-    #RunPythonDM([label, "Static_run,GPR_Single", 0])
-    #RunPythonDM([label, "Rolling_run,VAR", 0])
-    #RunPythonDM([label, "Rolling_run,GPR_Single", 0])
 
-    #Reporter("RunRandomWalks")
-    #Reporter("Run")
+    Reporter("RunRandomWalks") # Done!
+    Reporter("Run")
     Reporter("Read")
+
+    #Test()
 
 ### NOTES ###
 """
