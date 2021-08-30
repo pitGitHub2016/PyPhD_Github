@@ -1,20 +1,27 @@
 from Slider import Slider as sl
 import scipy.io, glob
+from scipy.interpolate import NearestNDInterpolator
 import itertools, math
 import numpy as np, investpy, time, pickle
 import pandas as pd
 from tqdm import tqdm
+import GPy
 from statsmodels.tsa.api import VAR
 import statsmodels.stats.api as sms
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import multiprocessing as mp
+from sklearn.decomposition import PCA
+from sklearn import manifold
+from sklearn.neighbors import NearestNeighbors
 from sklearn.gaussian_process.kernels import RBF, DotProduct, WhiteKernel, RationalQuadratic, ExpSineSquared, Matern, \
     ConstantKernel
 from sklearn.gaussian_process import GaussianProcessRegressor, GaussianProcessClassifier
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
 from scipy.interpolate import RBFInterpolator
-from sklearn.model_selection import cross_val_score, train_test_split
+from keras.models import Sequential
+from keras.layers import Dense
 import datafold.dynfold as dfold
 import datafold.pcfold as pfold
 from datafold.dynfold import (
@@ -22,10 +29,6 @@ from datafold.dynfold import (
     LocalRegressionSelection,
 )
 from datafold.dynfold import LocalRegressionSelection
-from datafold.utils.plot import plot_pairwise_eigenvector
-from skopt import gp_minimize
-from skopt.searchcv import BayesSearchCV
-from skopt.space import Categorical, Integer, Real
 
 mpl.rcParams['font.family'] = ['serif']
 mpl.rcParams['font.serif'] = ['Times New Roman']
@@ -33,9 +36,6 @@ mpl.rcParams['font.size'] = 20
 pd.set_option('display.width', 320)
 pd.set_option('display.max_columns',20)
 pd.set_option('display.max_rows',200)
-
-from sklearn.datasets import load_digits
-from sklearn.manifold import LocallyLinearEmbedding
 
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
@@ -66,10 +66,12 @@ def reframeData(dataIn, reframeStep, varSelect):
             subDF_i0.columns = ["base_" + str(x) for x in subDF_i0.columns]
             df_List.append(subDF_i0)
         else:
-            subDF = baseDF.shift(i).fillna(0)
+            subDF = baseDF.shift(i)#.fillna(0)
             subDF.columns = ["delay_"+str(i)+"_"+str(x) for x in subDF.columns]
             df_List.append(subDF)
-    df = pd.concat(df_List, axis=1)
+
+    df = pd.concat(df_List, axis=1).dropna()
+
     if varSelect == "all":
         Y_DF = df.loc[:, [x for x in df.columns if "base_" in x]]
     else:
@@ -86,36 +88,60 @@ def reframeData(dataIn, reframeStep, varSelect):
 
     X_all_gpr = X_DF.values
     if isinstance(Y_DF, pd.Series) == 1:
-        y_all_gpr = Y_DF.values.reshape(-1,1)
+        Y_all_gpr = Y_DF.values.reshape(-1,1)
     else:
-        y_all_gpr = Y_DF.values
+        Y_all_gpr = Y_DF.values
+
     lastY_test_point_gpr = lastY_test_point.values.reshape(1,-1)
 
-    return [X_all_gpr, y_all_gpr, lastY_test_point_gpr]
+    return [X_all_gpr, Y_all_gpr, lastY_test_point_gpr]
 
-def getTargetMapping(X_train_local, target_intrinsic_dim):
-    X_pcm = pfold.PCManifold(X_train_local)
-    X_pcm.optimize_parameters()
+def Embed(method, X_train_local, target_intrinsic_dim, **kwargs):
 
-    dmap_local = dfold.DiffusionMaps(
-        kernel=pfold.GaussianKernel(epsilon=X_pcm.kernel.epsilon),
-        n_eigenpairs=10,
-        dist_kwargs=dict(cut_off=X_pcm.cut_off),
-    )
-    dmap_local = dmap_local.fit(X_pcm)
-    #evecs_raw, evals_raw = dmap.eigenvectors_, dmap.eigenvalues_
+    if "LLE_neighbors" in kwargs:
+        LLE_neighbors = kwargs["LLE_neighbors"]
+    else:
+        LLE_neighbors = 50
 
-    selection = LocalRegressionSelection(
-        intrinsic_dim=target_intrinsic_dim, n_subsample=500, strategy="dim"
-    ).fit(dmap_local.eigenvectors_)
+    if method == "DM":
 
-    #print("selection.evec_indices_ = ", selection.evec_indices_)
-    parsimoniousEigs = ",".join([str(x) for x in selection.evec_indices_])
+        X_pcm = pfold.PCManifold(X_train_local)
+        X_pcm.optimize_parameters()
 
-    target_mapping = selection.transform(dmap_local.eigenvectors_)
-    #print("target_mapping.shape = ", target_mapping.shape)
+        dmap_local = dfold.DiffusionMaps(
+            kernel=pfold.GaussianKernel(epsilon=X_pcm.kernel.epsilon),
+            n_eigenpairs=10,
+            dist_kwargs=dict(cut_off=X_pcm.cut_off),
+        )
+        dmap_local = dmap_local.fit(X_pcm)
+        #evecs_raw, evals_raw = dmap.eigenvectors_, dmap.eigenvalues_
 
-    return [target_mapping, parsimoniousEigs, X_pcm.kernel.epsilon, dmap_local.eigenvalues_[selection.evec_indices_]]
+        selection = LocalRegressionSelection(
+            intrinsic_dim=target_intrinsic_dim, n_subsample=500, strategy="dim"
+        ).fit(dmap_local.eigenvectors_)
+
+        #print("selection.evec_indices_ = ", selection.evec_indices_)
+        parsimoniousEigs = ",".join([str(x) for x in selection.evec_indices_])
+
+        target_mapping = selection.transform(dmap_local.eigenvectors_)
+        #print("target_mapping.shape = ", target_mapping.shape)
+
+        out = [target_mapping, parsimoniousEigs, X_pcm.kernel.epsilon, dmap_local.eigenvalues_[selection.evec_indices_]]
+    elif method == "LLE":
+        lle = manifold.LocallyLinearEmbedding(n_neighbors=LLE_neighbors, n_components=target_intrinsic_dim, method="standard", n_jobs=-1)
+        target_mapping = lle.fit_transform(X_train_local)
+
+        out = [target_mapping, "none", 1, []]
+    elif method == "PCA":
+        pca = PCA(n_components=target_intrinsic_dim)
+        evecs = pca.fit_transform(X_train_local.T)
+        evals = pca.singular_values_
+        explainedVarianceRatio = pca.explained_variance_ratio_
+        target_mapping = pca.components_.T
+
+        out = [target_mapping, ",".join(evecs), explainedVarianceRatio, evals]
+
+    return out
 
 def TradePreds(X_Preds, X_test):
     trSig = pd.DataFrame(X_Preds)
@@ -160,13 +186,121 @@ def PaperizePreds(X_Preds, X_test, **kwargs): # CI_Lower_Band, CI_Upper_Band
         outList.append(textDF)
     """
     for col in X_test_df.columns:
-        rmse = np.round(np.sqrt(mse_psnr(X_Preds_df[col].values, X_test_df[col].values)[0]), 4)
+        #rmse = np.round(np.sqrt(mse_psnr(X_Preds_df[col].values, X_test_df[col].values)[0]), 4) # MINE
+        rmse = np.round(np.sqrt((1/X_test_df.shape[0]) * np.sum((X_Preds_df[col].values - X_test_df[col].values)**2)), 4) # SIETTOS
         outList.append(rmse)
 
     if 'returnData' in kwargs:
         return outList
     else:
         return ' & '.join([str(x) for x in outList])
+
+def get_ML_Predictions(mode, MLmethod, predictorsData, y_shifted, forecastHorizon):
+
+    if MLmethod == "GPR_Single":
+        mainKernel = 1 * ConstantKernel() + 1 * ExpSineSquared() + 1 * RBF() + 1 * WhiteKernel() # Official (29/8/2021)
+        model_List = [GaussianProcessRegressor(kernel=mainKernel, alpha=0.01, n_restarts_optimizer=2, random_state=random_state) for var in range(predictorsData.shape[1])]
+    elif MLmethod == "ANN_Single":
+        model_List = []
+        for var in range(predictorsData.shape[1]):
+            ANN_model = Sequential()
+            #ANN_model.add(Dense(2, input_dim=predictorsData.shape[1], activation='sigmoid'))
+            ANN_model.add(Dense(3, input_dim=predictorsData.shape[1], activation='sigmoid'))
+            ANN_model.add(Dense(1, activation='sigmoid'))
+            ANN_model.compile(loss='mse', optimizer='adam')
+            model_List.append(ANN_model)
+
+    if mode == "Main":
+        Preds_List = []
+        for step_i in tqdm(range(forecastHorizon)):
+
+            models_preds_list = []
+            for modelIn in range(len(model_List)):
+                if step_i == 0:
+                    roll_reframedData = reframeData(predictorsData, 1, modelIn)
+                    model_List[modelIn].fit(roll_reframedData[0], roll_reframedData[1])
+                    #print("model_List[modelIn].score = ", model_List[modelIn].score(roll_reframedData[0], roll_reframedData[1]))
+                    print("model_List[", modelIn, "].kernel = ", model_List[modelIn].kernel_)
+                    sub_row_Preds = model_List[modelIn].predict(roll_reframedData[2])
+                else:
+                    sub_row_Preds = model_List[modelIn].predict(total_row_subPred.reshape(roll_reframedData[2].shape))
+
+                models_preds_list.append(sub_row_Preds[0][0])
+
+            total_row_subPred = np.array(models_preds_list)
+            print("step_i = ", step_i, ", MLmethod = ", MLmethod, ", total_row_subPred = ", total_row_subPred)
+            Preds_List.append(total_row_subPred)
+    elif mode == "HardCoded":
+
+        mainKernel1 = 1 * RBF() + 1 * WhiteKernel() #"fixed", length_scale_bounds=(0,1)
+        mainKernel2 = 1 * RBF() + 1 * WhiteKernel()
+        mainKernel3 = 1 * RBF() + 1 * WhiteKernel()
+        mainKernel4 = 1 * RBF() + 1 * WhiteKernel()
+        mainKernel5 = 1 * RBF() + 1 * WhiteKernel()
+        gprModel1 = GaussianProcessRegressor(kernel=mainKernel1, random_state=random_state) #n_restarts_optimizer=10, normalize_y=True
+        gprModel2 = GaussianProcessRegressor(kernel=mainKernel2, random_state=random_state)
+        gprModel3 = GaussianProcessRegressor(kernel=mainKernel3, random_state=random_state)
+        gprModel4 = GaussianProcessRegressor(kernel=mainKernel4, random_state=random_state)
+        gprModel5 = GaussianProcessRegressor(kernel=mainKernel5, random_state=random_state)
+
+        #kernel1 = GPy.kern.RBF(input_dim=1, variance=1., lengthscale=1.)
+        #kernel2 = GPy.kern.RBF(input_dim=1, variance=1., lengthscale=1.)
+        #kernel3 = GPy.kern.RBF(input_dim=1, variance=1., lengthscale=1.)
+        #kernel4 = GPy.kern.RBF(input_dim=1, variance=1., lengthscale=1.)
+        #kernel5 = GPy.kern.RBF(input_dim=1, variance=1., lengthscale=1.)
+
+        #scale = StandardScaler()
+        #predictorsData = scale.fit_transform(predictorsData)
+
+        d1 = predictorsData[:predictorsData.shape[0]-1]
+        d2 = predictorsData[1:predictorsData.shape[0]]
+
+        # SKLEARN
+        gprModel1.fit(d1, d2[:, 0])
+        gprModel2.fit(d1, d2[:, 1])
+        gprModel3.fit(d1, d2[:, 2])
+        gprModel4.fit(d1, d2[:, 3])
+        gprModel5.fit(d1, d2[:, 4])
+
+        # GPY
+        #gprModel1 = GPy.models.GPRegression(d1, d2[:, 0].reshape(d2.shape[0], 1), kernel1)
+        #gprModel2 = GPy.models.GPRegression(d1, d2[:, 1].reshape(d2.shape[0], 1), kernel2)
+        #gprModel3 = GPy.models.GPRegression(d1, d2[:, 2].reshape(d2.shape[0], 1), kernel3)
+        #gprModel4 = GPy.models.GPRegression(d1, d2[:, 3].reshape(d2.shape[0], 1), kernel4)
+        #gprModel5 = GPy.models.GPRegression(d1, d2[:, 4].reshape(d2.shape[0], 1), kernel5)
+        #gprModel1.optimize(messages=True)
+        #gprModel2.optimize(messages=True)
+        #gprModel3.optimize(messages=True)
+        #gprModel4.optimize(messages=True)
+        #gprModel5.optimize(messages=True)
+
+        lastPreds = d1[-1].reshape(1,-1)
+        print("lastPreds = ", lastPreds)
+        print("lastPreds.shape = ", lastPreds.shape)
+
+        Preds_List = []
+        for step_i in range(500):
+            gprModel1_Preds = gprModel1.predict(lastPreds)
+            try:
+                print(gprModel1.kernel_)
+            except Exception as e:
+                print(e)
+            gprModel2_Preds = gprModel2.predict(lastPreds)
+            gprModel3_Preds = gprModel3.predict(lastPreds)
+            gprModel4_Preds = gprModel4.predict(lastPreds)
+            gprModel5_Preds = gprModel5.predict(lastPreds)
+
+            lastPreds = np.array([gprModel1_Preds[0], gprModel2_Preds[0], gprModel3_Preds[0], gprModel4_Preds[0], gprModel5_Preds[0]])
+            Preds_List.append(lastPreds)
+            print("step_i = ", step_i, ", lastPreds = ", lastPreds)
+            #print("lastPreds.shape = ", lastPreds.shape)
+            lastPreds = lastPreds.reshape(1,-1)
+            #print("lastPreds.shape = ", lastPreds.shape)
+    #pd.DataFrame(Preds_List).plot()
+    #plt.show()
+    #time.sleep(3000)
+
+    return Preds_List
 
 ################################## ROLLING RUN PROCESS ##############################
 def RollingRunProcess(params):
@@ -180,6 +314,7 @@ def RollingRunProcess(params):
     mode = params['mode']
     modeSplit = mode.split(',')
     rolling_Predict_Memory = params['rolling_Predict_Memory']
+    embedMethod = params['embedMethod']
     processName = '_'.join([str(x) for x in list(params.values())[2:]])
     print(processName)
     #time.sleep(3000)
@@ -198,14 +333,14 @@ def RollingRunProcess(params):
             roll_parsimoniousEigs_List.append(roll_parsimoniousEigs)
             modelListSpectrum = roll_target_mapping.shape[1]
         else:
-            roll_target_mapping_List = getTargetMapping(roll_X_train, target_intrinsic_dim)
+            roll_target_mapping_List = Embed(embedMethod, roll_X_train, target_intrinsic_dim)
             roll_target_mapping = roll_target_mapping_List[0]
             roll_parsimoniousEigs = roll_target_mapping_List[1]
             roll_parsimoniousEigs_List.append(roll_parsimoniousEigs)
             modelListSpectrum = roll_target_mapping.shape[1]
 
         if i == trainSetLength:
-            model_GPR_List = [GaussianProcessRegressor(kernel=1 * Matern(), random_state=0) for var in range(modelListSpectrum)]
+            model_GPR_List = [GaussianProcessRegressor(kernel=1 * RBF(), random_state=0) for var in range(modelListSpectrum)]
 
         ##############################################################################################################
         if modeSplit[1].strip() == 'VAR':
@@ -286,10 +421,10 @@ def RollingRunProcess(params):
     #CI_Upper_Band = np.array(CI_Upper_Band_List)
 
     print(PaperizePreds(Preds, X_test))
-    pickle.dump(Preds, open(RollingRunnersPath + processName + "_Preds.p", "wb"))
+    pickle.dump(Preds, open(RollingRunnersPath + processName + ".p", "wb"))
     #pickle.dump(Lifted_X_Preds, open(RollingRunnersPath + label + "_" + str(simulationNumber) + "_" + mode.replace(",","_") + "_" + modelID + "_Preds.p", "wb"))
 
-random_state = 1
+random_state = 0
 
 modelParamsList = []
 
@@ -373,11 +508,15 @@ def Lift(method, X_trainingSet, X_testSet, eig_trainingSet, eig_Simulation, knn)
         residual = lpyr_interpolant_psi_to_X.score(eig_trainingSet, X_trainingSet)
         extrapolatedPsi_to_X = lpyr_interpolant_psi_to_X.predict(eig_Simulation)
     elif method == 'KR':
-        mainKernel_Kriging_GP = 1 * Matern()
-        gpr_model = GaussianProcessRegressor(kernel=mainKernel_Kriging_GP)
+        mainKernel_Kriging_GP = 1 * RBF()
+        gpr_model = GaussianProcessRegressor(kernel=mainKernel_Kriging_GP, normalize_y=True)
         gpr_model_fit = gpr_model.fit(eig_trainingSet, X_trainingSet)
         residual = gpr_model_fit.score(eig_trainingSet, X_trainingSet)
         extrapolatedPsi_to_X = gpr_model_fit.predict(eig_Simulation)
+    elif method == 'SI': #Simple Linear ND Interpolator
+        knn_interpolator = NearestNDInterpolator(eig_trainingSet, X_trainingSet)
+        extrapolatedPsi_to_X = knn_interpolator(eig_Simulation)
+        residual = extrapolatedPsi_to_X - X_testSet
 
     try:
         mse_psnr_val = mse_psnr(extrapolatedPsi_to_X, X_testSet)
@@ -535,24 +674,30 @@ def RunPythonDM(paramList):
     simulationNumber = paramList[2]
     datasetsPath = paramList[3]
     RollingRunnersPath = paramList[4]
+    embedMethod = paramList[5]
 
-    #matFileName = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets\\' + label + "_" + str(simulationNumber) + '.mat'
     matFileName = datasetsPath + label + "_" + str(simulationNumber) + '.mat'
+    print("matFileName = ", matFileName)
     mat = scipy.io.loadmat(matFileName)
-    data = mat['y']
+    #data = mat['y']
+    data = mat['Ytrain']
     forecastHorizon = 500
     rolling_Embed_Memory = 500
     rolling_Predict_Memory = 100
     trainSetLength = data.shape[0]-forecastHorizon
     modeSplit = mode.split(',')
 
-    if label == 'EEGdatanew':
-        target_intrinsic_dim = 2
-    else:
+    if 'nonlin' in label:
         target_intrinsic_dim = 3
+    elif 'FX' in label:
+        target_intrinsic_dim = 3
+    else:
+        target_intrinsic_dim = 2
 
     X_train = data[:trainSetLength]
     X_test = data[trainSetLength:]
+    X_test_shifted = sl.S(pd.DataFrame(X_test)).values
+    X_test_shifted[0] = X_train[-1]
 
     if modeSplit[0] == 'FullModel_Static':
 
@@ -560,43 +705,17 @@ def RunPythonDM(paramList):
             forecasting_model = VAR(X_train)
             model_fit = forecasting_model.fit()
             FullModel_VAR_Preds = model_fit.forecast_interval(model_fit.y, steps=forecastHorizon, alpha=0.05)
-
+            #FullModel_VAR_Preds = model_fit.forecast_interval(X_test_shifted, steps=forecastHorizon, alpha=0.05)
             Preds = FullModel_VAR_Preds[0]
-        elif modeSplit[1] == "GPR_Multi":
-
-            reframedDataTrain = reframeData(X_train[-rolling_Predict_Memory:], 1, "all")
-
-            model_gpr = GaussianProcessRegressor(kernel=1 * Matern(), random_state=0)
-            model_gpr.fit(reframedDataTrain[0], reframedDataTrain[1])
-            Preds, sub_indPrediction_Std = model_gpr.predict(reframedDataTrain[2], return_std=True)
-
-        elif modeSplit[1] == "GPR_Single": ##################### 'FullModel_Static' #######################
-
-            mainKernel = 1 * Matern()
-            model_GPR_List = [GaussianProcessRegressor(kernel=mainKernel, random_state=0) for var in range(X_test.shape[1])]
-
-            Preds_List = []
-            for step_i in tqdm(range(forecastHorizon)):
-                models_preds_list = []
-                for modelIn in range(len(model_GPR_List)):
-                    if step_i == 0:
-                        roll_reframedData = reframeData(X_train, 1, modelIn)
-                        model_GPR_List[modelIn].fit(roll_reframedData[0], roll_reframedData[1])
-                        sub_row_Preds, sub_roll_target_mapping_Preds_Std = model_GPR_List[modelIn].predict(roll_reframedData[2], return_std=True)
-                    else:
-                        sub_row_Preds, sub_roll_target_mapping_Preds_Std = model_GPR_List[modelIn].predict(total_row_subPred.reshape(roll_reframedData[2].shape), return_std=True)
-
-                    models_preds_list.append(sub_row_Preds[0][0])
-
-                total_row_subPred = np.array(models_preds_list)
-                #print(total_row_subPred)
-                Preds_List.append(total_row_subPred)
-
+        elif modeSplit[1] in ["GPR_Single", "ANN_Single"]:
+            Preds_List = get_ML_Predictions("Main", modeSplit[1], X_train, X_test_shifted, forecastHorizon)
+            #Preds_List = get_ML_Predictions("Use_shifted_Test_Set", modeSplit[1], X_train, X_test_shifted, forecastHorizon)
+            #Preds_List = get_ML_Predictions("HardCoded", modeSplit[1], X_train, X_test_shifted, forecastHorizon)
             Preds = pd.DataFrame(Preds_List).values
 
         FullModel_Static_PaperText = PaperizePreds(Preds, X_test)
         print("FullModel_Static_PaperText = ", FullModel_Static_PaperText)
-        pickle.dump(Preds, open(RollingRunnersPath + label + "_" + str(simulationNumber) + "_" + mode.replace(",","_") + "_Preds.p", "wb"))
+        pickle.dump(Preds, open(RollingRunnersPath + label + "_" + str(simulationNumber) + "_" + mode.replace(",","_") + "_" + embedMethod + ".p", "wb"))
     elif modeSplit[0] == "FullModel_Rolling":
 
         params = {'data': data,
@@ -608,6 +727,7 @@ def RunPythonDM(paramList):
                   'rolling_Embed_Memory': rolling_Embed_Memory,
                   'target_intrinsic_dim': target_intrinsic_dim, 'mode': "FullModel_Rolling,"+modeSplit[1],
                   'rolling_Predict_Memory': rolling_Predict_Memory,
+                  'embedMethod': embedMethod,
                   'kernelIn': np.nan, 'degreeIn': np.nan, 'neighborsIn': np.nan, 'epsilonIn': np.nan
                   }
 
@@ -617,40 +737,21 @@ def RunPythonDM(paramList):
 
         ###################################### REDUCED TARGET SPACE #######################################
         "Embed"
-        target_mapping_List = getTargetMapping(X_train, target_intrinsic_dim)
+        target_mapping_List = Embed(embedMethod, X_train, target_intrinsic_dim)
         target_mapping = target_mapping_List[0]
-        parsimoniousEigs = target_mapping_List[1]
-        target_mapping_EigVals = target_mapping_List[3]
+        #parsimoniousEigs = target_mapping_List[1]
+        #target_mapping_EigVals = target_mapping_List[3]
 
         "Forecast and get CIs for the embedded space"
         if modeSplit[1] == "VAR":
             forecasting_model = VAR(target_mapping)
             model_fit = forecasting_model.fit()
             target_mapping_Preds_All = model_fit.forecast_interval(model_fit.y, steps=forecastHorizon, alpha=0.05)
-            eigPreds = target_mapping_Preds_All[0]
-        elif modeSplit[1] == "GPR_Single":
-            mainKernel = 1 * Matern()
-            model_GPR_List = [GaussianProcessRegressor(kernel=mainKernel, random_state=0) for var in range(target_mapping.shape[1])]
+            mapped_Preds = target_mapping_Preds_All[0]
+        elif modeSplit[1] in ["GPR_Single", "ANN_Single"]:
 
-            Preds_List = []
-            for step_i in tqdm(range(forecastHorizon)):
-                models_preds_list = []
-                for modelIn in range(len(model_GPR_List)):
-                    if step_i == 0:
-                        roll_reframedData = reframeData(target_mapping, 1, modelIn)
-                        model_GPR_List[modelIn].fit(roll_reframedData[0], roll_reframedData[1])
-                        sub_row_Preds, sub_roll_target_mapping_Preds_Std = model_GPR_List[modelIn].predict(roll_reframedData[2], return_std=True)
-                    else:
-                        sub_row_Preds, sub_roll_target_mapping_Preds_Std = model_GPR_List[modelIn].predict(total_row_subPred.reshape(roll_reframedData[2].shape), return_std=True)
-
-                    models_preds_list.append(sub_row_Preds[0][0])
-
-                total_row_subPred = np.array(models_preds_list)
-                Preds_List.append(total_row_subPred)
-
-            eigPreds = pd.DataFrame(Preds_List).values
-
-        mapped_Preds = eigPreds
+            Preds_List = get_ML_Predictions("Main", modeSplit[1], target_mapping, [], forecastHorizon)
+            mapped_Preds = pd.DataFrame(Preds_List).values
 
         #if simulationNumber == 0:
         #    pd.DataFrame(target_mapping).to_excel(label+"_"+modeSplit[1]+"_DM_mapped_Eigs_to_Matlab.xlsx")
@@ -658,7 +759,7 @@ def RunPythonDM(paramList):
         #    pd.DataFrame(mapped_Preds).to_excel(label+"_"+modeSplit[1]+"_DM_mapped_Preds_to_Matlab.xlsx")
 
         #statsList = []
-        for liftMethod in ["RBF", "GH"]:
+        for liftMethod in ["SI", "GH", "RBF", "KR"]: #
             if liftMethod == "RBF":
                 for kernelIn in ['linear']: # , 'gaussian'
                     for degreeIn in [1]:
@@ -666,13 +767,14 @@ def RunPythonDM(paramList):
                             for epsilonIn in [1]:
                                 modelID = str(kernelIn) + '_' + str(degreeIn) + '_' + str(neighborsIn) + '_' + str(epsilonIn) + '_' + str(liftMethod)
                                 Lifted_X_Preds = RBFInterpolator(target_mapping, X_train, kernel=kernelIn,degree=degreeIn, neighbors=neighborsIn,epsilon=epsilonIn)(mapped_Preds)
-                                pickle.dump(Lifted_X_Preds, open(RollingRunnersPath + label + "_" + str(simulationNumber) + "_" + mode.replace(",","_") + "_" + modelID + "_Preds.p","wb"))
-
-            else:
+                                print("Static_Run, ", modeSplit[1], ", liftMethod = ", liftMethod, ", Lifted_X_Preds = ", Lifted_X_Preds)
+                                pickle.dump(Lifted_X_Preds, open(RollingRunnersPath + label + "_" + str(simulationNumber) + "_" + mode.replace(",","_") + "_" + modelID + "_" + embedMethod + ".p","wb"))
+            else: # knn Greedy Search is only valid for GH method = pls make another 'if' in case of other methods G.Sea
                 for knn in [50]:
                     modelID = str(knn) + '_' + str(liftMethod)
                     Lifted_X_Preds = Lift(liftMethod, X_train, X_test, target_mapping, mapped_Preds, knn)[0]
-                    pickle.dump(Lifted_X_Preds, open(RollingRunnersPath + label + "_" + str(simulationNumber) + "_" + mode.replace(",","_") + "_" + modelID + "_Preds.p","wb"))
+                    print("Static_Run, ", modeSplit[1], ", liftMethod = ", liftMethod, ", Lifted_X_Preds = ", Lifted_X_Preds)
+                    pickle.dump(Lifted_X_Preds, open(RollingRunnersPath + label + "_" + str(simulationNumber) + "_" + mode.replace(",","_") + "_" + modelID + "_" + embedMethod + ".p","wb"))
     ###################################################################################################################
     elif modeSplit[0] == 'Rolling_run':
 
@@ -691,6 +793,7 @@ def RunPythonDM(paramList):
                                 'rolling_Embed_Memory': rolling_Embed_Memory,
                                 'target_intrinsic_dim': target_intrinsic_dim, 'mode': mode,
                                 'rolling_Predict_Memory': rolling_Predict_Memory,
+                                'embedMethod': embedMethod,
                                 'kernelIn':kernelIn, 'degreeIn':degreeIn, 'neighborsIn':neighborsIn, 'epsilonIn':epsilonIn
                             }
                             #processList.append(params)
@@ -724,7 +827,7 @@ def RunPythonDM(paramList):
         full_eigenval_df = pd.DataFrame(evals_full)
         full_eigenval_df.to_csv(label+"_"+mode+".csv")
 
-def Reporter(mode):
+def Reporter(mode, datasetsPath, RollingRunnersPath):
 
     forecastHorizon = 500
 
@@ -733,7 +836,8 @@ def Reporter(mode):
         allDataListRW = []
         for dataset_total_name in glob.glob(datasetsPath+'*.mat'):
             mat_dataset = scipy.io.loadmat(dataset_total_name)
-            dataRW = mat_dataset['y']
+            #dataRW = mat_dataset['y']
+            dataRW = mat_dataset['Ytrain']
             trainSetLengthRW = dataRW.shape[0] - forecastHorizon
             X_testRW = dataRW[trainSetLengthRW:]
 
@@ -746,15 +850,16 @@ def Reporter(mode):
     elif mode == "Run":
 
         allDataList = []
-        for file_total_name in glob.glob('D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners/*.p'):
+        for file_total_name in glob.glob(RollingRunnersPath+'\\*.p'):
             file_name = file_total_name.split("\\")[-1]
             file_name_split = file_name.split("_")
             label = file_name_split[0]
             simulationNumber = file_name_split[1]
 
-            matFileName = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets\\' + label + "_" + str(simulationNumber) + '.mat'
+            matFileName = datasetsPath + label + "_" + str(simulationNumber) + '.mat'
             mat = scipy.io.loadmat(matFileName)
-            data = mat['y']
+            #data = mat['y']
+            data = mat['Ytrain']
             trainSetLength = data.shape[0] - forecastHorizon
             X_test = data[trainSetLength:]
 
@@ -791,7 +896,7 @@ def Reporter(mode):
             #conf = sms.DescrStatsW(rmseVarsDF.values).tconfint_mean()
             percentile5 = np.percentile(rmseVarsDF.values, 5, axis=0)
             percentile95 = np.percentile(rmseVarsDF.values, 95, axis=0)
-            reportText = ' & '.join([str(np.round(rmseVarsDF_median[c],4)) + ' (' + str(np.round(percentile5[c],4)) + ',' + str(np.round(percentile95[c],4)) +')' for c in range(len(rmseVarsDF_median))])
+            reportText = ' & '.join([str(np.round(rmseVarsDF_median[c],3)) + ' (' + str(np.round(percentile5[c],3)) + ',' + str(np.round(percentile95[c],3)) +')' for c in range(len(rmseVarsDF_median))])
 
             ReportList.append([elem, reportText, subDF.shape[0]])
 
@@ -799,52 +904,75 @@ def Reporter(mode):
         ReportDF.to_excel("Reporter.xlsx")
 
 def Test():
-    siettos_rmse_Mat_data = scipy.io.loadmat("D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\siettos_Example_Dataset.mat")
-    data = siettos_rmse_Mat_data['rmserw'][0]
-    siettos_df = pd.DataFrame(data)
-    print("np.percentile5 = ", np.percentile(siettos_df.values, 5, axis=0))
-    print("np.percentile95 = ", np.percentile(siettos_df.values, 95, axis=0))
-    print("median = ", siettos_df.median())
-    print(type(data))
+    matFileName = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_Siettos_ThirdApproach\\EEGsynthetic2nonlin_0.mat'
+    mat = scipy.io.loadmat(matFileName)
+    data = mat['Ytrain']
+    forecastHorizon = 500
+    trainSetLength = data.shape[0] - forecastHorizon
+    X_test = data[trainSetLength:]
+
+    Preds1 = pickle.load(open("D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners\EEGsynthetic2nonlin_0_FullModel_Static_VAR_DM.p", "rb"))
+    Preds2 = pickle.load(open("D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners\EEGsynthetic2nonlin_0_FullModel_Static_GPR_Single_DM.p", "rb"))
+
+    print("VAR")
+    print(pd.DataFrame(Preds1))#.tail(5))
+    print(PaperizePreds(Preds1, X_test, returnData='yes'))
+    print("GPR")
+    print(pd.DataFrame(Preds2))#.tail(5))
+    print(PaperizePreds(Preds2, X_test, returnData='yes'))
+
+    pd.concat([pd.DataFrame(Preds1, columns=["Preds1_"+str(x) for x in range(Preds1.shape[1])]), pd.DataFrame(Preds2, columns=["Preds2_"+str(x) for x in range(Preds1.shape[1])])], axis=1).plot()
+    plt.show()
 
 if __name__ == '__main__':
 
-    label = "EEGsynthetic2nonlin" # "EEGdatanew", "EEGdataNonLinear", "FxDataAdjRets", "EEGsynthetic2nonlin" (second approach)
-    #datasetsPath = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets\\'; simulNum = 100
-    datasetsPath = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_Siettos_SecondApproach\\'; simulNum = 5
+    label = "EEGsynthetic2" # "FxDataAdjRets", "EEGsynthetic2", "EEGsynthetic2nonlin" (third and final approach)
+    embedMethod = "DM" # PCA, LLE, DM
 
+    datasetsPath = 'D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_Siettos_ThirdApproach\\'
+    simulNum = 100 # 5, 100 CAUTION! How many datasets(simulations) to scan in the target folder !!!
     RollingRunnersPath = "D:\Dropbox\VM_Backup\RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners\\"
 
-    #processToRun = "FullModel_Static,VAR" # 1 done(100), 2 done(100),
-    processToRun = "FullModel_Static,GPR_Single" #
-    #processToRun = "Static_run,VAR" # 1 done(10), 2 done(10)
-    #processToRun = "Static_run,GPR_Single" #
+    ##### STATIC ####
+    #processToRun = "FullModel_Static,VAR" # done both
+    #processToRun = "FullModel_Static,GPR_Single"
+    processToRun = "Static_run,VAR"
+    #processToRun = "Static_run,GPR_Single" # Siettos
+    #processToRun = "Static_run,ANN_Single"
+
     ##### ROLLING ####
     #processToRun = "FullModel_Rolling,VAR" # 1 done(100), 2 done(100)
     #processToRun = "FullModel_Rolling,GPR_Single"
     #processToRun = "Rolling_run,VAR" # , 2 done(100)
     #processToRun = "Rolling_run,GPR_Single"
 
-    #simulList = []
-    #for simul in range(simulNum):
-    #    try:
-    #        simulList.append([label, processToRun, simul, datasetsPath, RollingRunnersPath])
-    #    except Exception as e:
-    #        print(simul)
-    #        print(e)
-
-    #p = mp.Pool(mp.cpu_count())
-    #result = p.map(RunPythonDM, tqdm(simulList))
-    #p.close()
-    #p.join()
-
-    #RunPythonDM([label, "FullModel_Static,VAR", 0])
-
-    Reporter("RunRandomWalks") # Done!
-    Reporter("Run")
-    Reporter("Read")
+    "Run Single Process (for testing)"
+    #RunPythonDM([label, "FullModel_Static,VAR", 0, datasetsPath, RollingRunnersPath, embedMethod])
+    #RunPythonDM([label, "FullModel_Static,GPR_Single", 0, datasetsPath, RollingRunnersPath, embedMethod])
 
     #Test()
+
+    runProcessesParallel = 1
+
+    if runProcessesParallel == 1:
+
+        simulList = []
+        for simul in range(simulNum):
+            try:
+                simulList.append([label, processToRun, simul, datasetsPath, RollingRunnersPath, embedMethod])
+            except Exception as e:
+                print(simul)
+                print(e)
+        p = mp.Pool(mp.cpu_count())
+        result = p.map(RunPythonDM, tqdm(simulList))
+        p.close()
+        p.join()
+
+    elif runProcessesParallel == 0:
+        " REPORT RESULTS "
+        Reporter("RunRandomWalks", datasetsPath, RollingRunnersPath) # Done!
+        Reporter("Run", datasetsPath, RollingRunnersPath)
+        Reporter("Read", datasetsPath, RollingRunnersPath)
 
 ### NOTES ###
 """
