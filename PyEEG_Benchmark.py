@@ -736,7 +736,7 @@ def RunPythonDM(paramList):
             FullModel_VAR_Preds = model_fit.forecast_interval(model_fit.y, steps=forecastHorizon, alpha=0.05)
             Preds = FullModel_VAR_Preds[0]
         elif modeSplit[1] in ["GPR_Single", "ANN_Single"]:
-            Preds_List = get_ML_Predictions("Main", modeSplit, X_train_predict, X_test_shifted, forecastHorizon)
+            Preds_List = get_ML_Predictions("Main", mode, X_train_predict, X_test_shifted, forecastHorizon)
             Preds = pd.DataFrame(Preds_List).values
 
         try:
@@ -1019,8 +1019,8 @@ def Reporter(mode, datasetsPath, RollingRunnersPath, writeResiduals, target_intr
 
 if __name__ == '__main__':
 
-    label = "EEGsynthetic2nonlin"  # EEGsynthetic2, EEGsynthetic2nonlin, EEGsynthetic2nonlinDelay, FxDataAdjRetsMAJORSDelay
-    embedMethod = "DMComputeParsimonious"  # LLE, DMComputeParsimonious, DM
+    label = "EEGsynthetic2nonlinDelay"  # EEGsynthetic2, EEGsynthetic2nonlin, EEGsynthetic2nonlinDelay, FxDataAdjRetsMAJORSDelay
+    embedMethod = "LLE"  # LLE, DMComputeParsimonious, DM
 
     pcFolderRoot = 'D:\Dropbox\VM_Backup\\'
     #pcFolderRoot = 'E:\Dropbox\Dropbox\VM_Backup\\'
@@ -1047,7 +1047,8 @@ if __name__ == '__main__':
         ######################
         rollingSpecs = [[], [], 1] #1,
 
-        runProcessesFlag = "MultipleProcesses"
+        runProcessesFlag = "SingleProcesses"
+        #runProcessesFlag = "MultipleProcesses"
 
         datasetsPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_Siettos_ThirdApproach\\'
         RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\StaticRunners\\'
@@ -1102,7 +1103,7 @@ if __name__ == '__main__':
         GH_cut_offIn = "opt"
         lift_optParams_knnIn = 50
         ######################
-        rollingSpecs = [[], [], 1]
+        rollingSpecs = [[], [], 3]
 
         runProcessesFlag = "MultipleProcesses"
 
@@ -1141,10 +1142,10 @@ if __name__ == '__main__':
     ##### STATIC ####
     #processToRun = "FullModel_Static,Single_AR,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Static,VAR,"+str(rollingSpecs[2])
-    #processToRun = "FullModel_Static,GPR_Single"+str(rollingSpecs[2])
+    #processToRun = "FullModel_Static,GPR_Single,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Static,ANN_Single"+str(rollingSpecs[2])
-    #processToRun = "Static_run,VAR,"+str(rollingSpecs[2])
-    processToRun = "Static_run,GPR_Single,"+str(rollingSpecs[2])
+    processToRun = "Static_run,VAR,"+str(rollingSpecs[2])
+    #processToRun = "Static_run,GPR_Single,"+str(rollingSpecs[2])
     #processToRun = "Static_run,ANN_Single"
 
     ##### ROLLING ####
@@ -1153,7 +1154,7 @@ if __name__ == '__main__':
     #processToRun = "Rolling_run,VAR,"+str(rollingSpecs[2])
     #processToRun = "Rolling_run,GPR_Single,"+str(rollingSpecs[2])
 
-    runProcessesFlag = "Report"
+    #runProcessesFlag = "Report"
     writeResiduals = 0
 
     if runProcessesFlag == "SingleProcess":
