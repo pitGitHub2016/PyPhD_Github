@@ -596,8 +596,6 @@ def RollingRunProcess(params):
     if os.path.exists(checkEmbeddingFilePath):
         print("Embedding File Exists! : " + checkEmbeddingFilePath)
         Stored_Embedding_Data = pickle.load(open(checkEmbeddingFilePath, "rb"))
-        target_mapping = Stored_Embedding_Data[0]
-        modelListSpectrum = target_mapping[0].shape[1]
         storedCount = 0
         embeddingFileExists = True
     else:
@@ -613,14 +611,17 @@ def RollingRunProcess(params):
                 roll_target_mapping = data[i - rolling_Embed_Memory:i]
                 modelListSpectrum = roll_target_mapping.shape[1]
             else:
+                roll_X_train_embed = data_embed[i - rolling_Embed_Memory:i]
+                roll_X_train_lift = data[i - rolling_Embed_Memory:i]
+                roll_X_test = data[i]
+
                 if embeddingFileExists == True:
-                    roll_target_mapping = target_mapping[storedCount]
+                    roll_target_mapping = Stored_Embedding_Data[storedCount][0]
+                    modelListSpectrum = roll_target_mapping.shape[1]
+                    #print("storedCount = ", storedCount, ", type(roll_target_mapping) = ", type(roll_target_mapping), ", roll_target_mapping.shape = ", roll_target_mapping.shape)
+                    #time.sleep(3000)
                     storedCount += 1
                 else:
-                    roll_X_train_embed = data_embed[i - rolling_Embed_Memory:i]
-                    roll_X_train_lift = data[i - rolling_Embed_Memory:i]
-                    roll_X_test = data[i]
-    
                     roll_target_mapping_List = Embed(embedMethod, roll_X_train_embed, target_intrinsic_dim, LLE_neighbors=LLE_neighborsIn, dm_epsilon=dm_epsilonIn, cut_off=cut_offIn, dm_optParams_knn=dm_optParams_knnIn)
                     roll_target_mapping = roll_target_mapping_List[0]
                     modelListSpectrum = roll_target_mapping.shape[1]
@@ -640,10 +641,12 @@ def RollingRunProcess(params):
                     subPredsList.append(FullModel_Single_AR_Preds[0][0])
                 row_Preds = np.array(subPredsList).reshape(1, roll_target_mapping.shape[1])
             elif modeSplit[1].strip() == 'VAR':
+                #print("roll_target_mapping[-rolling_Predict_Memory:].shape = ", roll_target_mapping[-rolling_Predict_Memory:].shape)
                 roll_forecasting_model = VAR(roll_target_mapping[-rolling_Predict_Memory:])
                 roll_model_fit = roll_forecasting_model.fit(int(modeSplit[2]))
                 roll_target_mapping_Preds_All = roll_model_fit.forecast_interval(roll_model_fit.y, steps=1, alpha=0.05)
                 row_Preds = roll_target_mapping_Preds_All[0]
+                #print("row_Preds.shape = ", row_Preds.shape)
             elif modeSplit[1].strip() == 'GPR_Single':
                 if i == trainSetLength:
                     mainRolling_kernel = 1 * ConstantKernel() + 1 * ExpSineSquared() + 1 * RBF() + 1 * WhiteKernel()
