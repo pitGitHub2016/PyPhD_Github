@@ -1,5 +1,5 @@
 from Slider import Slider as sl
-import scipy.io, glob
+import scipy.io, glob, os
 from scipy.interpolate import NearestNDInterpolator
 import itertools, math
 import numpy as np, investpy, time, pickle
@@ -588,35 +588,46 @@ def RollingRunProcess(params):
 
     processName = '_'.join([str(x) for x in list(params.values())[3:]])
 
-    roll_parsimoniousEigs_List = []
+    writeEmbeddingFile = False
+    embeddingFileExists = False
+
+    "Check if embedding File already exists and use this one instead of recalculating!"
+    checkEmbeddingFilePath = RollingRunnersPath + "Embeddings\\" + processName.replace(mode + "_", "") + "_EMBEDDINGFILE.p"
+    if os.path.exists(checkEmbeddingFilePath):
+        print("Embedding File Exists! : " + checkEmbeddingFilePath)
+        Stored_Embedding_Data = pickle.load(open(checkEmbeddingFilePath, "rb"))
+        target_mapping = Stored_Embedding_Data[0]
+        modelListSpectrum = target_mapping[0].shape[1]
+        storedCount = 0
+        embeddingFileExists = True
+    else:
+        print("No related Embedding File exists. Calculating embedding as well .... ")
+
     PredsList = []
+    embeddingList = []
     for i in tqdm(range(trainSetLength, data.shape[0], 1)):
 
         try:
             if liftMethod == 'FullModel':
                 roll_X_test = data[i]
-
                 roll_target_mapping = data[i - rolling_Embed_Memory:i]
-                roll_parsimoniousEigs = ""
-                roll_parsimoniousEigs_List.append(roll_parsimoniousEigs)
                 modelListSpectrum = roll_target_mapping.shape[1]
             else:
+                if embeddingFileExists == True:
+                    roll_target_mapping = target_mapping[storedCount]
+                    storedCount += 1
+                else:
+                    roll_X_train_embed = data_embed[i - rolling_Embed_Memory:i]
+                    roll_X_train_lift = data[i - rolling_Embed_Memory:i]
+                    roll_X_test = data[i]
+    
+                    roll_target_mapping_List = Embed(embedMethod, roll_X_train_embed, target_intrinsic_dim, LLE_neighbors=LLE_neighborsIn, dm_epsilon=dm_epsilonIn, cut_off=cut_offIn, dm_optParams_knn=dm_optParams_knnIn)
+                    roll_target_mapping = roll_target_mapping_List[0]
+                    modelListSpectrum = roll_target_mapping.shape[1]
+                    embeddingList.append(roll_target_mapping_List)
+                    writeEmbeddingFile = True
 
-                roll_X_train_embed = data_embed[i - rolling_Embed_Memory:i]
-                roll_X_train_lift = data[i - rolling_Embed_Memory:i]
-                roll_X_test = data[i]
-
-                roll_target_mapping_List = Embed(embedMethod, roll_X_train_embed, target_intrinsic_dim, LLE_neighbors=LLE_neighborsIn, dm_epsilon=dm_epsilonIn, cut_off=cut_offIn, dm_optParams_knn=dm_optParams_knnIn)
-                roll_target_mapping = roll_target_mapping_List[0]
-                roll_parsimoniousEigs = roll_target_mapping_List[1]
-                roll_parsimoniousEigs_List.append(roll_parsimoniousEigs)
-                modelListSpectrum = roll_target_mapping.shape[1]
-
-            if i == trainSetLength:
-                mainRolling_kernel = 1 * ConstantKernel() + 1 * ExpSineSquared() + 1 * RBF() + 1 * WhiteKernel()
-                model_GPR_List = [GaussianProcessRegressor(kernel=mainRolling_kernel, random_state=0) for var in range(modelListSpectrum)]
-
-            ##############################################################################################################
+            ###################################### PREDICT #######################################
             if modeSplit[1].strip() == "Single_AR":
                 # print("roll_target_mapping.shape[1] = ", roll_target_mapping.shape[1])
                 subPredsList = []
@@ -634,6 +645,10 @@ def RollingRunProcess(params):
                 roll_target_mapping_Preds_All = roll_model_fit.forecast_interval(roll_model_fit.y, steps=1, alpha=0.05)
                 row_Preds = roll_target_mapping_Preds_All[0]
             elif modeSplit[1].strip() == 'GPR_Single':
+                if i == trainSetLength:
+                    mainRolling_kernel = 1 * ConstantKernel() + 1 * ExpSineSquared() + 1 * RBF() + 1 * WhiteKernel()
+                    model_GPR_List = [GaussianProcessRegressor(kernel=mainRolling_kernel, random_state=0) for var in range(modelListSpectrum)]
+
                 models_preds_list = []
                 for modelIn in range(len(model_GPR_List)):
                     roll_reframedData = reframeData(roll_target_mapping[-rolling_Predict_Memory:], int(modeSplit[2]), modelIn)
@@ -656,9 +671,10 @@ def RollingRunProcess(params):
             PredsList.append([0 for var in range(len(PredsList[-1]))])
 
     Preds = np.array(PredsList)
-
-    print(Preds.shape)
+    print("Preds.shape = ", Preds.shape)
     pickle.dump(Preds, open(RollingRunnersPath + processName + ".p", "wb"))
+    if writeEmbeddingFile == True:
+        pickle.dump(embeddingList, open(RollingRunnersPath + "Embeddings\\" + processName.replace(mode+"_", "") + "_EMBEDDINGFILE.p", "wb"))
 
 def RunPythonDM(paramList):
     label = paramList[0]
@@ -1019,7 +1035,7 @@ def Reporter(mode, datasetsPath, RollingRunnersPath, writeResiduals, target_intr
 
 if __name__ == '__main__':
 
-    label = "EEGsynthetic2nonlinDelay"  # EEGsynthetic2, EEGsynthetic2nonlin, EEGsynthetic2nonlinDelay, FxDataAdjRetsMAJORSDelay
+    label = "FxDataAdjRetsMAJORSDelay"  # EEGsynthetic2, EEGsynthetic2nonlin, EEGsynthetic2nonlinDelay, FxDataAdjRetsMAJORSDelay
     embedMethod = "LLE"  # LLE, DMComputeParsimonious, DM
 
     pcFolderRoot = 'D:\Dropbox\VM_Backup\\'
@@ -1047,8 +1063,7 @@ if __name__ == '__main__':
         ######################
         rollingSpecs = [[], [], 1] #1,
 
-        runProcessesFlag = "SingleProcesses"
-        #runProcessesFlag = "MultipleProcesses"
+        runProcessesFlag = "MultipleProcesses"
 
         datasetsPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_Siettos_ThirdApproach\\'
         RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\StaticRunners\\'
@@ -1119,7 +1134,7 @@ if __name__ == '__main__':
         outputFormat = "Sharpe"
         RiskParityFlagIn = "Yes,250" # "Yes,250", "No"
 
-        rollingSpecs = [250, 100, 1] # 20, 100, 250, 500, 1000
+        rollingSpecs = [250, 20, 3] # 20, 100, 250, 500, 1000
 
         forecastHorizon = 5002 - rollingSpecs[0]
         Predict_Memory = rollingSpecs[1]
@@ -1144,14 +1159,14 @@ if __name__ == '__main__':
     #processToRun = "FullModel_Static,VAR,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Static,GPR_Single,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Static,ANN_Single"+str(rollingSpecs[2])
-    processToRun = "Static_run,VAR,"+str(rollingSpecs[2])
+    #processToRun = "Static_run,VAR,"+str(rollingSpecs[2])
     #processToRun = "Static_run,GPR_Single,"+str(rollingSpecs[2])
     #processToRun = "Static_run,ANN_Single"
 
     ##### ROLLING ####
     #processToRun = "FullModel_Rolling,Single_AR,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Rolling,VAR,"+str(rollingSpecs[2])
-    #processToRun = "Rolling_run,VAR,"+str(rollingSpecs[2])
+    processToRun = "Rolling_run,VAR,"+str(rollingSpecs[2])
     #processToRun = "Rolling_run,GPR_Single,"+str(rollingSpecs[2])
 
     #runProcessesFlag = "Report"
