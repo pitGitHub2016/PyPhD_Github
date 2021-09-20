@@ -39,6 +39,13 @@ pd.set_option('display.max_columns', 20)
 pd.set_option('display.max_rows', 200)
 
 "Simple function to test sth"
+def mean_confidence_interval(data, confidence=0.95):
+    a = 1.0 * np.array(data)
+    n = len(a)
+    m, se = np.mean(a), scipy.stats.sem(a)
+    h = se * scipy.stats.t.ppf((1 + confidence) / 2., n - 1)
+    return m, m - h, m + h
+
 def Test():
     pass
 
@@ -366,12 +373,28 @@ def PaperizePreds(X_Preds, X_test, **kwargs):  # CI_Lower_Band, CI_Upper_Band
         elif outputFormat == "Sharpe":
             sub_pnl = sl.sign(X_Preds_df[col]) * X_test_df[col]
             submetric = np.sqrt(252) * sl.sharpe(sub_pnl)
+        elif outputFormat == "RollingSharpe":
+            sub_pnl = sl.sign(X_Preds_df[col]) * X_test_df[col]
+            rollSharpe = np.sqrt(252) * sl.rollStatistics(sub_pnl, 'Sharpe', nIn=250).dropna()
+            rollSharpeStats = [str(np.round(x, 3)) for x in [rollSharpe.mean(), rollSharpe.min(), rollSharpe.max()]]
+            #rollSharpe_CIs = mean_confidence_interval(rollSharpe.values, confidence=0.95)
+            #rollSharpeStats = [str(np.round(x, 3)) for x in [rollSharpe.mean(), rollSharpe_CIs[1], rollSharpe_CIs[2]]]
+            submetric = rollSharpeStats[0] + '(' + rollSharpeStats[1] + "," + rollSharpeStats[2] + ")"
         outList.append(submetric)
 
     if outputFormat == "Sharpe":
         totalPnl = sl.rs(sl.sign(X_Preds_df) * X_test_df)
         totalSharpe = np.sqrt(252) * sl.sharpe(totalPnl)
         outList.append(totalSharpe)
+    elif outputFormat == "RollingSharpe":
+        totalPnl = sl.rs(sl.sign(X_Preds_df) * X_test_df)
+        total_rollSharpe = np.sqrt(252) * sl.rollStatistics(totalPnl, 'Sharpe', nIn=250).dropna()
+        total_rollSharpeStats = [str(np.round(x, 3)) for x in [total_rollSharpe.mean(), total_rollSharpe.min(), total_rollSharpe.max()]]
+        #total_rollSharpe_CIs = mean_confidence_interval(total_rollSharpe.values, confidence=0.95)
+        #total_rollSharpeStats = [str(np.round(x, 3)) for x in [total_rollSharpe.mean(), total_rollSharpe_CIs[1], total_rollSharpe_CIs[2]]]
+        total_submetric = total_rollSharpeStats[0] + '(' + total_rollSharpeStats[1] + "," + total_rollSharpeStats[2] + ")"
+        outList.append(total_submetric)
+        roundingFlag = False
 
     if roundingFlag == True:
         outList = [np.round(x, 3) for x in outList]
@@ -592,10 +615,13 @@ def RollingRunProcess(params):
     embeddingFileExists = False
 
     "Check if embedding File already exists and use this one instead of recalculating!"
-    checkEmbeddingFilePath = RollingRunnersPath + "Embeddings\\" + processName.replace(mode + "_", "") + "_EMBEDDINGFILE.p"
+    checkEmbeddingFilePath = RollingRunnersPath + "Embedding\\" + processName.replace(mode + "_", "") + "_EMBEDDINGFILE.p"
     if os.path.exists(checkEmbeddingFilePath):
         print("Embedding File Exists! : " + checkEmbeddingFilePath)
         Stored_Embedding_Data = pickle.load(open(checkEmbeddingFilePath, "rb"))
+        #print("len(Stored_Embedding_Data) = ", len(Stored_Embedding_Data))
+        #print("len(range(trainSetLength, data.shape[0], 1)) = ", len(range(trainSetLength, data.shape[0], 1)))
+        #time.sleep(3000)
         storedCount = 0
         embeddingFileExists = True
     else:
@@ -603,8 +629,8 @@ def RollingRunProcess(params):
 
     PredsList = []
     embeddingList = []
-    for i in tqdm(range(trainSetLength, data.shape[0], 1)):
-
+    for i in tqdm(range(trainSetLength, data.shape[0], 1)): #
+        #print(i)
         try:
             if liftMethod == 'FullModel':
                 roll_X_test = data[i]
@@ -622,10 +648,17 @@ def RollingRunProcess(params):
                     #time.sleep(3000)
                     storedCount += 1
                 else:
-                    roll_target_mapping_List = Embed(embedMethod, roll_X_train_embed, target_intrinsic_dim, LLE_neighbors=LLE_neighborsIn, dm_epsilon=dm_epsilonIn, cut_off=cut_offIn, dm_optParams_knn=dm_optParams_knnIn)
-                    roll_target_mapping = roll_target_mapping_List[0]
+                    try:
+                        roll_target_mapping_List = Embed(embedMethod, roll_X_train_embed, target_intrinsic_dim, LLE_neighbors=LLE_neighborsIn, dm_epsilon=dm_epsilonIn, cut_off=cut_offIn, dm_optParams_knn=dm_optParams_knnIn)
+                        roll_target_mapping = roll_target_mapping_List[0]
+                        embeddingList.append(roll_target_mapping_List)
+                    except Exception as e:
+                        print("Embedding error ... ")
+                        print(e)
+                        roll_target_mapping = embeddingList[-1][0]
+                        embeddingList.append(embeddingList[-1])
+
                     modelListSpectrum = roll_target_mapping.shape[1]
-                    embeddingList.append(roll_target_mapping_List)
                     writeEmbeddingFile = True
 
             ###################################### PREDICT #######################################
@@ -674,10 +707,15 @@ def RollingRunProcess(params):
             PredsList.append([0 for var in range(len(PredsList[-1]))])
 
     Preds = np.array(PredsList)
+    #sl.cs(pd.DataFrame(Preds)).plot()
+    #plt.show()
     print("Preds.shape = ", Preds.shape)
     pickle.dump(Preds, open(RollingRunnersPath + processName + ".p", "wb"))
     if writeEmbeddingFile == True:
-        pickle.dump(embeddingList, open(RollingRunnersPath + "Embeddings\\" + processName.replace(mode+"_", "") + "_EMBEDDINGFILE.p", "wb"))
+        try:
+            pickle.dump(embeddingList, open(RollingRunnersPath + "Embedding\\" + processName.replace(mode+"_", "") + "_EMBEDDINGFILE.p", "wb"))
+        except Exception as e:
+            pickle.dump(embeddingList, open(RollingRunnersPath + processName.replace(mode + "_", "") + "_EMBEDDINGFILE.p", "wb"))
 
 def RunPythonDM(paramList):
     label = paramList[0]
@@ -778,7 +816,13 @@ def RunPythonDM(paramList):
             'target_intrinsic_dim': target_intrinsic_dim, 'mode': mode,
             'rolling_Predict_Memory': data.shape[0] - forecastHorizon,
             'embedMethod': embedMethod,
-            'kernelIn': np.nan, 'degreeIn': np.nan, 'neighborsIn': np.nan, 'epsilonIn': np.nan
+            'LLE_neighborsIn': LLE_neighborsIn,
+            'dm_epsilonIn': dm_epsilonIn,
+            'cut_offIn': cut_offIn,
+            'dm_optParams_knnIn': dm_optParams_knnIn,
+            'lift_optParams_knn': lift_optParams_knnIn,
+            'GH_epsilon': GH_epsilonIn,
+            'GH_cut_off': GH_cut_offIn
         }
 
         RollingRunProcess(paramsProcess)
@@ -801,7 +845,7 @@ def RunPythonDM(paramList):
             model_fit = forecasting_model.fit(int(modeSplit[2]))
             target_mapping_Preds_All = model_fit.forecast_interval(model_fit.y, steps=forecastHorizon, alpha=0.05)
             mapped_Preds = target_mapping_Preds_All[0]
-        elif modeSplit[1] in ["GPR_Single", "ANN_Single"]:
+        elif modeSplit[1] in ["GPRSingle", "ANN_Single"]:
             Preds_List = get_ML_Predictions("Main", mode, target_mapping, [], forecastHorizon)
             mapped_Preds = pd.DataFrame(Preds_List).values
 
@@ -992,7 +1036,6 @@ def Reporter(mode, datasetsPath, RollingRunnersPath, writeResiduals, target_intr
                                          roundingFlag=roundingFlagIn)
 
                 allDataList.append([file_name, metricsVars, parsimoniousEigs, target_intrinsic_dim, Preds.shape[0]])
-
             except Exception as e:
                 print(e)
                 print(file_total_name)
@@ -1036,10 +1079,28 @@ def Reporter(mode, datasetsPath, RollingRunnersPath, writeResiduals, target_intr
             "Dataset_ID", drop=True)
         ReportDF.to_excel(RollingRunnersPath+"Reporter_"+RiskParityFlag+".xlsx")
 
+def ReportProcessingToOverleaf(RiskParityFlagIn):
+    df = pd.read_excel(RollingRunnersPath + "Reporter_dataDF_raw_" + RiskParityFlagIn + ".xlsx")
+    df = df[["file_name", "metricsVars"]]
+    df["file_name_split"] = df["file_name"].str.split("_")
+    df["fullOrEmbed"] = df["file_name_split"].str[2]
+
+    df = df[df["fullOrEmbed"]!="FullModel"]
+    #df = df[df["fullOrEmbed"]=="FullModel"]
+
+    df["embedMethod"] = df["file_name_split"].str[9]
+    for embedMethod in set(list(df["embedMethod"].values)):
+        print(embedMethod)
+        subdf = df[df["embedMethod"]==embedMethod]
+        subdf["TableID"] = subdf["file_name_split"].str[3] + "," + df["file_name_split"].str[8]
+        subdf["TotalSharpe"] = subdf["metricsVars"].str.split(",").str[-1].str.replace("]", "") + ", " + subdf["file_name_split"].str[7]
+        subdf = subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).max()
+        subdf.to_excel(RollingRunnersPath+embedMethod+"_ReportProcessingToOverleaf.xlsx")
+
 if __name__ == '__main__':
 
     label = "FxDataAdjRetsMAJORSDelay"  # EEGsynthetic2, EEGsynthetic2nonlin, EEGsynthetic2nonlinDelay, FxDataAdjRetsMAJORSDelay
-    embedMethod = "LLE"  # LLE, DMComputeParsimonious, DM
+    embedMethod = "DMComputeParsimonious"  # LLE, DMComputeParsimonious, DM
 
     pcFolderRoot = 'D:\Dropbox\VM_Backup\\'
     #pcFolderRoot = 'E:\Dropbox\Dropbox\VM_Backup\\'
@@ -1135,44 +1196,49 @@ if __name__ == '__main__':
         target_intrinsic_dim = 3 # 2, 3
         reportPercentilesFlagIn = False
         outputFormat = "Sharpe"
+        #outputFormat = "RollingSharpe"
         RiskParityFlagIn = "Yes,250" # "Yes,250", "No"
+        #RiskParityFlagIn = "No" # "Yes,250", "No"
 
-        rollingSpecs = [250, 20, 3] # 20, 100, 250, 500, 1000
+        rollingSpecs = [1000, 1000, 10] # 20, 100, 250, 500, 1000
 
         forecastHorizon = 5002 - rollingSpecs[0]
         Predict_Memory = rollingSpecs[1]
         ######################
-        LLE_neighborsIn = 50
+        LLE_neighborsIn = 50 #5
         ######################
         dm_epsilonIn = "opt"
         cut_offIn = np.inf
-        dm_optParams_knnIn = 50
+        dm_optParams_knnIn = 50 #5
         ######################
         GH_epsilonIn = "opt"
         GH_cut_offIn = "opt"
-        lift_optParams_knnIn = 50
+        lift_optParams_knnIn = 50 #5, 25, 50
 
         runProcessesFlag = "SingleProcess"
 
         datasetsPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_FOREX\\'
         RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners_FOREX\\'
+        #RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners_FOREX\\temp\\'
 
     ##### STATIC ####
     #processToRun = "FullModel_Static,Single_AR,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Static,VAR,"+str(rollingSpecs[2])
-    #processToRun = "FullModel_Static,GPR_Single,"+str(rollingSpecs[2])
+    #processToRun = "FullModel_Static,GPRSingle,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Static,ANN_Single"+str(rollingSpecs[2])
     #processToRun = "Static_run,VAR,"+str(rollingSpecs[2])
-    #processToRun = "Static_run,GPR_Single,"+str(rollingSpecs[2])
+    #processToRun = "Static_run,GPRSingle,"+str(rollingSpecs[2])
     #processToRun = "Static_run,ANN_Single"
 
     ##### ROLLING ####
     #processToRun = "FullModel_Rolling,Single_AR,"+str(rollingSpecs[2])
     #processToRun = "FullModel_Rolling,VAR,"+str(rollingSpecs[2])
+    #processToRun = "FullModel_Rolling,GPRSingle,"+str(rollingSpecs[2])
     processToRun = "Rolling_run,VAR,"+str(rollingSpecs[2])
-    #processToRun = "Rolling_run,GPR_Single,"+str(rollingSpecs[2])
+    #processToRun = "Rolling_run,GPRSingle,"+str(rollingSpecs[2])
 
     #runProcessesFlag = "Report"
+    runProcessesFlag = "ReportProcessingToOverleaf"
     writeResiduals = 0
 
     if runProcessesFlag == "SingleProcess":
@@ -1202,8 +1268,11 @@ if __name__ == '__main__':
                  reportPercentilesFlag=reportPercentilesFlagIn, outputFormatReporter=outputFormat, RiskParityFlag=RiskParityFlagIn)
         Reporter("Run", datasetsPath, RollingRunnersPath, writeResiduals, target_intrinsic_dim,
                  reportPercentilesFlag=reportPercentilesFlagIn, outputFormatReporter=outputFormat, RiskParityFlag=RiskParityFlagIn)
-        Reporter("Read", datasetsPath, RollingRunnersPath, writeResiduals, target_intrinsic_dim,
-                 reportPercentilesFlag=reportPercentilesFlagIn, outputFormatReporter=outputFormat, RiskParityFlag=RiskParityFlagIn)
+        if outputFormat != "RollingSharpe":
+            Reporter("Read", datasetsPath, RollingRunnersPath, writeResiduals, target_intrinsic_dim,
+                     reportPercentilesFlag=reportPercentilesFlagIn, outputFormatReporter=outputFormat, RiskParityFlag=RiskParityFlagIn)
+    elif runProcessesFlag == "ReportProcessingToOverleaf":
+        ReportProcessingToOverleaf(RiskParityFlagIn)
 
 ### NOTES ###
 """
