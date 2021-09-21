@@ -1097,10 +1097,16 @@ def ReportProcessingToOverleaf(RiskParityFlagIn):
         print(embedMethod)
         subdf = df[df["embedMethod"]==embedMethod]
         subdf["TableID"] = subdf["file_name_split"].str[3] + "," + df["file_name_split"].str[8]
-        subdf["TotalSharpe"] = subdf["metricsVars"].str.split(",").str[-1].str.replace("]", "") + ", " + subdf["file_name_split"].str[7]
+        #subdf["TotalSharpe"] = subdf["metricsVars"].str.split(",").str[-1].str.replace("]", "") + ", " + subdf["file_name_split"].str[7]
         #subdf = subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).size()
-        subdf = subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).max()
-        subdf.to_excel(RollingRunnersPath+embedMethod+"_ReportProcessingToOverleaf.xlsx")
+        #subdf = subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).max()
+        subdf["TotalSharpe"] = (subdf["metricsVars"].str.split(",").str[-1].str.replace("]", "")).astype(float)
+        subdf["Model"] = subdf["file_name_split"].str[7]
+        (subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).size()).to_excel(RollingRunnersPath + embedMethod + "_ReportProcessingSize.xlsx")
+        subdf_group = subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).max().reset_index()
+        final = pd.merge(subdf, subdf_group, on=['TableID', 'TotalSharpe']).set_index('TableID', drop=True)[
+            ["TotalSharpe", "Model"]]
+        final.to_excel(RollingRunnersPath + embedMethod + "_ReportProcessingToOverleaf.xlsx")
 
 if __name__ == '__main__':
 
@@ -1205,7 +1211,7 @@ if __name__ == '__main__':
         RiskParityFlagIn = "Yes,250" # "Yes,250", "No"
         #RiskParityFlagIn = "No" # "Yes,250", "No"
 
-        rollingSpecs = [250, 20, 10] # 20, 100, 250, 500, 1000
+        rollingSpecs = [500, 500, 10] # 20, 100, 250, 500, 1000
 
         forecastHorizon = 5002 - rollingSpecs[0]
         Predict_Memory = rollingSpecs[1]
