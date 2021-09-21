@@ -700,6 +700,10 @@ def RollingRunProcess(params):
                 PredsList.append(row_Preds[0])
             else:
                 # Lifted_X_Preds = Lift(liftMethod, X_train_lift, X_test, target_mapping, mapped_Preds, knn)[0]
+                if lift_optParams_knnIn == "r0":
+                    lift_optParams_knnIn = int(round(rolling_Embed_Memory/10))
+                    params["lift_optParams_knn"] = lift_optParams_knnIn
+                    processName = '_'.join([str(x) for x in list(params.values())[3:]])
                 single_lifted_Preds = Lift("GH", roll_X_train_lift, roll_X_test, roll_target_mapping, row_Preds, lift_optParams_knn=lift_optParams_knnIn, GH_epsilon=GH_epsilonIn, GH_cut_off=GH_cut_offIn)[0]
                 PredsList.append(single_lifted_Preds)
         except Exception as e:
@@ -1094,13 +1098,14 @@ def ReportProcessingToOverleaf(RiskParityFlagIn):
         subdf = df[df["embedMethod"]==embedMethod]
         subdf["TableID"] = subdf["file_name_split"].str[3] + "," + df["file_name_split"].str[8]
         subdf["TotalSharpe"] = subdf["metricsVars"].str.split(",").str[-1].str.replace("]", "") + ", " + subdf["file_name_split"].str[7]
+        #subdf = subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).size()
         subdf = subdf[["TableID", "TotalSharpe"]].groupby(['TableID']).max()
         subdf.to_excel(RollingRunnersPath+embedMethod+"_ReportProcessingToOverleaf.xlsx")
 
 if __name__ == '__main__':
 
     label = "FxDataAdjRetsMAJORSDelay"  # EEGsynthetic2, EEGsynthetic2nonlin, EEGsynthetic2nonlinDelay, FxDataAdjRetsMAJORSDelay
-    embedMethod = "DMComputeParsimonious"  # LLE, DMComputeParsimonious, DM
+    embedMethod = "LLE"  # LLE, DMComputeParsimonious, DM
 
     pcFolderRoot = 'D:\Dropbox\VM_Backup\\'
     #pcFolderRoot = 'E:\Dropbox\Dropbox\VM_Backup\\'
@@ -1193,14 +1198,14 @@ if __name__ == '__main__':
         #TakensSpace = "extended"
         #TakensSpace = "TakensDynFold"
 
-        target_intrinsic_dim = 3 # 2, 3
+        target_intrinsic_dim = 2 # 2, 3
         reportPercentilesFlagIn = False
         outputFormat = "Sharpe"
         #outputFormat = "RollingSharpe"
         RiskParityFlagIn = "Yes,250" # "Yes,250", "No"
         #RiskParityFlagIn = "No" # "Yes,250", "No"
 
-        rollingSpecs = [1000, 1000, 10] # 20, 100, 250, 500, 1000
+        rollingSpecs = [250, 20, 10] # 20, 100, 250, 500, 1000
 
         forecastHorizon = 5002 - rollingSpecs[0]
         Predict_Memory = rollingSpecs[1]
@@ -1213,13 +1218,13 @@ if __name__ == '__main__':
         ######################
         GH_epsilonIn = "opt"
         GH_cut_offIn = "opt"
-        lift_optParams_knnIn = 50 #5, 25, 50
+        lift_optParams_knnIn = "r0" #5, 25, 50
 
         runProcessesFlag = "SingleProcess"
 
         datasetsPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\DataSets_FOREX\\'
-        RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners_FOREX\\'
-        #RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners_FOREX\\temp\\'
+        #RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RollingRunners_FX'+str(target_intrinsic_dim)+'\\'
+        RollingRunnersPath = pcFolderRoot + 'RollingManifoldLearning\SmartGlobalAssetAllocation\MatlabCode_EqFree_DMAPs\EEG Benchmark\RR_0\\'
 
     ##### STATIC ####
     #processToRun = "FullModel_Static,Single_AR,"+str(rollingSpecs[2])
@@ -1238,7 +1243,7 @@ if __name__ == '__main__':
     #processToRun = "Rolling_run,GPRSingle,"+str(rollingSpecs[2])
 
     #runProcessesFlag = "Report"
-    runProcessesFlag = "ReportProcessingToOverleaf"
+    #runProcessesFlag = "ReportProcessingToOverleaf"
     writeResiduals = 0
 
     if runProcessesFlag == "SingleProcess":
