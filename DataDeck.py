@@ -17,7 +17,10 @@ def ManifoldLearnerRunner(argDict):
                                                       ProjectionMode=argDict["ProjectionMode"],
                                                       RollMode=argDict["RollMode"], st=argDict["st"])
         elif argDict["ManifoldLearnerMode"] == "Unpack":
-            ManifoldLearnerPack = ManSee.ManifoldPackUnpack(argDict["ManifoldLearnerID"], argDict['ManifoldLearnerPack'], TemporalExtraction=argDict["TemporalExtraction"])
+            ManifoldLearnerPack = ManSee.ManifoldPackUnpack(argDict["ManifoldLearnerID"],
+                                                            argDict['ManifoldLearnerPack'],
+                                                            argDict['ProjectionStyle'],
+                                                            TemporalExtraction=argDict["TemporalExtraction"])
         ################################################################################################################################################
         Picklefile = open(argDict["WriteFilePath"], 'wb')
         pickle.dump(ManifoldLearnerPack, Picklefile)
@@ -399,9 +402,9 @@ class DataDeck:
             self.ActiveStrategiesAssetsClusters.append(pd.Series(list(self.rets.columns), name="ALL").drop_duplicates())
             self.ActiveStrategiesAssetsClusters.append(pd.Series(list(self.rets.columns)+list(self.dIndicatorsDF.columns), name="ALLm").drop_duplicates())
             processList = []
-            for ManifoldLearner in ["PCA"]:#"PCA", "Beta", "LLE", "DMAPS", "BetaRegressV", "BetaProject"
+            for ManifoldLearner in ["LLE"]:#"PCA", "Beta", "LLE", "DMAPS", "BetaRegressV", "BetaProject"
                 for RollModeIn in [['RollWindow', 250]]: #['ExpWindow', 25]
-                    for ProjectionModeIn in ["NoTranspose"]:#NoTranspose,Transpose
+                    for ProjectionModeIn in ["Transpose"]:#NoTranspose,Transpose
                         for StrategiesAssetsCluster in self.ActiveStrategiesAssetsClusters:
                             StrategiesAssetsClusterName = StrategiesAssetsCluster.name
                             if StrategiesAssetsClusterName in ["Endurance"]: #!= "Expedition", "Endurance", StrategiesAssetsClusterName in ["ALL", "ALLm"]
@@ -411,15 +414,34 @@ class DataDeck:
                                     dbfile = open(self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID,'rb')
                                     ManifoldLearnerPack = pickle.load(dbfile)
                                     dbfile.close()
-                                    for TemporalExtractionIn in ["LastValue", "PearsonCorrelationVal"]:
+                                    ##########################################################################################
+                                    if (ManifoldLearner == "PCA")&(ProjectionModeIn == "NoTranspose"):
+                                        ProjectionStyle = "Spatial"
+                                    elif (ManifoldLearner == "PCA") & (ProjectionModeIn == "Transpose"):
+                                        ProjectionStyle = "Temporal"
+                                    ##########################################################################################
+                                    if ProjectionModeIn == "NoTranspose":
+                                        TemporalExtractionIn = ""
                                         argDict = {
                                             "ManifoldLearnerMode": "Unpack",
                                             "ManifoldLearnerID": ManifoldLearnerID,
                                             "ManifoldLearnerPack": ManifoldLearnerPack,
-                                            "TemporalExtraction": TemporalExtractionIn,
-                                            "WriteFilePath": self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID + "_"+TemporalExtractionIn+"_Unpacked"
+                                            "ProjectionStyle":ProjectionStyle,
+                                            "TemporalExtraction": "LastValue",
+                                            "WriteFilePath": self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID + "_" + TemporalExtractionIn + "_Unpacked"
                                         }
-                                        processList.append(argDict)
+                                        #processList.append(argDict)
+                                    else:
+                                        for TemporalExtractionIn in ["LastValue"]:#"PearsonCorrelationVal"
+                                            argDict = {
+                                                "ManifoldLearnerMode": "Unpack",
+                                                "ManifoldLearnerID": ManifoldLearnerID,
+                                                "ManifoldLearnerPack": ManifoldLearnerPack,
+                                                "TemporalExtraction": TemporalExtractionIn,
+                                                "WriteFilePath": self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID + "_"+TemporalExtractionIn+"_Unpacked"
+                                            }
+                                            #processList.append(argDict)
+                                    out = ManifoldLearnerRunner(argDict)
                                 elif RunSettings["ManifoldLearnersMode"] == "Read":
                                     dbfile = open(self.AlternativeStorageLocation+'ManifoldLearners\\' + ManifoldLearnerID, 'rb')
                                     ManifoldLearnerPack = pickle.load(dbfile)

@@ -861,7 +861,7 @@ class ManSee:
 
         return [df0, EmbeddingPackList]
 
-    def ManifoldPackUnpack(ID, ManifoldPackList, **kwargs):
+    def ManifoldPackUnpack(ID, ManifoldPackList, ProjectionStyle, **kwargs):
 
         if "TemporalExtraction" in kwargs:
             TemporalExtraction = kwargs['TemporalExtraction']
@@ -882,13 +882,13 @@ class ManSee:
                 if "PCA_" in ID:
                     ModelData = pack["ModelObj"].components_[c]
                 elif "LLE_" in ID:
-                    ModelData = pack["Projections"][c]
-                    print(ModelData)
+                    ModelData = pack["Projections"]
+                    print(ModelData.shape)
                     time.sleep(3000)
                 #########################################################################################
-                if "_NoTranspose_" in ID:
+                if ProjectionStyle == "Spatial":
                     ManifoldTS[c].loc[pack["latestIndex"]] = ModelData
-                else:
+                elif ProjectionStyle == "Temporal":
                     if TemporalExtraction == "LastValue":
                         ManifoldTS[c].loc[pack["latestIndex"]] = ModelData[-1]
                     elif TemporalExtraction in ["PearsonCorrelationVal", "PearsonCorrelationPVal", "AdjMI", "DecisionTree"]:
