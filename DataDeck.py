@@ -411,14 +411,15 @@ class DataDeck:
                                     dbfile = open(self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID,'rb')
                                     ManifoldLearnerPack = pickle.load(dbfile)
                                     dbfile.close()
-                                    argDict = {
-                                        "ManifoldLearnerMode": "Unpack",
-                                        "ManifoldLearnerID": ManifoldLearnerID,
-                                        "ManifoldLearnerPack": ManifoldLearnerPack,
-                                        "TemporalExtraction": "LastValue",
-                                        "WriteFilePath": self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID + "_Unpacked"
-                                    }
-                                    processList.append(argDict)
+                                    for TemporalExtractionIn in ["LastValue", "PearsonCorrelationVal"]:
+                                        argDict = {
+                                            "ManifoldLearnerMode": "Unpack",
+                                            "ManifoldLearnerID": ManifoldLearnerID,
+                                            "ManifoldLearnerPack": ManifoldLearnerPack,
+                                            "TemporalExtraction": TemporalExtractionIn,
+                                            "WriteFilePath": self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID + "_"+TemporalExtractionIn+"_Unpacked"
+                                        }
+                                        processList.append(argDict)
                                 elif RunSettings["ManifoldLearnersMode"] == "Read":
                                     dbfile = open(self.AlternativeStorageLocation+'ManifoldLearners\\' + ManifoldLearnerID, 'rb')
                                     ManifoldLearnerPack = pickle.load(dbfile)
