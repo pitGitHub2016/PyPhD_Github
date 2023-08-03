@@ -12,9 +12,12 @@ warnings.filterwarnings("ignore")
 "MULTIPROCESSING LOCAL RUNNERS"
 def ManifoldLearnerRunner(argDict):
     try:
-        ManifoldLearnerPack = ManSee.gRollingManifold(argDict["ManifoldLearner"], argDict["ISpace"],
+        if argDict["ManifoldLearnerMode"] == "Learn":
+            ManifoldLearnerPack = ManSee.gRollingManifold(argDict["ManifoldLearner"], argDict["ISpace"],
                                                       ProjectionMode=argDict["ProjectionMode"],
                                                       RollMode=argDict["RollMode"], st=argDict["st"])
+        elif argDict["ManifoldLearnerMode"] == "Unpack":
+            ManifoldLearnerPack = ManSee.ManifoldPackUnpack(argDict["ManifoldLearnerID"], argDict['ManifoldLearnerPack'], TemporalExtraction=argDict["TemporalExtraction"])
         ################################################################################################################################################
         Picklefile = open(argDict["WriteFilePath"], 'wb')
         pickle.dump(ManifoldLearnerPack, Picklefile)
@@ -396,9 +399,9 @@ class DataDeck:
             self.ActiveStrategiesAssetsClusters.append(pd.Series(list(self.rets.columns), name="ALL").drop_duplicates())
             self.ActiveStrategiesAssetsClusters.append(pd.Series(list(self.rets.columns)+list(self.dIndicatorsDF.columns), name="ALLm").drop_duplicates())
             processList = []
-            for ManifoldLearner in ["PCA", "LLE", "DMAPS"]:#"PCA", "Beta", "LLE", "DMAPS", "BetaRegressV", "BetaProject"
+            for ManifoldLearner in ["PCA"]:#"PCA", "Beta", "LLE", "DMAPS", "BetaRegressV", "BetaProject"
                 for RollModeIn in [['RollWindow', 250]]: #['ExpWindow', 25]
-                    for ProjectionModeIn in ["Transpose", "Transpose"]:#NoTranspose,Transpose
+                    for ProjectionModeIn in ["NoTranspose"]:#NoTranspose,Transpose
                         for StrategiesAssetsCluster in self.ActiveStrategiesAssetsClusters:
                             StrategiesAssetsClusterName = StrategiesAssetsCluster.name
                             if StrategiesAssetsClusterName in ["Endurance"]: #!= "Expedition", "Endurance", StrategiesAssetsClusterName in ["ALL", "ALLm"]
@@ -408,8 +411,14 @@ class DataDeck:
                                     dbfile = open(self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID,'rb')
                                     ManifoldLearnerPack = pickle.load(dbfile)
                                     dbfile.close()
-                                    out = ManSee.ManifoldPackUnpack(ManifoldLearnerID, ManifoldLearnerPack, TemporalExtraction="PearsonCorrelation")
-
+                                    argDict = {
+                                        "ManifoldLearnerMode": "Unpack",
+                                        "ManifoldLearnerID": ManifoldLearnerID,
+                                        "ManifoldLearnerPack": ManifoldLearnerPack,
+                                        "TemporalExtraction": "LastValue",
+                                        "WriteFilePath": self.AlternativeStorageLocation + 'ManifoldLearners\\' + ManifoldLearnerID + "_Unpacked"
+                                    }
+                                    processList.append(argDict)
                                 elif RunSettings["ManifoldLearnersMode"] == "Read":
                                     dbfile = open(self.AlternativeStorageLocation+'ManifoldLearners\\' + ManifoldLearnerID, 'rb')
                                     ManifoldLearnerPack = pickle.load(dbfile)
@@ -451,6 +460,7 @@ class DataDeck:
                                     #ISpace = ISpace.tail(255)
                                     ################################################################################################################################################
                                     argDict = {
+                                        "ManifoldLearnerMode" : "Learn",
                                         "ManifoldLearner": ManifoldLearner,
                                         "ISpace": ISpace,
                                         "ProjectionMode" : ProjectionModeIn,
