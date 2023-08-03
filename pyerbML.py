@@ -869,7 +869,6 @@ class ManSee:
             TemporalExtraction = "LastValue"
 
         InputData = ManifoldPackList[0]
-        print(InputData)
         EmbeddingDataPack = ManifoldPackList[1]
 
         if "NoTranspose_" in ID:
@@ -883,9 +882,11 @@ class ManSee:
                 if "PCA_" in ID:
                     ModelData = pack["ModelObj"].components_[c]
                 elif "LLE_" in ID:
-                    ModelData = []
+                    ModelData = pack["Projections"][c]
+                    print(ModelData)
+                    time.sleep(3000)
                 #########################################################################################
-                if "NoTranspose_" in ID:
+                if "_NoTranspose_" in ID:
                     ManifoldTS[c].loc[pack["latestIndex"]] = ModelData
                 else:
                     if TemporalExtraction == "LastValue":
@@ -930,7 +931,6 @@ class ManSee:
 
         if "_Transpose_" in ID:
             Out = pd.concat(ManifoldTS, axis=1).sort_index()
-            print(Out)
         else:
             Out = ManifoldTS
 
