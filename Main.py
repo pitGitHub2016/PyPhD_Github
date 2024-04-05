@@ -1,5 +1,5 @@
 import time
-
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -16,7 +16,8 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.gaussian_process.kernels import RBF, DotProduct, WhiteKernel, RationalQuadratic, ExpSineSquared, Matern, \
     ConstantKernel
-
+import warnings
+warnings.filterwarnings("ignore")
 def reframeData(dataIn, reframeStep, varSelect, **kwargs):
     """
     Function to reframe a dataset into lagged instances of the input matrix :
@@ -154,8 +155,8 @@ def Model(modelSpace, ModelFormat, modelName, **kwargs):
     else:
         Scaler = 'Standard'
 
-    lookbackPeriod_Base = 1000
-    NumPredAhead = 25
+    lookbackPeriod_Base = 25
+    NumPredAhead = 5
 
     df = pd.read_excel("dataHourlyTS_withRES_Edited_withESEK.xlsx")
     df = df.set_index(df.columns[0],drop=True)
@@ -201,8 +202,8 @@ def Model(modelSpace, ModelFormat, modelName, **kwargs):
         fitFlag = False
         GeneralErrorFlag = False
 
-        while (fitFlag == False)&(lookbackPeriod >= 150):
-            try:
+        while (fitFlag == False)&(lookbackPeriod >= 1):#150
+            #try:
                 trainData = baseData.iloc[i - lookbackPeriod:i, :].astype(float)
                 latestIndex = trainData.index[-1]
 
@@ -259,14 +260,92 @@ def Model(modelSpace, ModelFormat, modelName, **kwargs):
                         ################################################################################################
                         sub_predDF = pd.DataFrame(inv_sub_preds, index=PredsIndex, columns=Y)
 
+                    elif modelNameSplit[1] == "B":
+
+                        WhatToPredict = 'SMP_MCP'
+
+                        if WhatToPredict == 'SMP_MCP':
+                            WhatToPredict_Y = SMP_MCP_Cols
+                        else:
+                            WhatToPredict_Y = list(trainData.columns)
+
+                        if modelNameSplit[0] == "GPR":
+                            mainRolling_kernel = 1 * ConstantKernel() + 1 * ExpSineSquared() + 1 * Matern() + 1 * WhiteKernel()
+                            model_List = [GaussianProcessRegressor(kernel=mainRolling_kernel, random_state=0, n_restarts_optimizer=2,normalize_y=True) for var in range(len(SMP_MCP_Cols))]
+                        if modelNameSplit[0] == "RNN":
+                            pass
+                        elif modelNameSplit[0] == "RF":
+                            model_List = [RandomForestRegressor(max_depth=10, min_samples_split=2, n_estimators=500, random_state=0)
+                                          for var in range(len(WhatToPredict_Y))]
+
+                        Preds_List = []
+                        for step_i in range(NumPredAhead):
+                            models_preds_list = []
+                            for modelIn in range(len(model_List)):
+                                ########################################################################################
+                                if step_i == 0:
+                                    #reframedData = reframeData(trainData.values, 1, modelIn)
+                                    reframedData = reframeData(trainData.values, 1, modelIn)
+                                    #print(pd.DataFrame(reframedData[0]))
+                                    #print('///////////////////////////////////')
+                                    #print(pd.DataFrame(reframedData[1]))
+                                    #print('///////////////////////////////////')
+                                    #print(pd.DataFrame(reframedData[2], columns=trainData.columns))
+                                    #time.sleep(300000)
+                                    if Scaler == "Standard":
+                                        scX = StandardScaler()
+                                        reframedDataX = scX.fit_transform(reframedData[0])
+                                        scY = StandardScaler()
+                                        reframedDataY = scY.fit_transform(reframedData[1])
+                                    elif Scaler == 'MinMax':
+                                        scX = MinMaxScaler(feature_range=(0, 1))
+                                        reframedDataX = scX.fit_transform(reframedData[0])
+                                        scY = MinMaxScaler(feature_range=(0, 1))
+                                        reframedDataY = scY.fit_transform(reframedData[1])
+                                    else:
+                                        reframedDataX = reframedData[0]
+                                        reframedDataY = reframedData[1]
+                                    ########################################################################################
+                                    if modelNameSplit[0] == "GPR":
+                                        model_List[modelIn].fit(reframedDataX, reframedDataY.reshape(-1, 1))
+                                        sub_row_Preds, sub_row_Preds_std = model_List[modelIn].predict(reframedData[2])#, return_std=True)
+                                    elif modelNameSplit[0] == "RF":
+                                        model_List[modelIn].fit(reframedDataX, reframedDataY)
+                                        sub_row_Preds = model_List[modelIn].predict(reframedData[2])
+                                else:
+                                    if modelNameSplit[0] == "GPR":
+                                        sub_row_Preds, sub_row_Preds_std = model_List[modelIn].predict(
+                                            total_row_subPred.reshape(reframedData[2].shape),return_std=True)
+                                    elif modelNameSplit[0] == "RF":
+                                        sub_row_Preds = model_List[modelIn].predict(total_row_subPred.reshape(reframedData[2].shape))
+                                ########################################################################################
+                                if Scaler == "Standard":
+                                    subPredOut = scY.inverse_transform(sub_row_Preds)[0]
+                                else:
+                                    subPredOut = sub_row_Preds[0][0]
+                                ########################################################################################
+                                models_preds_list.append(subPredOut)
+                            ########################################################################################
+                            total_row_subPred = np.array(models_preds_list)
+                            ########################################################################################
+                            if WhatToPredict == 'SMP_MCP':
+                                LastInputPoint = pd.DataFrame(reframedData[2], columns=trainData.columns).iloc[0,:]
+                                LastInputPoint.loc[[x for x in LastInputPoint.index if x in SMP_MCP_Cols]] = total_row_subPred
+                                total_row_subPred = LastInputPoint.values
+                            ########################################################################################
+                            #print("step_i = ", step_i, ", total_row_subPred = ", total_row_subPred)
+                            Preds_List.append(total_row_subPred)
+
+                        sub_predDF = pd.DataFrame(Preds_List, index=PredsIndex, columns=trainData.columns)
+
                 fitFlag = True
-            except LinAlgError as e:
-                print(e, ", Reduced lookbackPeriod by 25 obs .. retrying ... ")
-                lookbackPeriod -= 25
-            except Exception as e:
-                print(e)
-                fitFlag = True
-                GeneralErrorFlag = True
+            #except LinAlgError as e:
+            #    print(e, ", Reduced lookbackPeriod by 25 obs .. retrying ... ")
+            #    lookbackPeriod -= 25
+            #except Exception as e:
+            #    print(e)
+            #    fitFlag = True
+            #    GeneralErrorFlag = True
 
         if (fitFlag == False)|(GeneralErrorFlag==True):
             sub_predDF = pd.DataFrame(PredsNaN_Fill, index=PredsIndex, columns=modelDF.columns)
@@ -331,7 +410,10 @@ def FlattenToCalendarDates():
 #Model("ScenarioA", "Raw", "RNN_A")
 #Model("ScenarioA", "Diff", "RNN_A")
 #########################################################
-Model("ScenarioA", "Raw", "RF_A")
+#Model("ScenarioA", "Raw", "RF_A")
+#Model("ScenarioA", "Diff", "RF_A")
+#########################################################
+Model("ScenarioA", "Raw", "RF_B")
 #Model("ScenarioA", "Diff", "RF_A")
 #########################################################
 #Model("ALL", "Raw", "VAR")
