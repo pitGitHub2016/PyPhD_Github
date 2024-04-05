@@ -1,5 +1,5 @@
 from datetime import datetime
-import pandas as pd, numpy as np, blpapi, sqlite3, time, matplotlib.pyplot as plt, itertools, types, multiprocessing, ta, sqlite3, xlrd
+import pandas as pd, numpy as np, blpapi, sqlite3, time, matplotlib.pyplot as plt, itertools, types, multiprocessing, ta, sqlite3, xlrd, glob
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -476,12 +476,9 @@ class ML:
 
             if mode == "MDI":
                 y_pred = reg.predict(X_test)
-                #print(mean_squared_error(y_test, y_pred, squared=False))
                 feature_importance = reg.feature_importances_
                 sorted_idx = np.argsort(feature_importance)
-                #pos = np.arange(sorted_idx.shape[0])
                 FeaturesOut = pd.Series(np.array(feature_names)[sorted_idx]).tolist()
-
             elif mode == "MDA":
                 result = permutation_importance(
                     reg, X_test, y_test, n_repeats=10, random_state=42, n_jobs=2
@@ -489,8 +486,10 @@ class ML:
                 tree_importances = pd.Series(result.importances_mean, index=feature_names)
                 sorted_idx = np.argsort(tree_importances)
                 FeaturesOut = pd.Series(np.array(feature_names)[sorted_idx]).tolist()
-
-            return FeaturesOut[:topNum]
+            #print(pd.concat([pd.Series(FeaturesOut), pd.Series(np.array(feature_importance)[sorted_idx])],axis=1))
+            #print(FeaturesOut[:topNum])
+            #print(FeaturesOut[-topNum:])
+            return FeaturesOut[-topNum:]
 
         if "workConn" in kwargs:
             workConn = sqlite3.connect(kwargs["workConn"],detect_types=sqlite3.PARSE_DECLTYPES)
@@ -521,6 +520,16 @@ class ML:
             RetsSmoothed = kwargs['RetsSmoothed']
         else:
             RetsSmoothed = False
+
+        if "IgnoreCondition" in kwargs:
+            IgnoreCondition = kwargs['IgnoreCondition']
+        else:
+            IgnoreCondition = None
+
+        if "AlphabeticallySortDrivingFeatures" in kwargs:
+            AlphabeticallySortDrivingFeatures = kwargs['AlphabeticallySortDrivingFeatures']
+        else:
+            AlphabeticallySortDrivingFeatures = False
 
         modelList = []
         for i in range(len(targetAssetList)):
@@ -558,14 +567,16 @@ class ML:
             FeaturesList = []
             for i in tqdm(range(startPeriod, df.shape[0] + 1)):
                 med_rets = df.iloc[i - MemoryDepth:i, :]
-                #if str(med_rets.index[-1]) == "2023-05-11 00:00:00": #Debug on index
-                #    print("got here...")
-                #    rolling_Predictions = rollPreds(med_rets, list(med_rets.columns).index(asset))
-                #else:
-                #    pass
-                #"""
+                if IgnoreCondition == "IgnorePositives":
+                    med_rets.loc[med_rets[asset] > 0, asset] = None
+                    med_rets = med_rets.dropna()
+                elif IgnoreCondition == "IgnoreNegatives":
+                    med_rets.loc[med_rets[asset] < 0, asset] = None
+                    med_rets = med_rets.dropna()
                 if FeaturesRegulators[0] != "SelfRegulate":
-                    DrivingFeatures = sorted(FeaturesExtract(med_rets, asset, "MDI", FeaturesRegulators[1]))
+                    DrivingFeatures = FeaturesExtract(med_rets, asset, "MDI", FeaturesRegulators[1])
+                    if AlphabeticallySortDrivingFeatures:
+                        DrivingFeatures = sorted(DrivingFeatures)
                     med_rets = med_rets[[asset]+DrivingFeatures]
                     FeaturesList.append([med_rets.index[-1]] + DrivingFeatures)
                 "Here I build the regression problem"
@@ -684,6 +695,11 @@ class ML:
         return splitThresholdDF
 
     def DecisionTrees_Signal_Filter(df, filteringIndicatorsDF, DecisionTrees_RV, targetFilters, **kwargs):
+        if "Delimiter" in kwargs:
+            Delimiter = kwargs['Delimiter']
+        else:
+            Delimiter = "_"
+
         if "DT_Aggregate_Mode" in kwargs:
             DT_Aggregate_Mode = kwargs['DT_Aggregate_Mode']
         else:
@@ -703,7 +719,7 @@ class ML:
         DT_FilterList = []
         for FilterPair in FilterPairsList:
             DT_SubFilter = pe.sign(
-                filteringIndicatorsDF[FilterPair[0]] - DecisionTrees_RV[FilterPair[0] + "_" + FilterPair[1]])
+                filteringIndicatorsDF[FilterPair[0]] - DecisionTrees_RV[FilterPair[0] + Delimiter + FilterPair[1]])
             if FilterPair[2] == "Under":
                 DT_SubFilter[DT_SubFilter < 0] = 0
             elif FilterPair[2] == "Upper":
@@ -712,7 +728,7 @@ class ML:
                 DT_SubFilter[DT_SubFilter < 0] *= -1
             elif FilterPair[2] == "UpperReverse":
                 DT_SubFilter[DT_SubFilter > 0] *= -1
-            DT_SubFilter.name = FilterPair[0] + "_" + FilterPair[1]
+            DT_SubFilter.name = FilterPair[0] + Delimiter + FilterPair[1]
             DT_FilterList.append(DT_SubFilter)
 
         DT_FilterDF = pd.concat(DT_FilterList, axis=1).sort_index().fillna(1)
@@ -793,49 +809,42 @@ class ManSee:
                 if manifoldIn == 'CustomMetric':
                     customMetric = pe.Metric(metaDF_Rolling, statistic=CustomMetricStatistic, metric=CustomMetric)
                     EmbeddingPackList.append({"latestIndex":latestIndex,"ModelObj":customMetric, "Projections":[], "ExtraData":[]})
-
-                elif manifoldIn == 'PCA':
-                    pca = PCA(n_components=NumProjections)
-                    X_pca = pca.fit_transform(x)
-                    EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": pca, "Projections": X_pca, "ExtraData": []})
-
-                elif manifoldIn == 'PCA_Correlations':
-                    cor_mat = pd.DataFrame(np.corrcoef(x.T)).abs().fillna(0).values
-                    eig_vecs, eig_vals, vh = np.linalg.svd(cor_mat, full_matrices=True)
-                    EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": cor_mat, "Projections": eig_vecs, "ExtraData": [eig_vals, vh]})
-
+                #################################################
                 elif manifoldIn == 'BetaRegressV':
                     BetaKernelDF = pe.BetaKernel(df)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": [], "Projections": BetaKernelDF, "ExtraData": []})
-
                 elif manifoldIn == 'BetaProject':
                     BetaKernelDF = pe.BetaKernel(df)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": [], "Projections": BetaKernelDF, "ExtraData": []})
-
                 elif manifoldIn == 'BetaRegressH':
                     BetaKernelDF = pe.BetaKernel(df)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": [], "Projections": BetaKernelDF, "ExtraData": []})
-
                 elif manifoldIn == 'BetaRegressC':
                     BetaKernelDF = pe.BetaKernel(df)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": [], "Projections": BetaKernelDF, "ExtraData": []})
-
                 elif manifoldIn == 'BetaDiffusion':
                     BetaKernelDF = pe.BetaKernel(df)
                     BetaKernelDF *= 1/BetaKernelDF.median()
                     U, s, VT = svd(BetaKernelDF.values)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": [], "Projections": BetaKernelDF, "ExtraData": [U, s, VT ]})
-
                 elif manifoldIn == 'Beta':
                     BetaKernelDF = pe.BetaKernel(df).fillna(0)
                     U, s, VT = svd(BetaKernelDF.values)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": [], "Projections": BetaKernelDF, "ExtraData": [U, s, VT ]})
-
                 elif manifoldIn == 'MultipleRegress':
-
                     MRKernelDF = pe.MultiRegressKernel(df)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": [], "Projections": MRKernelDF, "ExtraData": []})
-
+                #################################################
+                elif manifoldIn == 'PCA':
+                    pca = PCA(n_components=NumProjections)
+                    X_pca = pca.fit_transform(x)
+                    EmbeddingPackList.append(
+                        {"latestIndex": latestIndex, "ModelObj": pca, "Projections": X_pca, "ExtraData": []})
+                elif manifoldIn == 'PCA_Correlations':
+                    cor_mat = pd.DataFrame(np.corrcoef(x.T)).abs().fillna(0).values
+                    eig_vecs, eig_vals, vh = np.linalg.svd(cor_mat, full_matrices=True)
+                    EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": cor_mat, "Projections": eig_vecs,
+                                              "ExtraData": [eig_vals, vh]})
                 elif manifoldIn == 'DMAPS':
                     pcm = pfold.PCManifold(x)
                     pcm.optimize_parameters(random_state=1)
@@ -848,20 +857,18 @@ class ManSee:
                     dmap = dmap.fit(pcm, store_kernel_matrix=True)
                     evecs, evals = dmap.eigenvectors_, dmap.eigenvalues_
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": dmap, "Projections": evecs, "ExtraData": [evals]})
-
                 elif manifoldIn == 'LLE':
                     n_neighbors = int(np.sqrt(x.shape[0]))
                     lle = manifold.LocallyLinearEmbedding(n_neighbors=n_neighbors, n_components=NumProjections-1, method="standard", n_jobs=-1)
                     X_lle = lle.fit_transform(x)
                     EmbeddingPackList.append({"latestIndex": latestIndex, "ModelObj": lle, "Projections": X_lle, "ExtraData": [n_neighbors]})
-
             except Exception as e:
                 print(e)
                 EmbeddingPackList.append([latestIndex, []])
 
         return [df0, EmbeddingPackList]
 
-    def ManifoldPackUnpack(ID, ManifoldPackList, ProjectionStyle, **kwargs):
+    def ManifoldPackUnpack(ManifoldLearner, ManifoldPackList, ProjectionStyle, **kwargs):
 
         if "TemporalExtraction" in kwargs:
             TemporalExtraction = kwargs['TemporalExtraction']
@@ -869,69 +876,96 @@ class ManSee:
             TemporalExtraction = "LastValue"
 
         InputData = ManifoldPackList[0]
+        EWP = pe.E(InputData)
         EmbeddingDataPack = ManifoldPackList[1]
 
-        if "NoTranspose_" in ID:
-            ManifoldTS = [pd.DataFrame(None, index=InputData.index, columns=InputData.columns) for i in range(EmbeddingDataPack[0]["Projections"].shape[1])]
+        ManifoldTS_Index = InputData.index
+        if ProjectionStyle == "Spatial":
+            if EmbeddingDataPack[0]["Projections"].shape[1] == len(InputData.columns):
+                ManifoldTS_Columns = InputData.columns
+            else:
+                ManifoldTS_Columns = [ProjectionStyle+"Proj_"+str(x) for x in range(EmbeddingDataPack[0]["Projections"].shape[1])]
         else:
-            ManifoldTS = [pd.DataFrame(None, index=InputData.index, columns=[InputData.columns[i]]) for i in range(EmbeddingDataPack[0]["Projections"].shape[1])]
+            ManifoldTS_Columns = [ProjectionStyle+"Proj_"+str(x) for x in range(EmbeddingDataPack[0]["Projections"].shape[1])]
+
+        ManifoldTS = [pd.DataFrame(None, index=ManifoldTS_Index, columns=ManifoldTS_Columns) for i in range(len(ManifoldTS_Columns))]
 
         for pack in tqdm(EmbeddingDataPack):
-            for c in range(pack["Projections"].shape[1]):
-                #########################################################################################
-                if "PCA_" in ID:
-                    ModelData = pack["ModelObj"].components_[c]
-                elif "LLE_" in ID:
-                    ModelData = pack["Projections"]
-                    print(ModelData.shape)
-                    time.sleep(3000)
-                #########################################################################################
-                if ProjectionStyle == "Spatial":
-                    ManifoldTS[c].loc[pack["latestIndex"]] = ModelData
-                elif ProjectionStyle == "Temporal":
-                    if TemporalExtraction == "LastValue":
-                        ManifoldTS[c].loc[pack["latestIndex"]] = ModelData[-1]
-                    elif TemporalExtraction in ["PearsonCorrelationVal", "PearsonCorrelationPVal", "AdjMI", "DecisionTree"]:
-                        ModelDataSeries = pd.Series(ModelData)
-                        InputDataRefIndex = InputData.index.get_loc(pack["latestIndex"])+1
-                        InputDataRefSeries = InputData[InputData.columns[c]].iloc[InputDataRefIndex-ModelDataSeries.shape[0]:InputDataRefIndex]
-                        if TemporalExtraction == "PearsonCorrelationVal":
-                            ManifoldTS[c].loc[pack["latestIndex"]] = pearsonr(ModelDataSeries.values, InputDataRefSeries.values)[0]
-                        elif TemporalExtraction == "PearsonCorrelationPVal":
-                            ManifoldTS[c].loc[pack["latestIndex"]] = pearsonr(ModelDataSeries.values, InputDataRefSeries.values)[1]
-                        elif TemporalExtraction == "AdjMI":
-                            ManifoldTS[c].loc[pack["latestIndex"]] = adjusted_mutual_info_score(ModelDataSeries.values, InputDataRefSeries.values)
-                        elif TemporalExtraction == "DecisionTree":
-                            InputDataRefSeries[InputDataRefSeries > 0] = 1
-                            InputDataRefSeries[InputDataRefSeries < 0] = -1
-                            InputDataRefSeries[InputDataRefSeries == 0] = 0
-                            # Create the decision tree classifier
-                            clf = DecisionTreeClassifier(
-                                criterion='gini',
-                                splitter='best',
-                                max_depth=None,
-                                min_samples_split=2,  # 2, 10
-                                min_samples_leaf=1,  # 1, 5
-                                min_weight_fraction_leaf=0.0,
-                                max_features=None,
-                                random_state=None,
-                                max_leaf_nodes=None,
-                                min_impurity_decrease=0.0,
-                                class_weight=None,
-                                ccp_alpha=0.0)
+            try:
+                for c in range(pack["Projections"].shape[1]):
+                    #########################################################################################
+                    if ManifoldLearner == "PCA":
+                        ModelData = pack["ModelObj"].components_[c]
+                    elif ManifoldLearner in ["LLE", "DMAPS"]:
+                        ModelData = pack["Projections"][c]
+                        #print(ModelData)
+                    #########################################################################################
+                    if ProjectionStyle == "Spatial":
+                        ManifoldTS[c].loc[pack["latestIndex"]] = ModelData
+                    elif ProjectionStyle == "Temporal":
+                        if TemporalExtraction == "LastValue":
+                            ManifoldTS[c].loc[pack["latestIndex"]] = ModelData[-1]
+                        elif TemporalExtraction in ["PearsonCorrelationVal", "PearsonCorrelationPVal", "AdjMI", "DecisionTree"]:
+                            ModelDataSeries = pd.Series(ModelData)
+                            InputDataRefIndex = InputData.index.get_loc(pack["latestIndex"])+1
+                            #InputDataRefSeries = InputData[InputData.columns[c]].iloc[InputDataRefIndex-ModelDataSeries.shape[0]:InputDataRefIndex]
+                            InputDataRefSeries = EWP.iloc[InputDataRefIndex-ModelDataSeries.shape[0]:InputDataRefIndex]
+                            if TemporalExtraction == "PearsonCorrelationVal":
+                                ManifoldTS[c].loc[pack["latestIndex"]] = pearsonr(ModelDataSeries.values, InputDataRefSeries.values)[0]
+                            elif TemporalExtraction == "PearsonCorrelationPVal":
+                                ManifoldTS[c].loc[pack["latestIndex"]] = pearsonr(ModelDataSeries.values, InputDataRefSeries.values)[1]
+                            elif TemporalExtraction == "AdjMI":
+                                ManifoldTS[c].loc[pack["latestIndex"]] = adjusted_mutual_info_score(ModelDataSeries.values, InputDataRefSeries.values)
+                            elif TemporalExtraction == "DecisionTree":
+                                InputDataRefSeries[InputDataRefSeries > 0] = 1
+                                InputDataRefSeries[InputDataRefSeries < 0] = -1
+                                InputDataRefSeries[InputDataRefSeries == 0] = 0
+                                # Create the decision tree classifier
+                                clf = DecisionTreeClassifier(
+                                    criterion='gini',
+                                    splitter='best',
+                                    max_depth=None,
+                                    min_samples_split=2,  # 2, 10
+                                    min_samples_leaf=1,  # 1, 5
+                                    min_weight_fraction_leaf=0.0,
+                                    max_features=None,
+                                    random_state=None,
+                                    max_leaf_nodes=None,
+                                    min_impurity_decrease=0.0,
+                                    class_weight=None,
+                                    ccp_alpha=0.0)
 
-                            trainX = ModelDataSeries.values.reshape(-1, 1)
-                            trainY = InputDataRefSeries.values
+                                trainX = ModelDataSeries.values.reshape(-1, 1)
+                                trainY = InputDataRefSeries.values
 
-                            # Train the classifier
-                            clf.fit(trainX, trainY)
-                            # Print the split level of the tree
-                            tree_threshold_Info = clf.tree_.threshold
-                            ManifoldTS[c].loc[pack["latestIndex"]] = tree_threshold_Info[0]
+                                # Train the classifier
+                                clf.fit(trainX, trainY)
+                                # Print the split level of the tree
+                                tree_threshold_Info = clf.tree_.threshold
+                                ManifoldTS[c].loc[pack["latestIndex"]] = tree_threshold_Info[0]
+            except Exception as e:
+                print(e)
 
-        if "_Transpose_" in ID:
-            Out = pd.concat(ManifoldTS, axis=1).sort_index()
+        for i in range(len(ManifoldTS)):
+            ManifoldTS[i] = ManifoldTS[i].sort_index()
+
+        return [InputData, ManifoldTS]
+
+    def getManifoldProjections(ManifoldUnpacked, **kwargs):
+        if "ProjectionShift" in kwargs:
+            ProjectionShift = kwargs['ProjectionShift']
         else:
-            Out = ManifoldTS
+            ProjectionShift = 0
 
-        return Out
+        NativeSpace = ManifoldUnpacked[0]
+        ManifoldData = ManifoldUnpacked[1]
+
+        ProjectionsList = []
+        for coeffs in ManifoldData:
+            if ProjectionShift > 0:
+                subProjectionDF = pe.S(coeffs, nperiods=ProjectionShift) * NativeSpace
+            else:
+                subProjectionDF = coeffs * NativeSpace
+            ProjectionsList.append(subProjectionDF)
+
+        return ProjectionsList

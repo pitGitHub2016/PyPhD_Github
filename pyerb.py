@@ -1,23 +1,32 @@
 from datetime import datetime
-import pandas as pd, numpy as np, math, sqlite3, time, matplotlib.pyplot as plt, itertools, types, multiprocessing, ta, sqlite3, xlrd
+import pandas as pd, numpy as np, math, sqlite3, time, matplotlib.pyplot as plt, itertools, types, multiprocessing, ta, sqlite3, xlrd, pickle
 from statsmodels.regression.rolling import RollingOLS
 from tqdm import tqdm
+import persim
 from sklearn import (manifold, datasets, decomposition, ensemble, discriminant_analysis, random_projection, neighbors)
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
+import QuantLib as ql
 from scipy.stats import norm, t
 from scipy.stats import skew, kurtosis, entropy
-from pykalman import pykalman
 import statsmodels.tsa.stattools as ts
 from scipy.linalg import svd
 from sklearn.metrics.cluster import mutual_info_score, adjusted_mutual_info_score, normalized_mutual_info_score
 from sklearn import linear_model
-from fracdiff2 import frac_diff_ffd
 from sklearn.decomposition import PCA
 from itertools import combinations, permutations
 from ta.volume import *
 from optparse import OptionParser
-from hurst import compute_Hc
+try:
+    from ripser import Rips
+    from pykalman import pykalman
+    from fracdiff2 import frac_diff_ffd
+    from hurst import compute_Hc
+    from pypfopt.expected_returns import mean_historical_return
+    from pypfopt.risk_models import CovarianceShrinkage
+    from pypfopt.efficient_frontier import EfficientFrontier
+except Exception as e:
+    print(e)
 
 class pyerb:
 
@@ -116,8 +125,32 @@ class pyerb:
             nIn = kwargs["nIn"]
         else:
             nIn = 250
-        RollVol = np.sqrt(252) * pyerb.rollStatistics(df, method="Vol", nIn=nIn) * 100
-        out = (df / pyerb.S(RollVol)).fillna(0)
+
+        if "mode" in kwargs:
+            mode = kwargs["mode"]
+        else:
+            mode = "RollWin"
+
+        if "nShift" in kwargs:
+            nShift = kwargs["nShift"]
+        else:
+            nShift = 2
+
+        if "gapify" in kwargs:
+            gapify = kwargs["gapify"]
+        else:
+            gapify = None
+
+        if mode == "RollWin":
+            RollVol = np.sqrt(252) * pyerb.rollStatistics(df, method="Vol", nIn=nIn) * 100
+        elif mode == "ExpWin":
+            RollVol = np.sqrt(252) * df.expanding(25).std().ffill().bfill() * 100
+
+        if gapify is not None:
+            RollVol = pyerb.gapify(RollVol, steps=gapify)
+
+        out = df / pyerb.S(RollVol, nperiods=nShift)
+        out = pyerb.fd(out)
         return out
 
     def pb(df):
@@ -132,11 +165,17 @@ class pyerb:
         out = df[xVar].rolling(n).corr(df[yVar]) * (pyerb.roller(df[xVar], np.std, n) / pyerb.roller(df[yVar], np.std, n))
         return out
 
-    def sign(df):
-        #df[df > 0] = 1
-        #df[df < 0] = -1
-        #df[df == 0] = 0
+    def sign(df, **kwargs):
+        if "FillNA" in kwargs:
+            FillNA = kwargs['FillNA']
+        else:
+            FillNA = False
+
+        if FillNA:
+            df = df.fillna(0)
+
         out = np.sign(df)
+
         return out
 
     def S(df, **kwargs):
@@ -213,45 +252,56 @@ class pyerb:
 
     def expander(df, func, n):
         EXPAND = df.expanding(min_periods=n, center=False).apply(lambda x: func(x))
+        ################################################################################################
+        #tqdm.pandas(desc=None)
+        #EXPAND = df.expanding(min_periods=n, center=False).progress_apply(lambda x: func(x))
         return EXPAND
 
-    "Other operators (file readers, chunks etc.)"
+    def expanderMetric(df, metric, n):
+        if metric == "Sharpe":
+            out = df.expanding(n).mean() / df.expanding(n).std()
+        return out
 
-    def read_date(date):
-        return xlrd.xldate.xldate_as_datetime(date, 0)
+    def DeactivateAssets(df, targetAssets, **kwargs):
+        if 'mode' in kwargs:
+            mode = kwargs['mode']
+        else:
+            mode = "Neutralise"
 
-    def chunkReader(name):
-        df = pd.read_csv(name, delimiter=';', chunksize=10000)
+        if mode == "Neutralise":
+            df.loc[:, targetAssets] = 0
+
         return df
 
-    "Quantitative Finance"
+    def SubSpaceIgnore(df, TargetSubSpace, Condition):
+        out = df
+        for c in TargetSubSpace:
+            if Condition == "IgnorePositives":
+                out.loc[out[c] > 0,c] = None
+            elif Condition == "IgnoreNegatives":
+                out.loc[out[c] < 0,c] = None
+        return out
 
-    def sharpe(df):
-        return df.mean() / df.std()
+    def SubSpaceIgnoreConnections(df, mode, Condition):
+        outMat = pd.DataFrame(0, index=df.columns, columns=df.columns)
 
-    def drawdown(pnl):
-        """
-        calculate max drawdown and duration
-        Input:
-            pnl, in $
-        Returns:
-            drawdown : vector of drawdwon values
-            duration : vector of drawdown duration
-        """
-        cumret = pnl.cumsum()
+        for c1 in tqdm(df.columns):
+            for c2 in df.columns:
+                if c1 != c2:
+                    subDF = pyerb.SubSpaceIgnore(df[[c1, c2]], [c1], Condition).dropna(subset=[c1])
+                    try:
+                        if mode == "Corr":
+                            outMat.loc[c1, c2] = subDF.corr().iloc[0, 1]
+                        elif mode == "MI":
+                            outMat.loc[c1, c2] = mutual_info_score(subDF[c1].values, subDF[c2].values)
 
-        highwatermark = [0]
+                    except Exception as e:
 
-        idx = pnl.index
-        drawdown = pd.Series(index=idx)
-        drawdowndur = pd.Series(index=idx)
+                        outMat.loc[c1, c2] = None
 
-        for t in range(1, len(idx)):
-            highwatermark.append(max(highwatermark[t - 1], cumret[t]))
-            drawdown[t] = (highwatermark[t] - cumret[t])
-            drawdowndur[t] = (0 if drawdown[t] == 0 else drawdowndur[t - 1] + 1)
+        return outMat
 
-        return drawdown, drawdowndur
+    "Rollers"
 
     def rollNormalise(df, **kwargs):
         if 'mode' in kwargs:
@@ -395,11 +445,54 @@ class pyerb:
                 try:
                     H, Hc, Hdata = compute_Hc(df[c], kind='change', simplified=True)
                 except Exception as e:
+                    #print(c, e)
                     H = None
 
                 HurstDF.loc[df.index[-1], c] = H
 
         return HurstDF
+
+    "Quantitative Finance"
+
+    def Inactivity(df):
+        df = df.fillna(0)
+        zeroedDF = df[df==0]+1
+        InactivityPct = zeroedDF.sum() / df.shape[0]
+
+        return InactivityPct
+
+    def sharpe(df):
+        return df.mean() / df.std()
+
+    def drawdown(pnl):
+        """
+        calculate max drawdown and duration
+        Input:
+            pnl, in $
+        Returns:
+            drawdown : vector of drawdwon values
+            duration : vector of drawdown duration
+        """
+        cumret = pnl.cumsum()
+
+        highwatermark = [0]
+
+        idx = pnl.index
+        drawdown = pd.Series(index=idx)
+        drawdowndur = pd.Series(index=idx)
+
+        for t in range(1, len(idx)):
+            highwatermark.append(max(highwatermark[t - 1], cumret[t]))
+            drawdown[t] = (highwatermark[t] - cumret[t])
+            drawdowndur[t] = (0 if drawdown[t] == 0 else drawdowndur[t - 1] + 1)
+
+        return drawdown, drawdowndur
+
+    def max_drawdown(return_series):
+        comp_ret = (return_series + 1).cumprod()
+        peak = comp_ret.expanding(min_periods=1).max()
+        dd = (comp_ret / peak) - 1
+        return dd.min()
 
     def maxDD_DF(df):
         ddList = []
@@ -412,6 +505,27 @@ class pyerb:
         ddDF.columns = ['Strategy', 'maxDD']
         ddDF = ddDF.set_index('Strategy')
         return ddDF
+
+    def AnnSortinoRatio(series, **kwargs):
+        if "N" in kwargs:
+            N = kwargs['N']
+        else:
+            N = 252
+
+        if "rf" in kwargs:
+            rf = kwargs['rf']
+        else:
+            rf = 0
+
+        mean = series.mean() * N - rf
+        std_neg = series[series < 0].std() * np.sqrt(N)
+
+        return mean / std_neg
+
+    def AnnCalmar(df):
+        max_drawdowns = pyerb.max_drawdown(df)
+        calmars = df.mean() * 255 / abs(max_drawdowns)
+        return calmars
 
     def Roll_Max_DD(df, **kwargs):
         if 'nperiods' in kwargs:
@@ -451,43 +565,159 @@ class pyerb:
         else:
             raise TypeError("Input must be DataFrame or Series, not " + str(type(pnl)))
 
+    "Smoothers"
+
     def SelectLookBack(df, **kwargs):
+
+        def getLocalMetric(l_OptimizedMetric, l_OptimizationMode, l_subPnl):
+
+            if l_OptimizedMetric == "Sharpe":
+                l_rawMetric = pyerb.sharpe(l_subPnl)
+            elif l_OptimizedMetric == "Sortino":
+                l_rawMetric = pyerb.AnnSortinoRatio(l_subPnl)
+            elif l_OptimizedMetric == "Calmar":
+                l_rawMetric = pyerb.AnnCalmar(l_subPnl)
+            ###########################################
+            if l_OptimizationMode == "Raw":
+                l_subMetric = np.sqrt(252) * l_rawMetric
+            elif l_OptimizationMode == "Abs":
+                l_subMetric = np.sqrt(252) * np.abs(l_rawMetric)
+
+            return [l_subMetric, l_rawMetric]
+
+        if "DynamicsSpace" in kwargs:
+            DynamicsSpace = kwargs['DynamicsSpace']
+        else:
+            DynamicsSpace = "SlowTrendFollowingOnly"
+
+        if "LookBackSelectorMode" in kwargs:
+            LookBackSelectorMode = kwargs["LookBackSelectorMode"]
+        else:
+            LookBackSelectorMode = "SingleLookBack"
+
+        if "TopCalcPct" in kwargs:
+            TopCalcPct = kwargs["TopCalcPct"]
+        else:
+            TopCalcPct = 0.1
+
+        if "TopSelectPct" in kwargs:
+            TopSelectPct = kwargs["TopSelectPct"]
+        else:
+            TopSelectPct = 0.8
+
+        if "stdList" in kwargs:
+            stdList = kwargs["stdList"]
+        else:
+            stdList = [0.5, 1, 1.5, 2, 2.5, 3]
+
+        ##########################################################
+        if DynamicsSpace == "SlowTrendFollowingOnly":
+            LagList = [10, 25, 50, 125, 250, 375, 500]
+            sigShift = 2
+        elif DynamicsSpace == "FastTrendFollowingOnly":
+                LagList = [10, 25, 50]
+                sigShift = 2
+        elif DynamicsSpace == "MeanReversionOnlyShift2":
+            LagList = [2, 3, 5, 10, 15, 25]
+            sigShift = 2
+        elif DynamicsSpace == "MeanReversionOnlyShift1":
+            LagList = [2, 3, 5, 10, 15, 25]
+            sigShift = 1
+        elif DynamicsSpace == "CreditTrader":
+            LagList = [3, 5, 10, 25, 50, 125, 250]
+            sigShift = 1
+        elif DynamicsSpace == "SovTrader":
+            LagList = [5, 10, 25, 50, 100, 200]
+            sigShift = 1
+        elif "Range-" in DynamicsSpace:
+            DynamicsSpaceSplit = DynamicsSpace.split("-")
+            LagList = range(int(DynamicsSpaceSplit[1]),int(DynamicsSpaceSplit[2]), int(DynamicsSpaceSplit[3]))
+            sigShift = 2
+        ##########################################################
+        if "OptimizedMetric" in kwargs:
+            OptimizedMetric = kwargs['OptimizedMetric']
+        else:
+            OptimizedMetric = "Sharpe"
+        ##########################################################
+        if "OptimizationMode" in kwargs:
+            OptimizationMode = kwargs['OptimizationMode']
+        else:
+            OptimizationMode = "Abs"
+        ##########################################################
+        if "SortAscending" in kwargs:
+            SortAscending = kwargs['SortAscending']
+        else:
+            SortAscending = False
+
         if "method" in kwargs:
             method = kwargs['method']
         else:
             method = "EMA"
 
-        if method == "EMA":
-            columnSet = ["Asset", "Lag", "shiftLag", "Sharpe"]
+        columnSet = ["Asset", "Lag", "shiftLag", "Sharpe", 'Direction']
 
         outList = []
         for c in df.columns:
             if method == "EMA":
-                for l in [10, 25, 50, 125, 250, 500]:#[10, 25, 50, 125, 250, 500], range(5,750, 5):
-                    for s in [2]:#[1,2]:
+                for l in LagList:
+                    for s in [sigShift]:#[1,2]:
                         subPnl = pyerb.S(pyerb.sign(pyerb.ema(df[c], nperiods=l)), nperiods=s) * df[c]
-                        subSh = np.sqrt(252) * pyerb.sharpe(subPnl)
-                        outList.append([c,l,s,subSh])
+                        [subMetric, rawMetric] = getLocalMetric(OptimizedMetric, OptimizationMode, subPnl)
+                        outList.append([c,l,s,subMetric,np.sign(rawMetric)])
+            elif method == "BB":
+                for l in LagList:
+                    for no_of_std_In in stdList:
+                        for s in [sigShift]:#[1,2]:
+                            subPnl = pyerb.S(pyerb.sbb(pd.DataFrame(df[c], columns=[c]), nperiods=int(l), no_of_std=no_of_std_In)[c], nperiods=s) * df[c]
+                            [subMetric, rawMetric] = getLocalMetric(OptimizedMetric, OptimizationMode, subPnl)
+                            outList.append([c, str(l)+"_"+str(no_of_std_In), s, subMetric, np.sign(rawMetric)])
         ###############################################################################################################
         outDF = pd.DataFrame(outList, columns=columnSet)
-        outDF = outDF.sort_values(['Asset', 'Sharpe'], ascending=False).groupby('Asset').head()
+        outDF = outDF.sort_values(['Asset', 'Sharpe'], ascending=SortAscending).groupby('Asset').head(round(TopCalcPct * outDF.shape[0]))
         outDF = outDF.set_index("Asset", drop=True)
         ###############################################################################################################
         BestLagList = []
+        DirectionList = []
         for c in df.columns:
-            bestLag = outDF.loc[c,"Lag"].values[0]
+            #############################################################################
+            if LookBackSelectorMode == "SingleLookBack":
+                bestLag = outDF.loc[c,"Lag"].values[0]
+                direction = outDF.loc[c,"Direction"].values[0]
+            elif LookBackSelectorMode == "LookBacksList":
+                sub_AssetData = outDF.loc[c,:]
+                sub_AssetData["SharpeNormaliser"] = sub_AssetData["Sharpe"]/sub_AssetData["Sharpe"].max()
+                sub_AssetData = sub_AssetData[sub_AssetData["SharpeNormaliser"] >= TopSelectPct].round(4)
+                sub_AssetData["Lag"] = sub_AssetData["Lag"].astype(str)+":"+sub_AssetData["Sharpe"].astype(str)
+                bestLag = ','.join([str(x) for x in sub_AssetData["Lag"].values])
+                direction = ','.join([str(x) for x in sub_AssetData["Direction"].values])
+            ##############################################################################
             BestLagList.append([c,bestLag])
+            DirectionList.append([c,direction])
         BestLagDF = pd.DataFrame(BestLagList, columns=["Asset", "Lag"]).set_index("Asset", drop=True)
+        DirectionDF = pd.DataFrame(DirectionList, columns=["Asset", "Direction"]).set_index("Asset", drop=True)
         ###############################################################################################################
-        return BestLagDF
-
-    "Smoothers"
+        return [BestLagDF, DirectionDF]
 
     def DynamicSelectLookBack(df0, **kwargs):
+        if 'LookBackSelectorMode' in kwargs:
+            LookBackSelectorMode = kwargs['LookBackSelectorMode']
+        else:
+            LookBackSelectorMode = 'SingleLookBack' # SingleLookBack, LookBacksList
+
         if 'RollMode' in kwargs:
             RollMode = kwargs['RollMode']
         else:
             RollMode = 'RollWindow'
+
+        if "method" in kwargs:
+            method = kwargs['method']
+        else:
+            method = "EMA"
+
+        if "stdList" in kwargs:
+            stdList = kwargs["stdList"]
+        else:
+            stdList = [0.5, 1, 1.5, 2, 2.5, 3]
 
         if 'st' in kwargs:
             st = kwargs['st']
@@ -496,21 +726,50 @@ class pyerb:
         if st < 500:
             print("You need at least 500 observations for the 'SelectLookBack' function to run .. setting st to 500+1")
             st = 500+1
+        ##########################################################
+        if "DynamicsSpace" in kwargs:
+            DynamicsSpace = kwargs['DynamicsSpace']
+        else:
+            DynamicsSpace = "SlowTrendFollowingOnly"
+        ##########################################################
+        if "OptimizedMetric" in kwargs:
+            OptimizedMetric = kwargs['OptimizedMetric']
+        else:
+            OptimizedMetric = "Sharpe"
+        ##########################################################
+        if "OptimizationMode" in kwargs:
+            OptimizationMode = kwargs['OptimizationMode']
+        else:
+            OptimizationMode = "Abs"
+        ##########################################################
 
-        outList = []
+        LookbacksList = []
+        LookbacksDirectionsList = []
         for i in tqdm(range(st, len(df0) + 1)):
             if RollMode == 'RollWindow':
                 df = df0.iloc[i - st:i, :]
             else:
                 df = df0.iloc[0:i, :]
+            ##########################################################
+            out = pyerb.SelectLookBack(df, method=method, stdList=stdList, DynamicsSpace=DynamicsSpace,
+                                       OptimizedMetric=OptimizedMetric, OptimizationMode=OptimizationMode,
+                                       LookBackSelectorMode=LookBackSelectorMode)
+            ##########################################################
+            LookbacksOut = out[0]
+            LookbacksDirectionsOut = out[1]
+            LookbacksOut.columns = [df.index[-1]]
+            LookbacksDirectionsOut.columns = [df.index[-1]]
+            LookbacksList.append(LookbacksOut)
+            LookbacksDirectionsList.append(LookbacksDirectionsOut)
 
-            out = pyerb.SelectLookBack(df, method="EMA")
-            out.columns = [df.index[-1]]
-            outList.append(out)
-
-        outDF = pd.concat(outList,axis=1).T.sort_index()
-        outDF.index.names = df0.index.names
-        return outDF
+        ##############################################################################################
+        LookbacksDF = pd.concat(LookbacksList,axis=1).T.sort_index()
+        LookbacksDF.index.names = df0.index.names
+        ##############################################################################################
+        LookbacksDirectionsDF = pd.concat(LookbacksDirectionsList,axis=1).T.sort_index()
+        LookbacksDirectionsDF.index.names = df0.index.names
+        ##############################################################################################
+        return [LookbacksDF,LookbacksDirectionsDF]
 
     def RollKalman(df, **kwargs):
 
@@ -644,10 +903,19 @@ class pyerb:
         return EMA
 
     def dema(df, LookBacks, **kwargs):
+
         if "mode" in kwargs:
             mode = kwargs["mode"]
         else:
             mode = "mean"
+
+        if "LookBacksDirections" in kwargs:
+            LookBacksDirections = kwargs["LookBacksDirections"]
+        else:
+            LookBacksDirections = pd.DataFrame(1, index=df.index, columns=df.columns)
+        "Be sure to have the LookbackDirections 'on' ONLY for the rolling mean case"
+        if mode not in ["mean"]:
+            LookBacksDirections = pd.DataFrame(1, index=df.index, columns=df.columns)
 
         #pd.set_option('max_row', None)
         uniqueLags = []
@@ -663,7 +931,9 @@ class pyerb:
             elif mode == "AnnVol":
                 demaDF[LookBacks == l] = np.sqrt(252) * df.ewm(span=l, min_periods=l).std() * 100
 
-        return demaDF.fillna(0)
+        out = demaDF * LookBacksDirections
+
+        return out
 
     def bb(df, **kwargs):
         if 'nperiods' in kwargs:
@@ -711,17 +981,61 @@ class pyerb:
         RSI.columns = ['RSI']
         return RSI
 
-    "Signals"
-    def sbb(df, **kwargs):
+    "Gekko Custom Technicals"
+
+    def hmp(df, **kwargs):
+        if 'channelMethod' in kwargs:
+            channelMethod = kwargs['channelMethod']
+        else:
+            channelMethod = "BB"
+
         if 'nperiods' in kwargs:
             nperiods = kwargs['nperiods']
         else:
             nperiods = 3
 
+        if 'no_of_std' in kwargs:
+            no_of_std = kwargs['no_of_std']
+        else:
+            no_of_std = 2
+
+        outlist = []
+        for c in df.columns:
+            if channelMethod == "BB":
+                ch = pyerb.bb(df[c], nperiods=nperiods, no_of_std=no_of_std)
+                ch["InBands"] = 0
+                ch.loc[(ch["Price"] < ch["UPPER"])&(ch["Price"] >= ch["LOWER"]),"InBands"] = 1
+                ch["pctPointsOut"] = 0
+                for i in tqdm(range(nperiods, len(ch) + 1)):
+                    subCh = ch.iloc[i - nperiods:i, :]
+                    ch.loc[subCh.index[-1],"pctPointsOut"] = 1-subCh['InBands'].mean()
+            ################################################################################
+            subDF = ch["pctPointsOut"]
+            subDF.name = c
+            outlist.append(subDF)
+
+        outDF = pd.concat(outlist,axis=1).sort_index()
+
+        return outDF
+
+    "Signals"
+
+    def sbb(df, **kwargs):
+
+        if 'nperiods' in kwargs:
+            nperiods = kwargs['nperiods']
+        else:
+            nperiods = 3
+
+        if 'no_of_std' in kwargs:
+            no_of_std = kwargs['no_of_std']
+        else:
+            no_of_std = 2
+
         signalList = []
         for c in df.columns:
             if c != 'Date':
-                cBB = pyerb.bb(df[c], nperiods=nperiods)
+                cBB = pyerb.bb(df[c], nperiods=nperiods, no_of_std=no_of_std)
                 cBB['Position'] = np.nan
                 cBB['Position'][(cBB['Price'] > cBB['UPPER']) & (pyerb.S(cBB['Price']) <= pyerb.S(cBB['UPPER']))] = 1
                 cBB['Position'][(cBB['Price'] < cBB['LOWER']) & (pyerb.S(cBB['Price']) >= pyerb.S(cBB['LOWER']))] = -1
@@ -840,14 +1154,14 @@ class pyerb:
             mode = kwargs['mode']
         else:
             mode = 'Linear'
-        if 'HedgeRatioConnectionMode' in kwargs:
-            HedgeRatioConnectionMode = kwargs['HedgeRatioConnectionMode']
+        if 'ConnectionMode' in kwargs:
+            ConnectionMode = kwargs['ConnectionMode']
         else:
-            HedgeRatioConnectionMode = "Spreads"
-        if HedgeRatioConnectionMode == "Baskets":
-            HedgeRatioConnectionSign = 1
+            ConnectionMode = "-"
+        if ConnectionMode == "+":
+            ConnectionSign = 1
         else:
-            HedgeRatioConnectionSign = -1
+            ConnectionSign = -1
         if 'n' in kwargs:
             n = kwargs['n']
         else:
@@ -888,20 +1202,20 @@ class pyerb:
                     PrZScore = (PrRatio-emaPrRatio) / volPrRatio
                     lDF.append(PrZScore)
                 df0 = pd.concat(lDF, axis=1, keys=cc)
-            elif mode == 'HedgeRatio':
+            elif mode == 'HedgeRatio_Rolling':
                 df0 = pd.concat([df[c[0]].rolling(n).corr(df[c[1]]) * (pyerb.roller(df[c[0]], np.std, n) / pyerb.roller(df[c[1]], np.std, n)) for c in tqdm(cc)], axis=1, keys=cc)
             elif mode == 'HedgeRatio_Expanding':
                 df0 = pd.concat([df[c[0]].expanding(n).corr(df[c[1]]) * (pyerb.expander(df[c[0]], np.std, n) / pyerb.expander(df[c[1]], np.std, n)) for c in tqdm(cc)], axis=1, keys=cc)
             elif mode == 'HedgeRatioPnL_Roll':
-                df0 = pd.concat([(df[c[0]] + HedgeRatioConnectionSign * pyerb.S(df[c[0]].rolling(n).corr(df[c[1]]) * (
-                            pyerb.roller(df[c[0]], np.std, n) / pyerb.roller(df[c[1]], np.std, n)))
+                df0 = pd.concat([(df[c[0]] + ConnectionSign * pyerb.S(df[c[0]].rolling(n).corr(df[c[1]]) * (
+                            pyerb.roller(df[c[0]], np.std, n) / pyerb.roller(df[c[1]], np.std, n)), nperiods=1)
                                              * df[c[1]]).fillna(0) for c in tqdm(cc)], axis=1, keys=cc)
             elif mode == 'HedgeRatioPnL_Expand':
-                df0 = pd.concat([(df[c[0]] + HedgeRatioConnectionSign * pyerb.S(df[c[0]].expanding(n).corr(df[c[1]]) * (
-                            pyerb.expander(df[c[0]], np.std, n) / pyerb.expander(df[c[1]], np.std, n)))
+                df0 = pd.concat([(df[c[0]] + ConnectionSign * pyerb.S(df[c[0]].expanding(n).corr(df[c[1]]) * (
+                            pyerb.expander(df[c[0]], np.std, n) / pyerb.expander(df[c[1]], np.std, n)), nperiods=1)
                                              * df[c[1]]).fillna(0) for c in tqdm(cc)], axis=1, keys=cc)
             elif mode == 'HedgeRatioSimpleCorr':
-                df0 = pd.concat([df[c[0]] + HedgeRatioConnectionSign * (pyerb.S(df[c[0]].expanding(n).corr(df[c[1]]), nperiods=2) * df[c[1]]) for c in tqdm(cc)], axis=1, keys=cc)
+                df0 = pd.concat([df[c[0]] + ConnectionSign * (pyerb.S(df[c[0]].expanding(n).corr(df[c[1]]), nperiods=1) * df[c[1]]) for c in tqdm(cc)], axis=1, keys=cc)
             df0.columns = df0.columns.map('_'.join)
         else:
             if mode == 'OLSpnl':
@@ -910,61 +1224,258 @@ class pyerb:
         return df0.fillna(0).sort_index()
 
     def RVSignalHandler(sigDF, **kwargs):
+
+        if 'HedgeRatioMul' in kwargs:
+            HedgeRatioMul = kwargs['HedgeRatioMul']
+        else:
+            HedgeRatioMul = 1
+
         if 'HedgeRatioDF' in kwargs:
             HedgeRatioDF = kwargs['HedgeRatioDF']
         else:
-            HedgeRatioDF = pd.DataFrame(1, index=sigDF.index, columns=sigDF.columns)
+            HedgeRatioDF = pd.DataFrame(HedgeRatioMul, index=sigDF.index, columns=sigDF.columns)
+
         assetSignList = []
         for c in sigDF.columns:
             medSigDF = pd.DataFrame(sigDF[c])
-            HedgeRatio = HedgeRatioDF[c]
             assetNames = c.split("_")
             medSigDF[assetNames[0]] = sigDF[c]
-            medSigDF[assetNames[1]] = sigDF[c] * (-1) * HedgeRatio
+            medSigDF[assetNames[1]] = sigDF[c] * HedgeRatioDF[c]
             subSigDF = medSigDF[[assetNames[0], assetNames[1]]]
             #print(subSigDF)
             assetSignList.append(subSigDF)
         assetSignDF = pd.concat(assetSignList, axis=1)
-        #print(assetSignDF)
         assetSignDFgroupped = assetSignDF.groupby(assetSignDF.columns, axis=1).sum()
-        #print(assetSignDFgroupped)
-        #time.sleep(3000)
+
         return assetSignDFgroupped
 
     "Pricing"
-
-    def black_scholes(S, K, T, r, rf, sigma, option_type):
-        d1 = (np.log(S / K) + (r - rf + sigma ** 2 / 2) * T) / (sigma * np.sqrt(T))
+    "Custom Pricers"
+    def black_scholes(S, K, T, rf, sigma, option_type):
+        "https://carlolepelaars.github.io/blackscholes/4.the_greeks_black76/#parameters"
+        d1 = (np.log(S / K) + (sigma ** 2 / 2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
 
         if option_type == "call":
-            option_price = S * math.exp(-rf * T) * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2)
+            option_price = math.exp(-rf * T) * (S * norm.cdf(d1) - K * norm.cdf(d2))
         elif option_type == "put":
-            option_price = K * math.exp(-r * T) * norm.cdf(-d2) - S * math.exp(-rf * T) * norm.cdf(-d1)
+            option_price = math.exp(-rf * T) * (K * norm.cdf(-d2) - S * norm.cdf(-d1))
 
         return option_price
 
-    def black_scholes_greeks(S, K, T, r, rf, sigma, option_type):
-        d1 = (np.log(S / K) + (r - rf + sigma ** 2 / 2) * T) / (sigma * np.sqrt(T))
+    def black_scholes_greeks(S, K, T, rf, sigma, option_type):
+        "https://carlolepelaars.github.io/blackscholes/4.the_greeks_black76/#parameters"
+        d1 = (np.log(S / K) + (sigma ** 2 / 2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
-        N_d1 = norm.cdf(d1)
-        N_d2 = norm.cdf(d2)
-        n_d1 = norm.pdf(d1)
+        #Phi_d1 = norm.cdf(d1)
+        #phi_d1 = norm.pdf(d1)
 
         if option_type == "call":
-            delta = np.exp(-rf * T) * N_d1
-            gamma = np.exp(-rf * T - d1 ** 2 / 2) / (S * sigma * np.sqrt(T) * np.sqrt(2 * np.pi))
-            theta = (-S * n_d1 * sigma / (2 * np.sqrt(T))) - (rf * K * np.exp(-rf * T) * N_d2)
-            vega = S * np.exp(-rf * T) * n_d1 * np.sqrt(T)
-            rho = K * T * np.exp(-r * T) * N_d2
+            delta = np.exp(-rf * T) * norm.cdf(d1)
+            gamma = np.exp(-rf * T) * (norm.pdf(d1) / (S * sigma * np.sqrt(T)))
+            theta = np.exp(-rf * T) * ((-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))) - (rf * K * norm.cdf(d2)) + (rf * S * norm.cdf(d1)))
+            vega = S * np.exp(-rf * T) * norm.pdf(d1) * np.sqrt(T)
+            rho = -T * np.exp(-rf * T) * (S * norm.cdf(d1) - K * norm.cdf(d2))
         elif option_type == "put":
-            delta = -np.exp(-rf * T) * (1 - N_d1)
-            gamma = np.exp(-rf * T - d1 ** 2 / 2) / (S * sigma * np.sqrt(T) * np.sqrt(2 * np.pi))
-            theta = (-S * n_d1 * sigma / (2 * np.sqrt(T))) + (rf * K * np.exp(-rf * T) * (1 - N_d2))
-            vega = S * np.exp(-rf * T) * n_d1 * np.sqrt(T)
-            rho = -K * T * np.exp(-r * T) * (1 - N_d2)
+            delta = -np.exp(-rf * T) * norm.cdf(-d1)
+            gamma = np.exp(-rf * T) * (norm.pdf(d1) / (S * sigma * np.sqrt(T)))
+            theta = np.exp(-rf * T) * ((-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))) + (rf * K * norm.cdf(-d2)) - (rf * S * norm.cdf(-d1)))
+            vega = S * np.exp(-rf * T) * norm.pdf(d1) * np.sqrt(T)
+            rho = -T * np.exp(-rf * T) * (K * norm.cdf(-d2) - S * norm.cdf(-d1))
 
         return delta, gamma / 100, theta / 365, vega / 100, rho / 100
+
+    "QuantLib Stuff"
+    def quantLib_DateConverter(dateInput):
+        ####################################################
+        if dateInput.month == 1:
+            qlmonth = ql.January
+        elif dateInput.month == 2:
+            qlmonth = ql.February
+        elif dateInput.month == 3:
+            qlmonth = ql.March
+        elif dateInput.month == 4:
+            qlmonth = ql.April
+        elif dateInput.month == 5:
+            qlmonth = ql.May
+        elif dateInput.month == 6:
+            qlmonth = ql.June
+        elif dateInput.month == 7:
+            qlmonth = ql.July
+        elif dateInput.month == 8:
+            qlmonth = ql.August
+        elif dateInput.month == 9:
+            qlmonth = ql.September
+        elif dateInput.month == 10:
+            qlmonth = ql.October
+        elif dateInput.month == 11:
+            qlmonth = ql.November
+        elif dateInput.month == 12:
+            qlmonth = ql.December
+        ####################################################
+        return ql.Date(dateInput.day, qlmonth, dateInput.year)
+
+    def Barrier(specs):
+
+        def binomial_barrier_option():
+            payoff = ql.CashOrNothingPayoff(option_type, strike, payoff_amt)
+            exercise = ql.EuropeanExercise(expiry_dt)
+            option = ql.BarrierOption(barrier_type, barrier, 0.0, payoff, exercise)
+            process = ql.GarmanKohlagenProcess(
+                ql.QuoteHandle(spot_quote),
+                ql.YieldTermStructureHandle(foreignTS),
+                ql.YieldTermStructureHandle(domesticTS),
+                ql.BlackVolTermStructureHandle(expanded_volTS),
+            )
+            engine = ql.BinomialBarrierEngine(process, "crr", 200)
+            option.setPricingEngine(engine)
+            return option
+
+        def vanna_volga_barrer_option():
+            payoff = ql.CashOrNothingPayoff(option_type, strike, payoff_amt)
+            exercise = ql.EuropeanExercise(expiry_dt)
+            option = ql.BarrierOption(barrier_type, barrier, 0.0, payoff, exercise)
+            engine = ql.VannaVolgaBarrierEngine(
+                ql.DeltaVolQuoteHandle(atmVol),
+                ql.DeltaVolQuoteHandle(vol25Put),
+                ql.DeltaVolQuoteHandle(vol25Call),
+                ql.QuoteHandle(spot_quote),
+                ql.YieldTermStructureHandle(domesticTS),
+                ql.YieldTermStructureHandle(foreignTS),
+            )
+            option.setPricingEngine(engine)
+            return option
+
+        #option_ID = specs['option_ID']#"OVML EURUSD DIKO 1.0000P B0.9500 01/13/23 N1M"
+
+        today = pyerb.quantLib_DateConverter(specs['today'])#ql.Date(7, ql.December, 2023)
+        ql.Settings.instance().evaluationDate = today
+
+        "option specification"
+        #underlying = specs['underlying']#"EURUSD"
+        ############################################################################
+        if specs['option_type'] == "call":
+            option_type = ql.Option.Call
+        elif specs['option_type'] == "put":
+            option_type = ql.Option.Put
+        ############################################################################
+        strike = specs['strike']#1.0779
+        if specs['barrier_type'] == "DownOut":
+            barrier_type = ql.Barrier.DownOut
+        elif specs['barrier_type'] == "DownIn":
+            barrier_type = ql.Barrier.DownIn
+        elif specs['barrier_type'] == "UpOut":
+            barrier_type = ql.Barrier.UpOut
+        elif specs['barrier_type'] == "UpIn":
+            barrier_type = ql.Barrier.UpIn
+        ############################################################################
+        barrier = specs['barrier']#1.0237
+        payoff_amt = specs['payoff_amt']#1000000.0
+        expiry_dt = pyerb.quantLib_DateConverter(specs['expiry_dt'])#ql.Date(14, 12, 2023)
+        #trade_dt = ql.Date(7, 12, 2023)
+        #settle_dt = ql.Date(9, 12, 2023)
+        #delivery_dt = ql.Date(18, 12, 2023)
+        ############################################################################
+        "market data"
+        spot = specs['spot'] #1.0776
+        vol_atm = specs['vol_atm']  # 9.528
+        vol_rr = specs['vol_rr']  # -0.31
+        vol_bf = specs['vol_bf']  # 0.08
+        vol_25d_put = vol_bf - vol_rr / 2 + vol_atm
+        vol_25d_call = vol_rr / 2 + vol_bf + vol_atm
+        rd = specs['rd']#3.950, eur_depo
+        rf = specs['rf']#5.335. usd_depo
+        ############################################################################
+        "simple quotes"
+        spot_quote = ql.SimpleQuote(spot)
+        vol_atm_quote = ql.SimpleQuote(vol_atm / 100)
+        vol_25d_put_quote = ql.SimpleQuote(vol_25d_put / 100)
+        vol_25d_call_quote = ql.SimpleQuote(vol_25d_call / 100)
+        rd_quote = ql.SimpleQuote(rd / 100)
+        rf_quote = ql.SimpleQuote(rf / 100)
+        ############################################################################
+        "delta quotes"
+        atmVol = ql.DeltaVolQuote(
+            ql.QuoteHandle(vol_atm_quote),
+            ql.DeltaVolQuote.Fwd,
+            3.0,
+            ql.DeltaVolQuote.AtmFwd,
+        )
+        vol25Put = ql.DeltaVolQuote(
+            -0.25, ql.QuoteHandle(vol_25d_put_quote), 3.0, ql.DeltaVolQuote.Fwd
+        )
+        vol25Call = ql.DeltaVolQuote(
+            0.25, ql.QuoteHandle(vol_25d_call_quote), 3.0, ql.DeltaVolQuote.Fwd
+        )
+        ############################################################################
+        "term structures"
+        domesticTS = ql.FlatForward(
+            0, ql.UnitedStates(), ql.QuoteHandle(rd_quote), ql.Actual360()
+        )
+        foreignTS = ql.FlatForward(
+            0, ql.UnitedStates(), ql.QuoteHandle(rf_quote), ql.Actual360()
+        )
+        volTS = ql.BlackConstantVol(
+            0, ql.UnitedStates(), ql.QuoteHandle(vol_atm_quote), ql.ActualActual()
+        )
+        expanded_volTS = ql.BlackConstantVol(
+            0, ql.UnitedStates(), ql.QuoteHandle(vol_atm_quote), ql.ActualActual()
+        )
+        ############################################################################
+        try:
+            option = binomial_barrier_option()
+            optionPricerData = {"Price": option.NPV() / spot}
+        except Exception as e:
+            print(e)
+            option = vanna_volga_barrer_option()
+            optionPricerData = {"Price":option.NPV()/spot}
+        ############################################################################
+        "https://quant.stackexchange.com/questions/70258/quantlib-greeks-of-fx-option-in-python"
+        ############################################################################
+        try:
+            optionPricerData["gamma"] = option.gamma()*spot/100
+        except Exception as e:
+            pass
+            optionPricerData["gamma"] = np.nan
+        try:
+            optionPricerData["vega"] = option.vega()*(1/100)/spot
+        except Exception as e:
+            pass
+            optionPricerData["vega"] = np.nan
+        try:
+            optionPricerData["theta"] = option.theta()*(1/365)/spot
+        except Exception as e:
+            pass
+            optionPricerData["theta"] = np.nan
+        try:
+            optionPricerData["delta"] = option.delta()
+        except Exception as e:
+            pass
+            optionPricerData["delta"] = np.nan
+        ############################################################################
+        return optionPricerData
+
+    "TDA"
+
+    def compute_wasserstein_distances(log_returns, window_size, rips):
+        """Compute the Wasserstein distances."""
+        n = len(log_returns) - (2 * window_size) + 1
+        distances = np.full((n, 1), np.nan)  # Using np.full with NaN values
+
+        for i in range(n):
+            segment1 = log_returns[i:i + window_size].reshape(-1, 1)
+            segment2 = log_returns[i + window_size:i + (2 * window_size)].reshape(-1, 1)
+
+            if segment1.shape[0] != window_size or segment2.shape[0] != window_size:
+                continue
+
+            dgm1 = rips.fit_transform(segment1)
+            dgm2 = rips.fit_transform(segment2)
+            distance = persim.wasserstein(dgm1[0], dgm2[0], matching=False)
+            distances[i] = distance
+            #print(distance)
+
+        return distances
 
     "Metric Build"
 
@@ -973,6 +1484,8 @@ class pyerb:
             metric = kwargs['metric']
         else:
             metric = "euclidean"
+        if "SubSpaceIgnoreConnections" in metric:
+            metricSplit = metric.split("_")
         if "minkowskiOrder" in kwargs:
             minkowskiOrder = kwargs['minkowskiOrder']
         else:
@@ -1019,6 +1532,18 @@ class pyerb:
                         MetricMat.loc[c1, c2] = adjusted_mutual_info_score(metaDF[c1].values, metaDF[c2].values)
                     elif metric == "NormMI":
                         MetricMat.loc[c1, c2] = normalized_mutual_info_score(metaDF[c1].values, metaDF[c2].values)
+                    elif "SubSpaceIgnoreConnections" in metric:
+                        if c1 != c2:
+                            subDF = pyerb.SubSpaceIgnore(metaDF[[c1, c2]], [c1], metricSplit[1]).dropna(subset=[c1])
+                            try:
+                                if metricSplit[2] == "Corr":
+                                    MetricMat.loc[c1, c2] = subDF.corr().iloc[0, 1]
+                                elif metricSplit[2] == "MI":
+                                    MetricMat.loc[c1, c2] = mutual_info_score(subDF[c1].values, subDF[c2].values)
+                            except Exception as e:
+                                MetricMat.loc[c1, c2] = None
+                        else:
+                            MetricMat.loc[c1, c2] = 0
 
         if skipEigCalc == "No":
             eigVals, eigVecs = np.linalg.eig(MetricMat.apply(pd.to_numeric, errors='coerce').fillna(0))
@@ -1244,39 +1769,89 @@ class pyerb:
         elif addButtons == "QuantStrategies":
             append_copy.write('<br><div class="topnav">')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/GreenBoxHome.html">GreenBox Home</a>')
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/GreenBoxHome.html">GreenBox Home</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/IRS_Risk_Reporting_Management/ALL_IRS_Risk.html">IRS Risk Reporting</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/IRS_Risk_Reporting_Management/ALL_IRS_Risk.html">IRS Risk Reporting</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/QuantitativeStrategies_ControlPanel.html">Quant Strategies</a>')
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/QuantitativeStrategies_ControlPanel.html">Quant Strategies</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/GreenBox/PPAPAIOANNO1_trader_aggregatedFills.html">EMSX Expiries</a>')
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/QuantitativeStrategies_ControlPanel_ActivePositions.html">Quant Strategies (Hermes)</a><br>')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/DeskPnLSinceInception.html">Desk PnL</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/GreenBox/PPAPAIOANNO1_trader_aggregatedFills.html">EMSX Expiries</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/DeskPnLSinceInception.html">Desk PnL</a><br>')
             append_copy.write('</div>')
             append_copy.write('<div class="topnav">')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Endurance.html">Endurance</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Endurance.html">Endurance</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Coast.html">Coast</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Coast.html">Coast</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Brotherhood.html">Brotherhood</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Brotherhood.html">Brotherhood</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Shore.html">Shore</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/ShoreDM.html">ShoreDM</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Valley.html">Valley</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/ShoreEM.html">ShoreEM</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Dragons.html">Dragons</a><br>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Valley.html">Valley</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/VolatilityScannerPnL.html">VolatilityScanner</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Dragons.html">Dragons</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Endurance_Coast_Brotherhood_Valley_Shore_Dragons_TimeStory.html">Total CTA Book</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Lumen.html">Lumen</a>||')
             append_copy.write(
-                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/TOTAL_SYSTEMATIC.html">TOTAL SYSTEMATIC</a>')
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Fidei.html">Fidei</a><br>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/Endurance_Coast_Brotherhood_ShoreDM_ShoreEM_Valley_Dragons_Lumen_Fidei_TimeStory.html">Total CTA Book</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/VolatilityScannerPnL.html">VolatilityScanner</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/IV_HV_Spreads_Plots/IV_HV_Plotter.html">IV HV Plotter</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/TOTAL_SYSTEMATIC.html">TOTAL SYSTEMATIC</a><br>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/HFT+ShoreDM.html">HFT+ShoreDM</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/MT5/HTML_Reports/LIVE/PyReports/Currently_Running_System_ERB_Py_Reporter_TOTAL_GATHERER_VOLSCANNER.html">HFT+VolScanner</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/StrategiesFactSheets/TOTAL_HFT_VolScanner_ShoreDM.html">HFT+VolScanner+ShoreDM</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/MT5/HTML_Reports/LIVE/PyReports/Currently_Running_System_ERB_Py_Reporter_TOTAL.html">HFT TOTAL</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/MT5/HTML_Reports/LIVE/PyReports/Currently_Running_System_ERB_Py_Reporter_YTD_TOTAL.html">HFT TOTAL YTD</a><br>')
+            append_copy.write(
+                '<a href="F:\Dealing\Panagiotis Papaioannou\pyerb\PyEurobankBloomberg\PySystems\PyLiveTradingSystems\StrategiesFactSheets\Galileo_Total.html">Galileo</a>||')
             append_copy.write(
                 '<a href="F:\Dealing\Panagiotis Papaioannou\MT5\HTML_Reports\LIVE\PyReports">HFT Strategies</a><br>')
             #append_copy.write('<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/GreenBox/BetaEyeDF_MajorFutures.html">Betas</a>')
             append_copy.write('</div><br>')
+        elif addButtons == "QuantStrategiesHermes":
+            append_copy.write('<br><div class="topnav">')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/GreenBoxHome.html">GreenBox Home</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/QuantitativeStrategies_ControlPanel.html">Quant Strategies</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/QuantitativeStrategies_ControlPanel_ActivePositions.html">Quant Strategies (Hermes)</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/GreenBox/PPAPAIOANNO1_trader_aggregatedFills.html">EMSX Expiries</a>')
+            append_copy.write('</div>')
+            append_copy.write('<div class="topnav">')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/TRADING/Govies/QIS/LiveQuantSystems/SOVTraderFactSheets">SOV Trader Factsheets</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/TRADING/High Yield Desk/Credit_Trader_Python/CreditTraderFactSheets">Credit Trader Factsheets</a>')
+            append_copy.write('</div><br>')
+        elif addButtons == "QIS_Reporter":
+            append_copy.write('<br><div class="topnav">')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/GreenBoxHome.html">GreenBox Home</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/QuantitativeStrategies_ControlPanel.html">Quant Strategies</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis%20Papaioannou/pyerb/GreenBox/QuantitativeStrategies_ControlPanel_ActivePositions.html">Quant Strategies (Hermes)</a>||')
+            append_copy.write(
+                '<a href="file:///F:/Dealing/Panagiotis Papaioannou/pyerb/GreenBox/PPAPAIOANNO1_trader_aggregatedFills.html">EMSX Expiries</a>')
+            append_copy.write('</div>')
         elif addButtons == "SalesOrderBook":
             append_copy.write('<div class="topnav">')
             append_copy.write(
@@ -1307,10 +1882,10 @@ class pyerb:
 
         if addPlots is not None:
             append_copy.write('<p>')
-            append_copy.write('<img src="'+addPlots+'" alt="'+addPlots+'Img" width="500" height="400">')
+            append_copy.write('<img src="'+addPlots['src']+'" alt="'+addPlots['name']+'Img" width="'+str(addPlots['width'])+'" height="'+str(addPlots['height'])+'">')
             append_copy.write('</p>')
 
-        if specificID == "DeskPnLSinceInception":
+        if specificID == "DeskPnLSinceInception_with_JS_Charts":
             append_copy.write(original_text)
             append_copy.write(
                 '<br><div id="chartDiv" style="width:80%; height:650px; margin:0 auto;"></div><br>'
@@ -1361,7 +1936,395 @@ class pyerb:
                 "<script>$('table').each (function(){var tableElementID = $(this).closest('table').attr('id'); $('#'+tableElementID+' thead>tr>th').each (function(index){var txt = $(this).text(); if(txt.includes('Asset')||txt.includes('TOTAL')) {var SumCol = index; $('#'+tableElementID+' tr').each(function() { $(this).find('td').each (function(index) {if(index === SumCol) {$(this).css('background', 'black'); $(this).css('color', ' #f2a20d'); $(this).css('border', '2px solid white');}})})}});});</script>")
             append_copy.close()
 
+    "Other operators (DB Handlers, File readers, Chunks etc.)"
+
+    def updateDF(OldDF, NewDF):
+        TotalNewDF = pd.concat([OldDF, NewDF], axis=0)
+        TotalNewDF = TotalNewDF[~TotalNewDF.index.duplicated(keep='last')]
+        TotalNewDF.index.names = ['date']
+        return TotalNewDF
+
+    def updateExcelDF(targetFile, NewDF):
+        ##################################################################################
+        OldDF = pd.read_excel(targetFile)
+        OldDF = OldDF.set_index(OldDF.columns[0], drop=True)
+        OldDF.index.names = ['date']
+        ##################################################################################
+        TotalNewDF = pd.concat([OldDF, NewDF], axis=0)
+        TotalNewDF = TotalNewDF[~TotalNewDF.index.duplicated(keep='last')]
+        TotalNewDF.index.names = ['date']
+        return TotalNewDF
+
+    def updateTableDF(tableName, NewDF, TargetDBconn):
+        ##################################################################################
+        OldDF = pd.read_sql('SELECT * FROM ' + tableName, TargetDBconn)
+        OldDF = OldDF.set_index(OldDF.columns[0], drop=True)
+        OldDF.index.names = ['date']
+        OldDF.to_sql(tableName + "_BeforeUpdate", TargetDBconn, if_exists='replace')
+        ##################################################################################
+        TotalNewDF = pd.concat([OldDF, NewDF], axis=0)
+        TotalNewDF = TotalNewDF[~TotalNewDF.index.duplicated(keep='last')]
+        TotalNewDF.index.names = ['date']
+        return TotalNewDF
+
+    def updatePickleDF(NewDF, TargetPickleFile):
+        ##################################################################################
+        OldPickle = open(TargetPickleFile,'rb')
+        OldDF = pickle.load(OldPickle)
+        OldPickle.close()
+        OldDF.index.names = ['date']
+        ##################################################################################
+        TotalNewDF = pd.concat([OldDF, NewDF], axis=0)
+        TotalNewDF = TotalNewDF[~TotalNewDF.index.duplicated(keep='last')]
+        TotalNewDF.index.names = ['date']
+
+        return TotalNewDF
+
+    def readPickleDF(TargetPickleFile):
+        tempPickle = open(TargetPickleFile, 'rb')
+        tempPickleDF = pickle.load(tempPickle)
+        tempPickle.close()
+        return tempPickleDF
+
+    def savePickleDF(saveData, TargetPickleFile):
+        tempPickle = open(TargetPickleFile, 'wb')
+        pickle.dump(saveData, tempPickle)
+        tempPickle.close()
+        return 'done'
+
+    def chunkMaker(df, axisDirection, chunkSize, **kwargs):
+
+        chunksList = []
+        if axisDirection == 0:
+            for i in range(0, df.shape[0], chunkSize):
+                if i+chunkSize <= df.shape[0]:
+                    i_end = i+chunkSize
+                else:
+                    i_end = df.shape[0]
+                subDF = df.iloc[i:i_end,:]
+                chunksList.append(subDF)
+        elif axisDirection == 1:
+            for i in range(0, df.shape[1], chunkSize):
+                if i+chunkSize <= df.shape[1]:
+                    i_end = i+chunkSize
+                else:
+                    i_end = df.shape[1]
+                subDF = df.iloc[:, i:i_end]
+                chunksList.append(subDF)
+
+        if "ReturnIntervals" in kwargs:
+            IntervalsList = []
+            for elem in chunksList:
+                IntervalsList.append([df.columns.get_loc(elem.columns[0]), df.columns.get_loc(elem.columns[-1])])
+            return [chunksList, IntervalsList]
+        else:
+            return chunksList
+
+    def getIndexes(dfObj, value):
+
+        # Empty list
+        listOfPos = []
+
+        # isin() method will return a dataframe with
+        # boolean values, True at the positions
+        # where element exists
+        result = dfObj.isin([value])
+
+        # any() method will return
+        # a boolean series
+        seriesObj = result.any()
+
+        # Get list of column names where
+        # element exists
+        columnNames = list(seriesObj[seriesObj == True].index)
+
+        # Iterate over the list of columns and
+        # extract the row index where element exists
+        for col in columnNames:
+            rows = list(result[col][result[col] == True].index)
+
+            for row in rows:
+                listOfPos.append((row, col))
+
+        # This list contains a list tuples with
+        # the index of element in the dataframe
+        return listOfPos
+
+    def top_bottom_columns(df, **kwargs):
+
+        if "N_Features" in kwargs:
+            N_Features = kwargs['N_Features']
+        else:
+            N_Features = 5
+
+        if "Normaliser" in kwargs:
+            Normaliser = kwargs['Normaliser']
+        else:
+            Normaliser = "Raw"
+            #Normaliser = "RowStoch"
+
+        if "Scalers" in kwargs:
+            Scalers = kwargs['Scalers']
+        else:
+            Scalers = [np.sqrt(252),np.sqrt(252)]
+
+        if Normaliser == "RowStoch":
+            df = pyerb.rowStoch(df)
+
+        MainIndexName = df.index.name
+        # Create a DataFrame to store the results
+        result_df = pd.DataFrame()
+
+        # Iterate through each row in the input DataFrame
+        for index, row in df.iterrows():
+            # Sort the row values and keep track of the original column names
+            sorted_values = row.sort_values(ascending=False).dropna()
+            if Normaliser == "RowStoch":
+                sorted_values *= 100
+            top_columns = sorted_values[-N_Features:].index.tolist()  # Top 5 column names
+            bottom_columns = sorted_values[:N_Features].index.tolist()  # Bottom 5 column names
+            ####################################################################################
+            top_values = list(sorted_values[-N_Features:].values * Scalers[0])  # Top 5 column names
+            bottom_values = list(sorted_values[:N_Features].values * Scalers[1])  # Bottom 5 column names
+            ####################################################################################
+            # Create a dictionary with the results for this row
+            row_result = {
+                MainIndexName : index,
+                'Top_'+str(N_Features)+'_Columns': top_columns,
+                'Bottom_'+str(N_Features)+'_Columns': bottom_columns,
+                'Top_'+str(N_Features)+'_Values': top_values,
+                'Bottom_'+str(N_Features)+'_Values': bottom_values
+            }
+            ####################################################################################
+            # Append the row result to the result DataFrame
+            result_df = result_df.append(row_result, ignore_index=True)
+
+        result_df = result_df.set_index(MainIndexName, drop=True)
+
+        return result_df
+
+    def read_date(date):
+        return xlrd.xldate.xldate_as_datetime(date, 0)
+
+    def chunkCSVReader(name):
+        df = pd.read_csv(name, delimiter=';', chunksize=10000)
+        return df
+
+    def getAllTablesDB(sqliteConnection):
+
+        sql_query = """SELECT name FROM sqlite_master WHERE type='table';"""
+        cursor = sqliteConnection.cursor()
+        cursor.execute(sql_query)
+        return cursor.fetchall()
+
+    def stringReplace(df, stringList, replaceWith):
+
+        out = df.copy().astype(str)
+        for c in df.columns:
+            try:
+                out[c] = out[c].str.replace("|".join(stringList), replaceWith, regex=True)
+            except:
+                pass
+
+        return out
+
     "BLOOMBERG TRADING RELATED"
+
+    def EMSX_Kondor_Dict(k):
+
+        if k == "CME-ED":
+            return "ED1 Comdty"
+        elif k == "ED1 Comdty":
+            return "CME-ED"
+        ##############################################
+        elif k == 'F_3MEURIBOR':
+            return 'ER2 Comdty'
+        elif k == 'ER2 Comdty':
+            return 'F_3MEURIBOR'
+        ##############################################
+        elif k == "F_EUR":
+            return "EC1 Curncy"
+        elif k == "EC1 Curncy":
+            return "F_EUR"
+        ##############################################
+        elif k == "F_GBP":
+            return "BP1 Curncy"
+        elif k == "BP1 Curncy":
+            return "F_GBP"
+        ##############################################
+        elif k == "F_CAD":
+            return "CD1 Curncy"
+        elif k == "CD1 Curncy":
+            return "F_CAD"
+        ##############################################
+        elif k == "F_NZD":
+            return "NV1 Curncy"
+        elif k == "NV1 Curncy":
+            return "F_NZD"
+        ##############################################
+        elif k == "F_JPY":
+            return "JY1 Curncy"
+        elif k == "JY1 Curncy":
+            return "F_JPY"
+        ##############################################
+        elif k == "F_AUD":
+            return "AD1 Curncy"
+        elif k == "AD1 Curncy":
+            return "F_AUD"
+        ##############################################
+        elif k == "F_CHF":
+            return 'SF1 Curncy'
+        elif k == 'SF1 Curncy':
+            return "F_CHF"
+        ##############################################
+        elif k == "DXY_FUTURE":
+            return 'DX1 Curncy'
+        elif k == 'DX1 Curncy':
+            return "DXY_FUTURE"
+        ##############################################
+        elif k in ["FUT_BRL", "F_BRL"]:
+            return "BR1 Curncy"
+        elif k == "BR1 Curncy":
+            return "F_BRL"
+        ##############################################
+        elif k == "F_MXN":
+            return "PE1 Curncy"
+        elif k == "PE1 Curncy":
+            return "F_MXN"
+        ##############################################
+        elif k == "RUB_USD_FUT":
+            return "RU1 Curncy"
+        elif k == "RU1 Curncy":
+            return "RUB_USD_FUT"
+        ##############################################
+        elif k == "F_ZAR":
+            return "RA1 Curncy"
+        elif k == "RA1 Curncy":
+            return "F_ZAR"
+        ##############################################
+        elif k == "E-MINI_FUTUR":
+            return "ES1 Index"
+        elif k == "ES1 Index":
+            return "E-MINI_FUTUR"
+        ##############################################
+        elif k == "YM":
+            return "DM1 Index"
+        elif k == "DM1 Index":
+            return "YM"
+        ##############################################
+        elif k == "CAC40_FUTURE":
+            return 'CF1 Index'
+        elif k == 'CF1 Index':
+            return "CAC40_FUTURE"
+        ##############################################
+        elif k == "F_EURSTOXX50":
+            return 'VG1 Index'
+        elif k == 'VG1 Index':
+            return "F_EURSTOXX50"
+        ##############################################
+        elif k == "FDAX_FUTURE":
+            return 'GX1 Index'
+        elif k == 'GX1 Index':
+            return "FDAX_FUTURE"
+        ##############################################
+        elif k == "ME":
+            return 'FA1 Index'
+        elif k == 'FA1 Index':
+            return "ME"
+        ##############################################
+        elif k == "OMXH25_FUT":
+            return 'OT1 Index'
+        elif k == 'OT1 Index':
+            return "OMXH25_FUT"
+       ###############################################
+        elif k == "NAS_100_MINI":
+            return 'NQ1 Index'
+        elif k == 'NQ1 Index':
+            return "NAS_100_MINI"
+        ##############################################
+        elif k == "F_SMI":
+            return "SM1 Index"
+        elif k == "SM1 Index":
+            return "F_SMI"
+        ##############################################
+        elif k == "LIF-FTSE100":
+            return "Z 1 Index"
+        elif k == "Z 1 Index":
+            return "LIF-FTSE100"
+        ##############################################
+        elif k == "F_2Y_T_NOTE":
+            return "TU1 Comdty"
+        elif k == "TU1 Comdty":
+            return "F_2Y_T_NOTE"
+        ##############################################
+        elif k == "F_TY_T_NOTE":
+            return "TY1 Comdty"
+        elif k == "TY1 Comdty":
+            return "F_TY_T_NOTE"
+        ##############################################
+        elif k == "F_5Y_T_NOTE":
+            return "FV1 Comdty"
+        elif k == "FV1 Comdty":
+            return "F_5Y_T_NOTE"
+        ##############################################
+        elif k == "EUREXSCHATZ":
+            return 'DU1 Comdty'
+        elif k == 'DU1 Comdty':
+            return "EUREXSCHATZ"
+        ##############################################
+        elif k == "EUREXBOBL":
+            return 'OE1 Comdty'
+        elif k == 'OE1 Comdty':
+            return "EUREXBOBL"
+        ##############################################
+        elif k == "EUREXBUND":
+            return 'RX1 Comdty'
+        elif k == 'RX1 Comdty':
+            return "EUREXBUND"
+        ##############################################
+        elif k == "EUREXBUXL":
+            return 'UB1 Comdty'
+        elif k == 'UB1 Comdty':
+            return "EUREXBUXL"
+        ##############################################
+        elif k == "EUREXFOAT":
+            return 'OAT1 Comdty'
+        elif k == 'OAT1 Comdty':
+            return "EUREXFOAT"
+        ##############################################
+        elif k == "F_30Y_ULTRA":
+            return 'WN1 Comdty'
+        elif k == 'WN1 Comdty':
+            return "F_30Y_ULTRA"
+        ##############################################
+        elif k == "LONG_GILT":
+            return 'G 1 Comdty'
+        elif k == 'G 1 Comdty':
+            return "LONG_GILT"
+        ##############################################
+        elif k == "----------------------":
+            return 'FF1 Comdty'
+        ##############################################
+        elif k == "----------------------":
+            return 'FVS1 Index'
+        ##############################################
+        elif k == "VIX_FUTURE":
+            return 'UX1 Index'
+        elif k == 'UX1 Index':
+            return "VIX_FUTURE"
+
+    def TimeOverride(HFT_Data_File, DayToOverride, WhichHourToUse, OutLabel):
+        HFT_df = pd.read_csv(HFT_Data_File, delimiter='\t')
+        HFT_df["<DATE>"] = pd.to_datetime(HFT_df["<DATE>"])
+        HFT_df["DayNumber"] = HFT_df["<DATE>"].dt.weekday.astype(int)
+        HFT_df["HH"] = HFT_df["<TIME>"].str.split(":").str[0].astype(int)
+        HFT_df["MM"] = HFT_df["<TIME>"].str.split(":").str[1].astype(int)
+        HFT_df["SS"] = HFT_df["<TIME>"].str.split(":").str[2].astype(int)
+
+        HFT_df_SubSace = HFT_df[(HFT_df['DayNumber'] == DayToOverride) & (HFT_df["HH"] == WhichHourToUse) & (HFT_df["MM"] == 0) & (HFT_df["SS"] == 0)].set_index("<DATE>",drop=True)["<CLOSE>"]
+        HFT_df_SubSace.name = OutLabel
+
+        return HFT_df_SubSace
 
     def getFutureTicker(FxCur):
         if FxCur == "EUR":
@@ -1398,49 +2361,86 @@ class pyerb:
 
         return outList
 
+    def PointsBelongToSameCurve(pair, **kwargs):
+        if "Delimiter" in kwargs:
+            Delimiter = kwargs['Delimiter']
+        else:
+            Delimiter = "_"
+
+        pairSplit = pair.split(Delimiter)
+        FirstFut = pairSplit[0].split(" ")[0]
+        SecondFut = pairSplit[1].split(" ")[0]
+
+        FirstFutBase = FirstFut.replace(FirstFut[-1], "")
+        SecondFutBase = SecondFut.replace(SecondFut[-1], "")
+
+        if FirstFutBase == SecondFutBase:
+            return True
+        else:
+            return False
+
+    def IndicatorsHandler(IndicatorsDF,ControllerDF,**kwargs):
+        if "SelectorHandler" in kwargs:
+            SelectorHandler = kwargs['SelectorHandler']
+        else:
+            SelectorHandler = [[0, "exclude"],[2, "diff"]]
+
+        out = IndicatorsDF
+        sel = [0, "exclude"]
+
+        for sel in SelectorHandler:
+            if sel[1] == 'exclude':
+                out = out[ControllerDF[ControllerDF["Selector"] != sel[0]]["Indicator"].dropna().tolist()]
+            if sel[1] in ['diff']:
+                out[ControllerDF.loc[ControllerDF["Selector"] == sel[0], "Indicator"].tolist()] = pyerb.d(out[ControllerDF.loc[ControllerDF["Selector"] == sel[0], "Indicator"].tolist()])
+
+        return out
+
+    def getUnderlyingFromDerivative(DerTicker):
+        if DerTicker == "SPX Index":
+            return "ES1 Index"
+        elif DerTicker == "NDX Index":
+            return "NQ1 Index"
+
 # SubClasses
-class BackTester:
+class MainStream:
 
-    def backTestReturnKernel(kernel, tradedAssets, **kwargs):
+    def __init__(self, ID):
+        self.ID = ID
 
-        if 'mode' in kwargs:
-            mode = kwargs['mode']
+    def PortfolioBuilder(self, df0, **kwargs):
+
+        if 'st' in kwargs:
+            st = kwargs['st']
         else:
-            mode = 'directionalPredictability'
+            st = 25
 
-        if 'TrShift' in kwargs:
-            TrShift = kwargs['TrShift']
+        if 'RollMode' in kwargs:
+            RollMode = kwargs['RollMode']
         else:
-            TrShift = 1
+            RollMode = 'RollWindow'
 
-        if 'reverseFlag' in kwargs:
-            reverseFlag = kwargs['reverseFlag']
-        else:
-            reverseFlag = 1
+        if RollMode == "ExpWindow":
+            st = 25
 
-        if 'scanAll' in kwargs:
-            scanAll = kwargs['scanAll']
-        else:
-            scanAll = 'no'
+        EmbeddingPackList = []
+        for i in tqdm(range(st, len(df0) + 1)):
+            try:
 
-        if mode == 'directionalPredictability':
-            kernel = pyerb.sign(kernel)
-        else:
-            print("Using defaulet 'Direct trading kernel projection' to traded assets ...")
+                # print("Step:", i, " of ", len(df0) + 1)
+                if RollMode == 'RollWindow':
+                    df = df0.iloc[i - st:i, :]
+                else:
+                    df = df0.iloc[0:i, :]
 
-        if isinstance(kernel, pd.Series):
-            kernel = pd.DataFrame(kernel)
-        if isinstance(tradedAssets, pd.Series):
-            tradedAssets = pd.DataFrame(tradedAssets)
+                latestIndex = df.index[-1]
 
-        if (len(kernel.columns) != len(tradedAssets.columns)) | (scanAll == 'yes'):
-            print("Kernel's dimension is not the same with the dimension of the Traded Assets matrix - building BT crosses...")
-            cc = []
-            for ck in kernel.columns:
-                for c in tradedAssets.columns:
-                    cc.append((ck, c))
-            pnl = pd.concat([pyerb.S(kernel[c[0]], nperiods=TrShift) * pyerb.dlog(tradedAssets[c[1]]) * reverseFlag for c in cc], axis=1, keys=cc)
-        else:
-            print("Straight BT Projection...")
-            pnl = pyerb.S(kernel, nperiods=TrShift) * pyerb.dlog(tradedAssets) * reverseFlag
-        return pnl
+                ef = EfficientFrontier(mean_historical_return(df, log_returns=True),
+                                       CovarianceShrinkage(df, log_returns=True).ledoit_wolf(),
+                                       weight_bounds=(-1, 1))
+                weights = ef.max_sharpe()
+                print(weights)
+                time.sleep(30000)
+
+            except Exception as e:
+                print(e)

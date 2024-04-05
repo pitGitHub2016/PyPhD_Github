@@ -1,5 +1,5 @@
 from itertools import combinations, permutations
-import pandas as pd, numpy as np, sqlite3, time, inspect
+import pandas as pd, numpy as np, sqlite3, time, inspect, pickle
 import matplotlib.pyplot as plt
 from pyerb import pyerb as pe
 from pyerbML import ML,ManSee
@@ -7,17 +7,56 @@ from hurst import compute_Hc
 
 class StrategiesDeck:
 
+    ############################# INITIALISERS & GENERAL FUNCTIONS #############################
+
     def __init__(self, SystemName, df, IndicatorsDF, Leverage):
         self.SystemName = SystemName
         self.df = df
+        self.LocalDataConn = sqlite3.connect("DataDeck.db")
+        self.AllDF = pd.read_sql('SELECT * FROM DataDeck', self.LocalDataConn).set_index('date', drop=True)
         self.IndicatorsDF = IndicatorsDF
+        AlternativeDataFieldsIndicators = pd.read_sql('SELECT * FROM AlternativeDataFieldsIndicators', self.LocalDataConn).set_index('date', drop=True)
+        self.IndicatorsDF = pd.concat([self.IndicatorsDF, AlternativeDataFieldsIndicators], axis=1).sort_index()
         self.Leverage = Leverage
+        self.FuturesTable = pd.read_sql('SELECT * FROM FuturesTable', self.LocalDataConn).set_index('index', drop=True)
+        self.AlternativeStorageLocation = "C:/SinceWeHaveLimitedSpace/"
+        self.ActiveStrategiesFactorsControl = pd.read_excel("AssetsDashboard.xlsx",sheet_name="ActiveStrategiesFactorsControl").set_index("Asset", drop=True)
+        "GET VOLUMES"
         try:
-            self.LookBacks = pd.read_sql("SELECT * FROM LookBacks", sqlite3.connect("DataDeck.db")).set_index('date', drop=True)
-            self.DEMAs = pd.read_sql("SELECT * FROM DEMAs", sqlite3.connect("DataDeck.db")).set_index('date', drop=True)
+            self.VolumeDeck = pd.read_sql('SELECT * FROM VolumeDeck', self.LocalDataConn).set_index('date', drop=True)
         except Exception as e:
             print(e)
+        try:
+            self.DailyTurnoverDF = pd.read_sql('SELECT * FROM DailyTurnoverDF', self.LocalDataConn).set_index('date',drop=True)
+        except Exception as e:
+            print(e)
+    def VolumeFilter(signal, **kwargs):
 
+        if 'VolumeDF' in kwargs:
+            VolumeDF = kwargs['VolumeDF']
+        else:
+            VolumeDF = pd.read_sql('SELECT * FROM VolumeDeck', sqlite3.connect("DataDeck.db")).set_index('date',drop=True)[signal.columns]
+
+        if 'DailyTurnoverDF' in kwargs:
+            DailyTurnoverDF = kwargs['DailyTurnoverDF']
+        else:
+            DailyTurnoverDF = pd.read_sql('SELECT * FROM DailyTurnoverDF', sqlite3.connect("DataDeck.db")).set_index('date',drop=True)[signal.columns]
+
+        if "FilterSet" in kwargs:
+            FilterSet = kwargs['FilterSet']
+        else:
+            FilterSet = {'VolumeLowerThr': [True,100],'DailyTurnoverDFLowerThr': [True,1000000]}
+
+        out = signal
+
+        if FilterSet['VolumeLowerThr'][0]:
+            VolumeDF[VolumeDF < FilterSet['VolumeLowerThr'][1]] = 0
+        if FilterSet['DailyTurnoverLowerThr'][0]:
+            VolumeDF[DailyTurnoverDF < FilterSet['DailyTurnoverLowerThr'][1]] = 0
+
+        out *= pe.sign(VolumeDF.fillna(0))
+
+        return out
     def ExPostRebase(signal, rets, **kwargs):
         if 'exPostRebaseCompounds' in kwargs:
             exPostRebaseCompoundsFlag = kwargs['exPostRebaseCompounds']
@@ -33,6 +72,16 @@ class StrategiesDeck:
             exPostVolFlag = kwargs['exPostVol']
         else:
             exPostVolFlag = "NO"
+
+        if 'exPostVolMode' in kwargs:
+            exPostVolMode = kwargs['exPostVolMode']
+        else:
+            exPostVolMode = "RollWindow"
+
+        if 'exPostVolLag' in kwargs:
+            exPostVolLag = kwargs['exPostVolLag']
+        else:
+            exPostVolLag = 1000
 
         if 'exPostHurstControl' in kwargs:
             exPostHurstControlFlag = kwargs['exPostHurstControl']
@@ -52,7 +101,11 @@ class StrategiesDeck:
             propsOut['compoundScaler'] = "No compounding Done..."
         if exPostVolFlag == "YES":
             "Strategy ExPost Risk Parity & Rebasing on Ann. Compounding"
-            volExpander = (np.sqrt(252) * pe.roller(rsStrat, np.std, n=1000) * 100).ffill().bfill()
+            if exPostVolMode == "RollWindow":
+                volExpander = (np.sqrt(252) * pe.roller(rsStrat, np.std, n=exPostVolLag) * 100).ffill().bfill()
+            else:
+                volExpander = (np.sqrt(252) * pe.expander(rsStrat, np.std, n=25) * 100).ffill().bfill()
+            #############################################################################################
             propsOut['volExpander'] = volExpander
             signal = signal.div(volExpander, axis=0).fillna(0)
         else:
@@ -68,451 +121,457 @@ class StrategiesDeck:
 
         return [signal, propsOut]
 
+    ##################################### STRATEGIES CORES #####################################
+
+    def EMA_RP(self, **kwargs):
+        if "DEMA_ID" in kwargs:
+            DEMA_ID = kwargs["DEMA_ID"]
+        else:
+            DEMA_ID = "_DefaultSingleLookBack_LookBacksPack_DEMAs"
+        ###################################################################################################################
+        if self.StrategySettings['EMA_Mode'][0] == "DEMA":
+            self.DEMAs = pe.readPickleDF(self.AlternativeStorageLocation + "DEMAs/" + DEMA_ID)[self.localRets.columns]
+            self.LookbacksDirections = 1
+            #self.LookbacksPacks = pe.readPickleDF(self.AlternativeStorageLocation + "LookbacksPacks/" + DEMA_ID.replace("_DEMAs",""))
+            #print(self.LookbacksPacks[0]["NQ1 Index"])
+            #print(self.LookbacksPacks[1]["NQ1 Index"])
+            #print(self.LookbacksPacks[2]["NQ1 Index"])
+            #time.sleep(3000)
+            #self.LookbacksDirections = self.LookbacksPacks[1][self.localRets.columns]
+            #self.LookbacksDirections[self.LookbacksDirections < 0] = 0
+            self.sigRaw = pe.sign(self.DEMAs.fillna(0)) * self.LookbacksDirections
+        elif self.StrategySettings['EMA_Mode'][0] == "EMA":
+            self.sigRaw = pe.sign(pe.ema(self.localRets, nperiods=self.StrategySettings['EMA_Mode'][1]))
+
+        self.RollingVolatilities = 1
+        if self.StrategySettings['RP_Mode'][0] == "Standard":
+            self.RollingVolatilities = np.sqrt(252) * pe.rollStatistics(self.localRets, 'Vol', nIn=self.StrategySettings['RP_Mode'][1]) * 100
+        elif self.StrategySettings['RP_Mode'][0] == "DEMA":
+            self.RollingVolatilities = pe.dema(self.localRets, self.LookBacks[self.localRets.columns],mode="AnnVol").ffill().bfill() * 100
+
+        if self.StrategySettings['DirectionBias'] == "LO":
+            "Long Only"
+            self.sigRaw[self.sigRaw < 0] = 0
+        elif self.StrategySettings['DirectionBias'] == "SO":
+            "Short Only"
+            self.sigRaw[self.sigRaw > 0] = 0
+        "Handle Stabilisers"
+        if self.StrategySettings['IndicatorsStabilisers'] is not None:
+            if self.StrategySettings['IndicatorsStabilisers'] not in ["DT"]:
+                for stabiliser in self.StrategySettings['IndicatorsStabilisers']:
+                    Smoothed_IndicatorsStabiliser = self.IndicatorsDF[stabiliser]
+                    "Smooth Stabiliser"
+                    if self.StrategySettings['SmoothStabilisers'][0] == "EMA":
+                        Smoothed_IndicatorsStabiliser = pe.ema(Smoothed_IndicatorsStabiliser,
+                                                               nperiods=self.StrategySettings['SmoothStabilisers'][1])
+                    sig_IndicatorsStabiliser = pe.sign(Smoothed_IndicatorsStabiliser)
+                    "Restrict Stabiliser"
+                    if self.StrategySettings['SmoothStabilisers'][2] == "LO":
+                        sig_IndicatorsStabiliser[sig_IndicatorsStabiliser < 0] = 0
+                    elif self.StrategySettings['SmoothStabilisers'][2] == "SO":
+                        sig_IndicatorsStabiliser[sig_IndicatorsStabiliser > 0] = 0
+                    "Additive or Multiplicative Stabilisers"
+                    if self.StrategySettings['SmoothStabilisers'][3] == "Additive":
+                        self.sigRaw = pe.sign(self.sigRaw.add(sig_IndicatorsStabiliser, axis=0)).sort_index()
+                    elif self.StrategySettings['SmoothStabilisers'][3] == "Multiplicative":
+                        self.sigRaw = self.sigRaw.mul(sig_IndicatorsStabiliser, axis=0).sort_index()
+            elif self.StrategySettings['IndicatorsStabilisers'] in ["DT"]:
+                ############################################################################################
+                for c in self.sigRaw.columns:
+                    ActiveContract = c
+                    #ActiveContract = self.FuturesTable["Point_1"].iloc[pe.getIndexes(self.FuturesTable, c)[0][0]]
+                    if c in list(self.ActiveStrategiesFactorsControl.index):#["NQ1 Index"]
+                        print(c)
+                        Combined_DT_Sig_List = []
+                        ############################################################################################
+                        for DT_Roll_Mode in ['_RollWindow_250_']:#'_RollWindow_250_','_ExpWindow_25_'
+                        #for DT_Roll_Mode in ['_ExpWindow_25_']:#'_RollWindow_250_','_ExpWindow_25_'
+                            ############################################################################################
+                            sub_DT_Map = self.ActiveStrategiesFactorsControl.loc[ActiveContract, :]
+                            ############################################################################################
+                            DT_Map_Pack_List = [x for x in sub_DT_Map["SingleDecisionTreesControllers_GG"].split(":") if x != '']
+                            for item_DT_Map_Pack_List in DT_Map_Pack_List:
+                                DT_Map_Pack = item_DT_Map_Pack_List.split("_")
+                                DT_Thr = pe.readPickleDF(self.AlternativeStorageLocation + "DecisionTrees" + self.StrategySettings['SmoothStabilisers'][0] + "/RetsLive/DecisionTrees_RV_Rets"+ DT_Roll_Mode + DT_Map_Pack[0])
+                                try:
+                                    DT_Sig = pe.sign(DT_Thr[DT_Map_Pack[0] + "," + c + ",TreeThreshold"] - self.IndicatorsDF[DT_Map_Pack[0]])  # .fillna(0)
+                                except:
+                                    print(DT_Thr.columns)
+                                    print(DT_Thr[DT_Map_Pack[0] + "," + c + ",TreeThreshold"])
+                                    print(self.IndicatorsDF[DT_Map_Pack[0]])
+                                ########################################
+                                if DT_Map_Pack[1] == "Upper":
+                                    DT_Sig[DT_Sig > 0] = 0
+                                elif DT_Map_Pack[1] == "Lower":
+                                    DT_Sig[DT_Sig < 0] = 0
+                                ############################################################################################
+                                print("DT_Roll_Mode = ", DT_Roll_Mode, " | DT_Map_Pack : ", DT_Map_Pack)
+                                if DT_Map_Pack[2] == "Positive":
+                                    FilterSig = DT_Sig
+                                elif DT_Map_Pack[2] == "Negative":
+                                    FilterSig = DT_Sig * (-1)
+                                ############################################################################################
+                                Combined_DT_Sig_List.append(FilterSig)
+                        ############################################################################################
+                        MomentumSig = self.sigRaw[c]
+                        ############################################################################################
+                        FinalSig = Combined_DT_Sig_List[0] * MomentumSig
+                        for fSig in Combined_DT_Sig_List[1:]:
+                            FinalSig += fSig * MomentumSig
+                            #FinalSig[FinalSig.abs() == 1] = 0
+                            #FinalSig = pe.sign(FinalSig)
+                        ############################################################################################
+                        #FinalSig /= len(Combined_DT_Sig_List)
+                        ############################################################################################
+                        #self.sigRaw[c] = FinalSig
+                        self.sigRaw[c] = pe.sign(FinalSig)
+                ############################################################################################
+        self.sigRaw = self.sigRaw / self.RollingVolatilities
+        #try:
+        #    pe.cs((pe.S(self.sigRaw[["NQ1 Index", "ES1 Index"]], nperiods=2)*self.localRets[["NQ1 Index", "ES1 Index"]]).fillna(0)).plot()
+        #    plt.show()
+        #except Exception as e:
+        #    print(e)
+        return self
+
+    ##################################### SPECIFIC CALLERS #####################################
     def Endurance(self):
-        strategyName = inspect.stack()[0][3]
-        localRets = pe.dlog(self.df)
-        #RollingVolatilities = np.sqrt(252) * pe.rollStatistics(localRets, 'Vol', nIn=250) * 100
-        RollingVolatilities = pe.dema(localRets, self.LookBacks[localRets.columns], mode="AnnVol").ffill().bfill()
-        RollingVolatilities.to_sql(self.SystemName + "_" + strategyName + "_RollingVolatilities",sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        ###############################################################################################################
-        #EMAs = pe.ema(localRets, nperiods=250)
-        #EMAs.to_sql(self.SystemName+"_"+strategyName+"_EMAs", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        #driver = pe.sign(EMAs)
-        ###############################################################################################################
-        driver = pe.sign(self.DEMAs[localRets.columns])
-        ###############################################################################################################
-        driver[driver < 0] = 0
-        "FINANCIAL CONDITIONS INDEXES"
-        #FCIs = self.IndicatorsDF[["BFCIUS Index", "BFCIEU Index"]]
-        ################################ STATIC FCI FILTER #########################################
-        #kernelFCIs = pd.DataFrame(1, index=FCIs.index,columns=FCIs.columns)
-        #kernelFCIs[FCIs <= -1] = 0
-        #for c in driver.columns:
-        #    driver[c] *= kernelFCIs["BFCIUS Index"]
-        ################################ DECISION TREE FCI FILTER ########################################
-        DecisionTrees_RV = pd.read_sql("SELECT * FROM DecisionTrees_RV", sqlite3.connect("DataDeck.db")).set_index('date', drop=True)
-        [DT_FilterDF, DT_Aggregated_SigDF] = ML.DecisionTrees_Signal_Filter(localRets, self.IndicatorsDF, DecisionTrees_RV, ["VIX Index", "MOVE Index"])
-        DT_FilterDF.to_sql(self.SystemName + "_" + strategyName + "_DT_FilterDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        DT_Aggregated_SigDF.to_sql(self.SystemName + "_" + strategyName + "_DT_Aggregated_SigDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        "DT Filter Out Final Driver (Signal)"
-        driver *= DT_Aggregated_SigDF
 
-        driver.to_sql(self.SystemName + "_"+strategyName+"_driver_Filtered", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
 
-        ######################################## RISK PARITY #############################################
-        driver["NQ1 Index"] = driver["NQ1 Index"].div(pd.concat([self.IndicatorsDF["VXN Index"], RollingVolatilities["NQ1 Index"]], axis=1).max(axis=1), axis=0)
-        driver["ES1 Index"] = driver["ES1 Index"].div(pd.concat([self.IndicatorsDF["VIX Index"], RollingVolatilities["ES1 Index"]], axis=1).max(axis=1), axis=0)
-        driver["DM1 Index"] = driver["DM1 Index"].div(pd.concat([self.IndicatorsDF["VXD Index"], RollingVolatilities["DM1 Index"]], axis=1).max(axis=1), axis=0)
-        driver["GX1 Index"] = driver["GX1 Index"].div(pd.concat([self.IndicatorsDF["VDAX Index"], RollingVolatilities["GX1 Index"]], axis=1).max(axis=1), axis=0)
-        driver["VG1 Index"] = driver["VG1 Index"].div(pd.concat([self.IndicatorsDF["V2X Index"], RollingVolatilities["VG1 Index"]], axis=1).max(axis=1), axis=0)
-        driver["CF1 Index"] = driver["CF1 Index"].div(pd.concat([self.IndicatorsDF["V2X Index"], RollingVolatilities["CF1 Index"]], axis=1).max(axis=1), axis=0)
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
 
-        sDF = driver
-        #sDF = driver / RollingVolatilities
+        ##########################################################################################
         "Rebase"
-        RebaseOut = StrategiesDeck.ExPostRebase(sDF, localRets, exPostRebaseCompounds="YES", exPostVol="YES") #, exPostHurstControl="YES"
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'], exPostVol=self.StrategySettings['exPostVolIn'])
         sDF = RebaseOut[0]
-        for prop in ['compoundScaler', 'volExpander']: #'HurstFilter'
+        for prop in ['compoundScaler', 'volExpander']:
             try:
-                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
             except Exception as e:
                 print(e)
         ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn, if_exists='replace')
+        ##############################################################################################################
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
         sDF = pe.fd(sDF)
-        sDF.loc[["2002-04-10 00:00:00", "2002-04-11 00:00:00"], "DM1 Index"] = 0
-        sDF.to_sql(self.SystemName+"_"+strategyName+"_sDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
         return sDF * self.Leverage
-
+    ############################################################################################
     def Coast(self):
-        strategyName = inspect.stack()[0][3]
-        localRets = pe.dlog(self.df)
-        #################################################################################################################################
-        #RollingVolatilities = np.sqrt(252) * pe.rollStatistics(localRets, 'Vol', nIn=250) * 100
-        RollingVolatilities = pe.dema(localRets, self.LookBacks[localRets.columns], mode="AnnVol").ffill().bfill()
-        RollingVolatilities.to_sql(self.SystemName + "_" + strategyName + "_RollingVolatilities", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        #################################################################################################################################
-        #EMAs = pe.ema(localRets, nperiods=250)
-        #EMAs.to_sql(self.SystemName + "_" + strategyName + "_EMAs", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        #driver = pe.sign(EMAs)
-        #################################################################################################################################
-        driver = pe.sign(self.DEMAs[localRets.columns])
-        #################################################################################################################################
-        "FINANCIAL CONDITIONS INDEXES"
-        #FCIs = self.IndicatorsDF[["BFCIUS Index", "BFCIEU Index", "BFCIGB Index"]]
-        #kernelFCIs = pd.DataFrame(1, index=FCIs.index, columns=FCIs.columns)
-        #kernelFCIs[FCIs <= -1.5] = 0
-        #for c in driver.columns:
-        #    driver[c] *= kernelFCIs["BFCIUS Index"]
-        #################### DECISION TREES ###################################################
-        DecisionTrees_RV = pd.read_sql("SELECT * FROM DecisionTrees_RV", sqlite3.connect("DataDeck.db")).set_index('date', drop=True)
-        [DT_FilterDF, DT_Aggregated_SigDF] = ML.DecisionTrees_Signal_Filter(localRets, self.IndicatorsDF,DecisionTrees_RV,["VIX Index", "MOVE Index"])
-        DT_FilterDF.to_sql(self.SystemName + "_" + strategyName + "_DT_FilterDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        DT_Aggregated_SigDF.to_sql(self.SystemName + "_" + strategyName + "_DT_Aggregated_SigDF",sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        "DT Filter Out Final Driver (Signal)"
-        driver *= DT_Aggregated_SigDF
 
-        driver.to_sql(self.SystemName + "_" + strategyName + "_driver_Filtered", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        ######################### RISK PARITY #####################################################
-        for c in driver.columns:
-            driver[c] = driver[c].div(pd.concat([self.IndicatorsDF["MOVE Index"], RollingVolatilities[c]], axis=1).max(axis=1), axis=0)
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
 
-        sDF = driver
-        #sDF = driver / RollingVolatilities
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
+
+        ##########################################################################################
         "Rebase"
-        RebaseOut = StrategiesDeck.ExPostRebase(sDF, localRets, exPostRebaseCompounds="YES", exPostVol="YES")
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'], exPostVol=self.StrategySettings['exPostVolIn'])
         sDF = RebaseOut[0]
         for prop in ['compoundScaler', 'volExpander']:
             try:
-                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, sqlite3.connect("SkeletonDB.db"),
-                                          if_exists='replace')
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
             except Exception as e:
                 print(e)
         ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
+        ##############################################################################################################
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
         sDF = pe.fd(sDF)
-        sDF.to_sql(self.SystemName + "_" + strategyName + "_sDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
         return sDF * self.Leverage
-
+    ############################################################################################
     def Brotherhood(self):
-        strategyName = inspect.stack()[0][3]
-        localRets = pe.dlog(self.df)
-        ####################################################################################################################
-        #driver = pe.sign(pe.ema(localRets, nperiods=25))
-        ####################################################################################################################
-        driver = pe.sign(self.DEMAs[localRets.columns])
-        ####################################################################################################################
-        RollingVolatilities = pe.dema(localRets, self.LookBacks[localRets.columns], mode="AnnVol").ffill().bfill()
-        #RollingVolatilities = np.sqrt(252) * pe.rollStatistics(localRets, 'Vol', nIn=250).ffill().bfill() * 100
 
-        for c in driver.columns:
-            driver[c] = driver["DX1 Curncy"]
-        driver["DX1 Curncy"] = 0
-        driver["EC1 Curncy"] *= 0.576
-        driver["JY1 Curncy"] *= 0.136
-        driver["BP1 Curncy"] *= 0.119
-        driver["CD1 Curncy"] *= 0.091
-        driver["SF1 Curncy"] *= 0.042 + 0.036  # "Getting SEK exposure into Swiss Franc Futures"
-        #################### DECISION TREES ###################################################
-        DecisionTrees_RV = pd.read_sql("SELECT * FROM DecisionTrees_RV", sqlite3.connect("DataDeck.db")).set_index('date', drop=True)
-        [DT_FilterDF, DT_Aggregated_SigDF] = ML.DecisionTrees_Signal_Filter(localRets, self.IndicatorsDF, DecisionTrees_RV,["JPMVXYG7 Index"], BarrierDirections=["UpperReverse"])
-        DT_FilterDF.to_sql(self.SystemName + "_" + strategyName + "_DT_FilterDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        DT_Aggregated_SigDF.to_sql(self.SystemName + "_" + strategyName + "_DT_Aggregated_SigDF",sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        "DT Filter Out Final Driver (Signal)"
-        #driver = pe.sign(driver+DT_Aggregated_SigDF)
-        driver *= DT_Aggregated_SigDF
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
 
-        driver.to_sql(self.SystemName + "_"+strategyName+"_driver", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self,
+                              DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
 
-        for c in driver.columns:
-            driver[c] = driver[c].div(pd.concat([self.IndicatorsDF["JPMVXYG7 Index"], RollingVolatilities[c]], axis=1).max(axis=1), axis=0)
-
-        sDF = driver
-        #sDF = driver / RollingVolatilities
-        #sDF = driver.div(RollingVolatilities["DX1 Curncy"],axis=0)
-
+        ##########################################################################################
         "Rebase"
-        RebaseOut = StrategiesDeck.ExPostRebase(sDF, localRets, exPostRebaseCompounds="YES", exPostVol="YES")
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets,
+                                                exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'],
+                                                exPostVol=self.StrategySettings['exPostVolIn'])
         sDF = RebaseOut[0]
         for prop in ['compoundScaler', 'volExpander']:
             try:
-                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, sqlite3.connect("SkeletonDB.db"),
-                                          if_exists='replace')
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
             except Exception as e:
                 print(e)
         ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
+        ##############################################################################################################
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],
+                                                          'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
         sDF = pe.fd(sDF)
-        #sDF[sDF.abs() > 1] = 0
-        sDF.to_sql(self.SystemName + "_"+strategyName+"_sDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
         return sDF * self.Leverage
+    ############################################################################################
+    def ShoreDM(self):
 
-    def Shore(self):
-        strategyName = inspect.stack()[0][3]
-        localRets = pe.dlog(self.df)
-        IRDs = self.IndicatorsDF[[x for x in self.IndicatorsDF.columns if "IS Curncy" in x]]
-        DEMAsIRDs = self.DEMAs[IRDs.columns]
-        IRDs.columns = [(pe.getFutureTicker(x.replace("IS Curncy", "")[:3]) + "_" + pe.getFutureTicker(
-            x.replace("IS Curncy", "")[-3:])).replace("_USD", "") for x in IRDs.columns]
-        DEMAsIRDs.columns = [(pe.getFutureTicker(x.replace("IS Curncy", "")[:3]) + "_" + pe.getFutureTicker(
-            x.replace("IS Curncy", "")[-3:])).replace("_USD", "") for x in DEMAsIRDs.columns]
-        #dIRDs = pe.d(IRDs)
-        LookBacksRV_DF = pd.read_sql("SELECT * FROM "+self.SystemName + "_" + strategyName + "_LookBacksRV_DF", sqlite3.connect("SkeletonDB.db")).set_index('date', drop=True)
-        #DEMAsRV_DF = pd.read_sql("SELECT * FROM "+self.SystemName + "_" + strategyName + "_DEMAsRV_DF", sqlite3.connect("SkeletonDB.db")).set_index('date', drop=True)
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
 
-        #DEMAsRVCalculateStatus = "Setup"
-        DEMAsRVCalculateStatus = "Update"
-        #DEMAsRVCalculateStatus = "Read"
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
 
-        nHR = 250; nEMA = 250; nIRDs = 250
-        targetPairs = [c for c in list(permutations(localRets.columns, 2)) if c[0] == "BR1 Curncy"]
-        "Enumerate Asset Occurencies"
-        trAssetList = []
-        for combo in targetPairs:
-            trAssetList.append(combo[0])
-            trAssetList.append(combo[1])
-        trAssetDF = pd.Series(trAssetList).value_counts()
-        "Strategy's Core"
-        sRawList = []
-        HedgeRatiosList = []
-        RVsList = []
-        LookBacksRVList = []
-        DEMAsRVList = []
-        for pair in targetPairs:
-            subPairName = pair[0] + "_" + pair[1]
-            assetX = localRets[pair[0]]
-            assetY = localRets[pair[1]]
-            HedgeRatio = pe.S(assetX.rolling(nHR).corr(assetY) * (
-                    pe.roller(assetX, np.std, n=nHR) / pe.roller(assetY, np.std, n=nHR)))
-            RV = assetX + HedgeRatio * assetY
-            RV = pd.DataFrame(RV, columns=[subPairName])
-
-            if DEMAsRVCalculateStatus == "Setup":
-                LookBacksRV = pe.DynamicSelectLookBack(RV, RollMode="ExpWindow")
-            elif DEMAsRVCalculateStatus == "Update":
-                OldLookBacksRV = LookBacksRV_DF[subPairName]
-                NewLookBacksRV = pe.DynamicSelectLookBack(RV, RollMode="ExpWindow", st=RV.shape[0]-10).dropna()[subPairName]
-                LookBacksRV = pd.concat([OldLookBacksRV, NewLookBacksRV], axis=0)
-                LookBacksRV = LookBacksRV[~LookBacksRV.index.duplicated(keep='last')]
-                LookBacksRV = pd.DataFrame(LookBacksRV, columns=[subPairName])
-                LookBacksRV.columns = [subPairName]
-            elif DEMAsRVCalculateStatus == "Read":
-                LookBacksRV = pd.DataFrame(LookBacksRV_DF[subPairName], columns=[subPairName])
-
-            DEMAsRV = pe.dema(RV, LookBacksRV).fillna(0)
-            DEMAsRV.columns = [subPairName]
-
-            LookBacksRVList.append(LookBacksRV)
-            DEMAsRVList.append(DEMAsRV)
-
-            HedgeRatiosList.append(pd.DataFrame(HedgeRatio, index=RV.index, columns=[subPairName]))
-            RVsList.append(RV)
-            #subSig = pd.DataFrame(pe.sign(pe.sign(pe.ema(RV, nperiods=nEMA)) + pe.sign(pe.ema(dIRDs[subPairName], nperiods=nIRDs))),index=RV.index, columns=[subPairName])
-            if isinstance(DEMAsRV, pd.DataFrame):
-                DemaSubSig = DEMAsRV[subPairName]
-            else:
-                DemaSubSig = DEMAsRV
-
-            subSig = pe.sign(pe.sign(DemaSubSig) + pe.sign(DEMAsIRDs[subPairName]))
-            sRawList.append(subSig)
-
-        LookBacksRV_DF = pd.concat(LookBacksRVList, axis=1).sort_index()
-        DEMAsRV_DF = pd.concat(DEMAsRVList, axis=1).sort_index()
-        LookBacksRV_DF.to_sql(self.SystemName + "_" + strategyName + "_LookBacksRV_DF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        DEMAsRV_DF.to_sql(self.SystemName + "_" + strategyName + "_DEMAsRV_DF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-
-        HedgeRatioDF = pd.concat(HedgeRatiosList, axis=1)
-        RVsDF = pd.concat(RVsList, axis=1)
-        sRaw = pd.concat(sRawList, axis=1)
-        #RVsDF.columns = sRaw.columns
-
-        sRaw.to_sql(self.SystemName + "_" + strategyName + "_sRaw", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        HedgeRatioDF.to_sql(self.SystemName + "_Shore_HedgeRatioDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        RVsDF.to_sql(self.SystemName + "_" + strategyName + "_RVsDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        sRaw.to_sql(self.SystemName + "_" + strategyName + "_sRollSharpeFiltered", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-
-        "First Signal"
-        sDF = pe.RVSignalHandler(sRaw, HedgeRatioDF=HedgeRatioDF)
-
-        "Rebase each asset exposure on frequency per pair"
-        for c in sDF.columns:
-            sDF[c] /= trAssetDF[c]
-
+        ##########################################################################################
         "Rebase"
-        RebaseOut = StrategiesDeck.ExPostRebase(sDF, localRets, exPostRebaseCompounds="YES", exPostVol="YES")
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'], exPostVol=self.StrategySettings['exPostVolIn'])
         sDF = RebaseOut[0]
         for prop in ['compoundScaler', 'volExpander']:
             try:
-                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, sqlite3.connect("SkeletonDB.db"),
-                                          if_exists='replace')
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
             except Exception as e:
                 print(e)
         ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
+        ##############################################################################################################
+        #sDF["DX1 Curncy"] *= 0
+        ##############################################################################################################
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
         sDF = pe.fd(sDF)
-        sDF.to_sql(self.SystemName + "_" + strategyName + "_sDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
         return sDF * self.Leverage
+    ############################################################################################
+    def ShoreEM(self):
 
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
+
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
+
+        ##########################################################################################
+        "Rebase"
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'],
+                                                exPostVol=self.StrategySettings['exPostVolIn'])
+        sDF = RebaseOut[0]
+        for prop in ['compoundScaler', 'volExpander']:
+            try:
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
+            except Exception as e:
+                print(e)
+        ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
+        ##############################################################################################################
+        #sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
+        sDF = pe.fd(sDF)
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
+        return sDF * self.Leverage
+    ############################################################################################
     def Valley(self):
-        strategyName = inspect.stack()[0][3]
-        localRets = pe.dlog(self.df).fillna(0)
-        localRets.to_sql(self.SystemName + "_" + strategyName + "_localRets", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        #RollingVolatilities = np.sqrt(252) * pe.rollStatistics(localRets, 'Vol', nIn=250) * 100
-        RollingVolatilities = pe.dema(localRets, self.LookBacks[localRets.columns], mode="AnnVol").ffill().bfill()
-        RollingVolatilities.to_sql(self.SystemName + "_" + strategyName + "_RollingVolatilities",sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        ##########################################################################################################
-        #driverEMA = pe.sign(pe.ema(localRets, nperiods=500)) # LIVE TRADED
-        ##########################################################################################################
-        driverEMA = pe.sign(self.DEMAs[localRets.columns])
-        ##########################################################################################################
-        driver = pd.DataFrame(0,index=localRets.index, columns=localRets.columns)
-        for betaMap in [["TU1 Comdty","FF1 Comdty"],["DU1 Comdty","ER1 Comdty"]]:
-            driver[betaMap[0]] = pe.beta(localRets, betaMap[0], betaMap[1], n=250) * driverEMA[betaMap[1]]
-            #driver[betaMap[0]] = 1 * driverEMA[betaMap[1]]
-        driver.to_sql(self.SystemName + "_"+strategyName+"_driver", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        "FINANCIAL CONDITION INDEXES"
-        #FCIs = self.IndicatorsDF[["BFCIUS Index", "BFCIEU Index"]]
-        #kernelFCIs = pd.DataFrame(1, index=FCIs.index, columns=FCIs.columns)
-        #kernelFCIs[FCIs <= -1] = 0
-        #for c in ["TU1 Comdty", "DU1 Comdty"]:
-        #    driver[c] *= kernelFCIs["BFCIUS Index"]
-        ######################## DECISION TREES ###############################################
-        DecisionTrees_RV = pd.read_sql("SELECT * FROM DecisionTrees_RV", sqlite3.connect("DataDeck.db")).set_index('date', drop=True)
-        [DT_FilterDF, DT_Aggregated_SigDF] = ML.DecisionTrees_Signal_Filter(localRets, self.IndicatorsDF,DecisionTrees_RV,
-                                                                            ["MOVE Index"], BarrierDirections=["Upper"])
-        DT_FilterDF.to_sql(self.SystemName + "_" + strategyName + "_DT_FilterDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        DT_Aggregated_SigDF.to_sql(self.SystemName + "_" + strategyName + "_DT_Aggregated_SigDF",sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        "DT Filter Out Final Driver (Signal)"
-        driver *= DT_Aggregated_SigDF
-        # --------------------------------------------------------
-        driver[[x for x in driver.columns if (x != "TU1 Comdty")&(x != "DU1 Comdty")]] = driverEMA[[x for x in driver.columns if (x != "TU1 Comdty") & (x != "DU1 Comdty")]]
-        # --------------------------------------------------------
-        #driver[["FF1 Comdty", "ZB1 Comdty", "SFR1 Comdty", "ER1 Comdty", "IR1 Comdty", "BA1 Comdty", ]] *= 0
-        # --------------------------------------------------------
-        driver.to_sql(self.SystemName + "_" + strategyName + "_driver_Filtered", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
 
-        for c in driver.columns:
-            driver[c] = driver[c].div(pd.concat([self.IndicatorsDF["EUNS01 Curncy"]/100, RollingVolatilities[c]], axis=1).max(axis=1), axis=0)
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
 
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
+        ##########################################################################################
+        "Neutralise first point"
+        self.sigRaw[[x for x in self.sigRaw.columns if x in self.FuturesTable["Point_1"].tolist()]] *= 0
+        ##########################################################################################
         "Rebase"
-        RebaseOut = StrategiesDeck.ExPostRebase(driver, localRets, exPostRebaseCompounds="YES", exPostVol="YES")
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'], exPostVol=self.StrategySettings['exPostVolIn'])
         sDF = RebaseOut[0]
         for prop in ['compoundScaler', 'volExpander']:
             try:
-                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, sqlite3.connect("SkeletonDB.db"),
-                                          if_exists='replace')
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
             except Exception as e:
                 print(e)
         ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
+        ##############################################################################################################
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
         sDF = pe.fd(sDF)
-        sDF.to_sql(self.SystemName + "_"+strategyName+"_sDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
         return sDF * self.Leverage
-
+    ############################################################################################
     def Dragons(self):
-        strategyName = inspect.stack()[0][3]
-        localRets = pe.dlog(self.df)
-        #################################################################################################################################
-        #RollingVolatilities = np.sqrt(252) * pe.rollStatistics(localRets, 'Vol', nIn=250) * 100
-        RollingVolatilities = pe.dema(localRets, self.LookBacks[localRets.columns], mode="AnnVol").ffill().bfill()
-        RollingVolatilities.to_sql(self.SystemName + "_" + strategyName + "_RollingVolatilities",sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        #################################################################################################################################
-        #EMAs = pe.ema(localRets, nperiods=250)
-        #EMAs.to_sql(self.SystemName + "_" + strategyName + "_EMAs", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        #driver = pe.sign(EMAs)
-        #################################################################################################################################
-        driver = pe.sign(self.DEMAs[localRets.columns])
-        #################################################################################################################################
-        "FINANCIAL CONDITIONS INDEXES"
-        # FCIs = self.IndicatorsDF[["BFCIUS Index", "BFCIEU Index", "BFCIGB Index"]]
-        # kernelFCIs = pd.DataFrame(1, index=FCIs.index, columns=FCIs.columns)
-        # kernelFCIs[FCIs <= -1.5] = 0
-        # for c in driver.columns:
-        #    driver[c] *= kernelFCIs["BFCIUS Index"]
-        #################### DECISION TREES ###################################################
-        DecisionTrees_RV = pd.read_sql("SELECT * FROM DecisionTrees_RV", sqlite3.connect("DataDeck.db")).set_index('date', drop=True)
-        [DT_FilterDF, DT_Aggregated_SigDF] = ML.DecisionTrees_Signal_Filter(localRets, self.IndicatorsDF,DecisionTrees_RV,
-                                                                            ["GVZ Index","OVX Index"],
-                                                                            BarrierDirections=["Upper", "Upper"]
-                                                                            )
-        DT_FilterDF.to_sql(self.SystemName + "_" + strategyName + "_DT_FilterDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        DT_Aggregated_SigDF.to_sql(self.SystemName + "_" + strategyName + "_DT_Aggregated_SigDF",sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        "DT Filter Out Final Driver (Signal)"
-        #driver *= DT_Aggregated_SigDF
 
-        driver.to_sql(self.SystemName + "_" + strategyName + "_driver_Filtered", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        ######################### RISK PARITY #####################################################
-        #for c in driver.columns:
-        #    driver[c] = driver[c].div(pd.concat([self.IndicatorsDF["GVZ Index"], self.IndicatorsDF["OVX Index"], RollingVolatilities[c]], axis=1).max(axis=1), axis=0)
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
 
-        #sDF = driver
-        sDF = driver / RollingVolatilities
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
+
+        ##########################################################################################
         "Rebase"
-        RebaseOut = StrategiesDeck.ExPostRebase(sDF, localRets, exPostRebaseCompounds="YES", exPostVol="YES")
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'], exPostVol=self.StrategySettings['exPostVolIn'])
         sDF = RebaseOut[0]
         for prop in ['compoundScaler', 'volExpander']:
             try:
-                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, sqlite3.connect("SkeletonDB.db"),
-                                          if_exists='replace')
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
             except Exception as e:
                 print(e)
         ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
+        ##############################################################################################################
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
         sDF = pe.fd(sDF)
-        sDF.to_sql(self.SystemName + "_" + strategyName + "_sDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
         return sDF * self.Leverage
+    ############################################################################################
+    def Lumen(self):
 
-    """R&D"""
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
 
-    def BrotherhoodRnD(self):
-        strategyName = inspect.stack()[0][3]
-        localRets = pe.dlog(self.df)
-        targetPairs = [
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "SO",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
 
-        ]
-        "Enumerate Asset Occurencies"
-        trAssetList = []
-        for combo in targetPairs:
-            trAssetList.append(combo[0])
-            trAssetList.append(combo[1])
-        trAssetDF = pd.Series(trAssetList).value_counts()
-        "Strategy's Core"
-        sRawList = []
-        HedgeRatiosList = []
-        RVsList = []
-        for pair in targetPairs:
-            subPairName = pair[0] + "_" + pair[1]
-            assetX = localRets[pair[0]]
-            assetY = localRets[pair[1]]
-            nHR = 250
-            nEMA = 250
-            nIRDs = 250
-            HedgeRatio = pe.S(assetX.rolling(nHR).corr(assetY) * (
-                    pe.roller(assetX, np.std, n=nHR) / pe.roller(assetY, np.std, n=nHR)))
-            RV = assetX - HedgeRatio * assetY
-            HedgeRatiosList.append(pd.DataFrame(HedgeRatio, index=RV.index, columns=[subPairName]))
-            RVsList.append(RV)
-            subSig = pd.DataFrame(pe.sign(pe.ema(RV, nperiods=nEMA)), index=RV.index, columns=[subPairName])
-            #subSig = pd.DataFrame(pe.sign(pe.sign(pe.ema(RV, nperiods=nEMA)) + pe.sign(pe.ema(pe.d(IRDs[subPairName]), nperiods=nIRDs))),index=RV.index, columns=[subPairName])
-            sRawList.append(subSig)
-        HedgeRatioDF = pd.concat(HedgeRatiosList, axis=1)
-        RVsDF = pd.concat(RVsList, axis=1)
-        sRaw = pd.concat(sRawList, axis=1)
-        RVsDF.columns = sRaw.columns
-
-        #sRaw.to_sql(self.SystemName + "_Brotherhood_sRaw", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        #HedgeRatioDF.to_sql(self.SystemName + "_Brotherhood_HedgeRatioDF", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-        #RVsDF.to_sql(self.SystemName + "_Brotherhood_RVsDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        #sRaw.to_sql(self.SystemName + "_Brotherhood_sRollSharpeFiltered", sqlite3.connect("SkeletonDB.db"),if_exists='replace')
-
-        "First Signal"
-        sDF = pe.RVSignalHandler(sRaw, HedgeRatioDF=HedgeRatioDF)
-
-        "Rebase each asset exposure on frequency per pair"
-        #for c in sDF.columns:
-        #    sDF[c] /= trAssetDF[c]
-
+        ##########################################################################################
         "Rebase"
-        RebaseOut = StrategiesDeck.ExPostRebase(sDF, localRets, exPostRebaseCompounds="YES", exPostVol="YES")
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'],
+                                                exPostVol=self.StrategySettings['exPostVolIn'],
+                                                exPostVolMode="ExpWindow"
+                                                )
+        sDF = RebaseOut[0]
+        #################################### NEUTRALISE ##########################################
+        sDF["FVS1 Index"] *= 0
+        ##########################################################################################
+        for prop in ['compoundScaler', 'volExpander']:
+            try:
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
+            except Exception as e:
+                print(e)
+        ##############################################################################################################
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
+        ##############################################################################################################
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
+        sDF = pe.fd(sDF)
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
+        return sDF * self.Leverage
+    ############################################################################################
+    def Fidei(self):
+
+        self.StrategyName = inspect.stack()[0][3]
+        self.stategyDBconn = sqlite3.connect(self.StrategyName + ".db")
+        self.localRets = pe.dlog(self.df).fillna(0)
+
+        self.StrategySettings = {
+            "EMA_Mode": ["DEMA", 250],
+            "RP_Mode": [None],  # ["Standard", 250]
+            "DirectionBias": "NoBias",  # "LO", "SO"
+            "IndicatorsStabilisers": "DT",  # None,[Ind1, Ind2],"DT"
+            "SmoothStabilisers": [""],  # ["EMA", 250, "", "Additive"],"Positive","Negative","Both"
+            "exPostRebaseCompoundsIn": "NO",
+            "exPostVolIn": "YES"
+        }
+        StrategiesDeck.EMA_RP(self, DEMA_ID="_DefaultSingleLookBack_LookBacksPack_DEMAs")
+
+        ##########################################################################################
+        "Rebase"
+        RebaseOut = StrategiesDeck.ExPostRebase(self.sigRaw, self.localRets, exPostRebaseCompounds=self.StrategySettings['exPostRebaseCompoundsIn'], exPostVol=self.StrategySettings['exPostVolIn'])
         sDF = RebaseOut[0]
         for prop in ['compoundScaler', 'volExpander']:
             try:
-                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, sqlite3.connect("SkeletonDB.db"),
-                                          if_exists='replace')
+                RebaseOut[1][prop].to_sql(self.SystemName + "_" + prop, self.stategyDBconn, if_exists='replace')
             except Exception as e:
                 print(e)
         ##############################################################################################################
-        sDF = pe.fd(sDF)
-        sDF.to_sql(self.SystemName + "_Brotherhood_sDF", sqlite3.connect("SkeletonDB.db"), if_exists='replace')
-        return sDF * self.Leverage
-
-    def UnderMaskPCA(self):
-        manifoldTarget = 'PCA'
-        localDBconn = sqlite3.connect("SkeletonDB.db")
-        localRets = pe.dlog(self.df)
-        out = ManSee.gRollingManifold(manifoldTarget, localRets, 50, 3, [0, 1, 2])
-        out[0].to_sql('df', localDBconn, if_exists='replace')
-        principalCompsDfList = out[1]
-        exPostProjectionsList = out[2]
-        for k in range(len(principalCompsDfList)):
-            principalCompsDfList[k].to_sql(manifoldTarget + '_principalCompsDf_' + str(k), localDBconn, if_exists='replace')
-            exPostProjectionsList[k].to_sql(manifoldTarget + '_exPostProjections_' + str(k), localDBconn, if_exists='replace')
-        sDF = principalCompsDfList[1]
-
+        pe.fd(sDF).to_sql(self.SystemName + "_" + self.StrategyName + "_sDF_PreVolumeFiltered", self.stategyDBconn,if_exists='replace')
         ##############################################################################################################
-        sDF.to_sql(self.SystemName+"_UnderMaskPCA_sDF", localDBconn, if_exists='replace')
+        sDF = StrategiesDeck.VolumeFilter(sDF, FilterSet={'VolumeLowerThr': [True, 100],'DailyTurnoverLowerThr': [True, 1000000]})
+        ##############################################################################################################
+        print("self.Leverage = ", self.Leverage)
+        sDF = pe.fd(sDF)
+        sDF.to_sql(self.SystemName + "_" + self.StrategyName + "_sDF", self.stategyDBconn, if_exists='replace')
         return sDF * self.Leverage
+
+#test = StrategiesDeck()

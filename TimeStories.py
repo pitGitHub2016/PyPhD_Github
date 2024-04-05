@@ -1,38 +1,43 @@
 import time
-try:
-    from os.path import dirname, basename, isfile, join
-    import glob, os, sys
-    import pandas as pd, numpy as np, sqlite3, matplotlib.pyplot as plt
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    os.chdir(dir_path)
-    sys.path.insert(0,'F:/Dealing/Panagiotis Papaioannou/pyerb/')
+#try:
+from os.path import dirname, basename, isfile, join
+import glob, os, sys
+import pandas as pd, numpy as np, sqlite3, matplotlib.pyplot as plt
+dir_path = os.path.dirname(os.path.realpath(__file__))
+os.chdir(dir_path)
+PyERBMainPath = 'F:/Dealing/Panagiotis Papaioannou/pyerb/'
+sys.path.insert(0,PyERBMainPath)
 
-    from pyerb import pyerb as pe
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import DataDeck
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Endurance
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Coast
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Brotherhood
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Shore
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Valley
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Dragons
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import LiveEMSXHistory
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import StrategiesAggregator
+from pyerb import pyerb as pe
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import DataDeck
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Endurance
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Coast
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Brotherhood
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import ShoreDM
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import ShoreEM
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Valley
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Dragons
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Lumen
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Fidei
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import LiveEMSXHistory
+from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import StrategiesAggregator
 
-    import warnings
-    warnings.filterwarnings("ignore")
-except Exception as e:
-    print(e)
-    time.sleep(10)
+import warnings
+warnings.filterwarnings("ignore")
+#except Exception as e:
+#    print(e)
+#    time.sleep(10)
 
 class TimeStories:
 
-    def __init__(self, update, StrategiesStatus):
+    def __init__(self, StrategiesStatus):
         self.StrategiesStatus = StrategiesStatus
         if self.StrategiesStatus == "ActiveStrategies":
             self.DataDB_Label = ""
         elif self.StrategiesStatus == "StagedStrategies":
             self.DataDB_Label = "_Staged"
         self.conn = sqlite3.connect("TimeStories"+self.DataDB_Label+".db")
+        self.AlternativeStorageLocation = "C:/SinceWeHaveLimitedSpace/"
         self.PyLiveTradingSystemsFolder = "F:\Dealing\Panagiotis Papaioannou\pyerb\PyEurobankBloomberg\PySystems\PyLiveTradingSystems/"
         self.GreenBoxFolder = "F:/Dealing/Panagiotis Papaioannou/pyerb/GreenBox/"
         self.KplusExposuresPath = "F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/Bloomberg_EMSX/"
@@ -40,106 +45,34 @@ class TimeStories:
         self.PyTradingScriptsDF = pd.DataFrame(glob.glob(self.PyLiveTradingSystemsFolder+"*.py"), columns=["ScriptFile"])
         self.PyTradingScriptsDF["Name"] = self.PyTradingScriptsDF["ScriptFile"].str.split("PyLiveTradingSystems").str[1]
         self.PyTradingScriptsDF[["Name", "ScriptFile"]].to_sql("PyTradingScriptsDF", self.conn, if_exists='replace')
-
-        if update == "Yes":
-            RunSettings = {"RunDataMode": True,
-                           "DataPatchers": True,
-                           "LookBacksDEMAsCalcMode": [False, True, True],  # LookbacksDEMAsAll, Lookbacks, DEMAs
-                           "RunEcoDataMode": True,
-                           "ManifoldLearnersMode": "Break",  # Setup, Update, Read, Break
-                           "MacroConnectorsObservatory": [False, "Break", "ReadMetric"],
-                           # "DataSetup", "RollMetric", "ReadMetric"
-                           "RunBenchmarkPortfolios": True}
-
-            DataDeck.DataDeck("DataDeck"+self.DataDB_Label+".db").Run(RunSettings)
+        self.DataDeckExcel = "F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/PyLiveTradingSystems/AssetsDashboard.xlsx"
+        self.Live_Strategies_Control_Panel = pd.read_excel(self.DataDeckExcel, sheet_name="Live Strategies Control Panel", engine='openpyxl').dropna(subset=["Strategy Name"]).dropna(axis=1)
 
     def LiveStrategiesRun(self):
 
         # Start With Endurance which updates Latest Data (DataDeck) as well!
         Endurance.Endurance().Run()
 
-        # Continue with the rest of the strategies - "No" means no need to update live data tables again
+        # Continue with the rest of the strategies
         Coast.Coast().Run()
         Brotherhood.Brotherhood().Run()
-        Shore.Shore().Run()
+        ShoreDM.ShoreDM().Run()
+        ShoreEM.ShoreEM().Run()
         Valley.Valley().Run()
         Dragons.Dragons().Run()
+        Lumen.Lumen().Run()
+        Fidei.Fidei().Run()
 
     def ControlPanel(self, **kwargs):
 
+        self.ActiveAssetsReferenceData = pd.read_sql('SELECT * FROM ActiveAssetsReferenceData', sqlite3.connect("DataDeck.db")).set_index('ticker', drop=True)
+
         # Aggregate Live Strategies
-        StrategiesAggregator.StrategiesAggregator("DataDeck"+self.DataDB_Label+".db", "Endurance", ["Coast", "Brotherhood", "Valley", "Shore", "Dragons"], [1,1,1,1,1]).LinearAggregation()
-
-        def EMSX_Kondor_Dict(k):
-
-            if k == "CME-ED":
-                return "ED1 Comdty"
-            elif k == 'F_3MEURIBOR':
-                return 'ER1 Comdty'
-            ##############################################
-            elif k == "NE":
-                return "NV1 Curncy"
-            elif k == "F_MXN":
-                return "PE1 Curncy"
-            elif k == "F_EUR":
-                return "EC1 Curncy"
-            elif k == "F_JPY":
-                return "JY1 Curncy"
-            elif k == "FUT_BRL":
-                return "BR1 Curncy"
-            elif k == "F_ZAR":
-                return "RA1 Curncy"
-            elif k == "F_CAD":
-                return "CD1 Curncy"
-            elif k == "F_AUD":
-                return "AD1 Curncy"
-            elif k == "F_GBP":
-                return "BP1 Curncy"
-            elif k == "RUB_USD_FUT":
-                return "RU1 Curncy"
-            elif k == "F_CHF":
-                return 'SF1 Curncy'
-            elif k == "DOLLAR_FUT":
-                return 'DX1 Curncy'
-            ##############################################
-            elif k == "E-MINI_FUTUR":
-                return "ES1 Index"
-            elif k == "YM":
-                return "DM1 Index"
-            elif k == "CAC40_FUTURE":
-                return 'CF1 Index'
-            elif k == "F_EURSTOXX50":
-                return 'VG1 Index'
-            elif k == "F_DAX":
-                return 'GX1 Index'
-            elif k == "ME":
-                return 'FA1 Index'
-            elif k == "OMXH25_FUT":
-                return 'OT1 Index'
-            elif k == "NAS_100_MINI":
-                return 'NQ1 Index'
-            elif k == "F_SMI":
-                return "SM1 Index"
-            ##############################################
-            elif k == "F_2Y_T_NOTE":
-                return "TU1 Comdty"
-            elif k == "F_TY_T_NOTE":
-                return "TY1 Comdty"
-            elif k == "F_5Y_T_NOTE":
-                return "FV1 Comdty"
-            elif k == "EUREXSCHATZ":
-                return 'DU1 Comdty'
-            elif k == "EUREXBOBL":
-                return 'OE1 Comdty'
-            elif k == "EUREXBUND":
-                return 'RX1 Comdty'
-            ##############################################
-            elif k == "----------------------":
-                return 'FF1 Comdty'
-            elif k == "----------------------":
-                return 'FVS1 Index'
-            elif k == "VIX_FUTURE":
-                return 'UX1 Index'
+        StrategiesAggregatorObj = StrategiesAggregator.StrategiesAggregator("DataDeck"+self.DataDB_Label+".db", self.Live_Strategies_Control_Panel["Strategy Name"].iloc[0],
+                                                  self.Live_Strategies_Control_Panel["Strategy Name"].iloc[1:].tolist(),
+                                                  self.Live_Strategies_Control_Panel["CTA Allocation"].iloc[1:].tolist())
+        StrategiesAggregatorObj.LinearAggregation()
+        StrategiesAggregatorObj.PlotContributions()
 
         if "Stealth" in kwargs:
             Stealth = kwargs['Stealth']
@@ -158,7 +91,8 @@ class TimeStories:
             LiveFuturesMaturity = ""
 
         "GET KONDOR EXPOSURES AND AGGREGATE!"
-        self.KplusDF = pd.read_excel(self.KplusExposuresPath+"KondorFuturesDealsExport.xlsx")
+        self.KplusDF = pd.read_excel(PyERBMainPath+"KPlus_FX_SPOT_POSITIONS.xlsx",sheet_name='DERIV_2_FUTURES')
+        ##############################################################################################################
         self.KplusDF["Trade Date"] = pd.to_datetime(self.KplusDF["Trade Date"])
         self.KplusDF["BinaryDirection"] = None
         self.KplusDF.loc[self.KplusDF["Type"] == "Sell", "BinaryDirection"] = -1
@@ -176,7 +110,7 @@ class TimeStories:
         self.dfAggr.to_excel(self.KplusExposuresPath+"KondorExposureTracker.xlsx")
         self.KondorExposureTrackerDF = pd.read_excel(self.KplusExposuresPath+"KondorExposureTracker.xlsx").set_index("Trade Date", drop=True)
         for c in self.KondorExposureTrackerDF.columns:
-            self.KondorExposureTrackerDF = self.KondorExposureTrackerDF.rename(columns={c: EMSX_Kondor_Dict(c)})
+            self.KondorExposureTrackerDF = self.KondorExposureTrackerDF.rename(columns={c: pe.EMSX_Kondor_Dict(c)})
         self.KondorLatestExposures = self.KondorExposureTrackerDF.iloc[-1]
 
         "EMSX TRADES"
@@ -220,22 +154,128 @@ class TimeStories:
         ControlPanel["exposureSharesEMSX"] = ControlPanel["exposureShares"]
         ControlPanel["exposureShares"] = ControlPanel["KondorExposures"]
 
-        ControlPanel["PositionAdjustment"] = ControlPanel.iloc[:, 0] - ControlPanel["exposureShares"]
 
         ### HTML REPORT ###
         ControlPanelToReport = ControlPanel.reset_index().rename(columns={'index': 'Asset', 'exposureShares': 'CurrentPosition'+exposureSpaceIdentifier})
-        ControlPanelToReport = ControlPanelToReport[['Asset', ControlPanel.iloc[:,0].name, 'CurrentPosition'+exposureSpaceIdentifier, 'exposureSharesEMSX', 'KondorExposures', 'PositionAdjustment']].set_index('Asset',drop=True)
-        ControlPanelToReport = ControlPanelToReport.sort_values(by="PositionAdjustment")
+        ControlPanelToReport = ControlPanelToReport[['Asset', ControlPanel.iloc[:,0].name, 'CurrentPosition'+exposureSpaceIdentifier, 'KondorExposures',
+                                                     'exposureSharesEMSX']].set_index('Asset',drop=True)
+
+        "Adjusting Position for External EMSX exposures (e.g. Galileo)"
+        ExternalStrategy_A_Name = 'Galileo'
+        ExternalStrategy_A = pd.read_sql('SELECT * FROM NumContracts', sqlite3.connect(ExternalStrategy_A_Name+".db"))
+        Exposures_ExternalStrategy_A = ExternalStrategy_A.iloc[-1,:]
+        ControlPanelToReport["TargetPositions_"+ExternalStrategy_A_Name] = Exposures_ExternalStrategy_A
+        ExternalStrategy_A_Fills = pd.read_sql('SELECT * FROM PPAPAIOANNO1_ExposuresDF_'+ExternalStrategy_A_Name, sqlite3.connect("LiveEMSXHistory.db"))
+        ExternalStrategy_A_Fills = ExternalStrategy_A_Fills.set_index('BaseAsset',drop=True)
+        ControlPanelToReport["Fills_"+ExternalStrategy_A_Name] = ExternalStrategy_A_Fills
+
+        ControlPanelToReport["TotalSignal"] = 0#ControlPanelToReport.iloc[:, 0] + ControlPanelToReport["TargetPositions_"+ExternalStrategy_A_Name]
+        ControlPanelToReport["TotalKondorExposures"] = 0#ControlPanelToReport["KondorExposures"] + ControlPanelToReport["Fills_"+ExternalStrategy_A_Name] * (-1)
+
+        try:
+            ControlPanelToReport = ControlPanelToReport.drop(["ED2 Comdty","ED3 Comdty"])
+        except Exception as e:
+            print(e)
+        #ControlPanelToReport = ControlPanelToReport.sort_values(by='CurrentPosition'+exposureSpaceIdentifier)
+        ControlPanelToReport["-B1-"] = "-"
+        ControlPanelToReport = ControlPanelToReport[[ControlPanel.iloc[:,0].name, "TotalSignal",
+                                                     'CurrentPosition'+exposureSpaceIdentifier, 'KondorExposures', "TotalKondorExposures",
+                                                     "-B1-",
+                                                     'Fills_'+ExternalStrategy_A_Name, 'TargetPositions_'+ExternalStrategy_A_Name,
+                                                     'exposureSharesEMSX']].fillna(0)
+        ########################################################################################################################
+
+        ControlPanelToReport["-B2-"] = "-----"
+        ControlPanelToReport["PositionAdjustment"] = ControlPanelToReport.iloc[:,0] - ControlPanelToReport["KondorExposures"]
+        #ControlPanel["PositionAdjustment"] = ControlPanelToReport["TotalSignal"] - ControlPanelToReport["TotalKondorExposures"]
+        print(ControlPanel)
+        ########################################################################################################################
         ControlPanelToReport["Kondor_vs_EMSX"] = ControlPanel["exposureSharesEMSX"] - ControlPanel["KondorExposures"]
         ControlPanelToReport["Kondor_vs_EMSX_FLAG"] = "-"
         ControlPanelToReport.loc[(ControlPanelToReport["Kondor_vs_EMSX"] != 0)&(~ControlPanel["KondorExposures"].isna()),"Kondor_vs_EMSX_FLAG"] = "CHECK !!!"
         ControlPanelToReport.to_sql("ControlPanel", self.conn, if_exists='replace')
         ControlPanelToReport['CurrentPosition'+exposureSpaceIdentifier].to_excel(self.KplusExposuresPath+"EMSX_ControlPanel.xlsx")
 
-        ControlPanelToReport = ControlPanelToReport.dropna().reset_index()
+        ControlPanelToReport = ControlPanelToReport.fillna(0).reset_index()
+        ControlPanelToReport['HaveExposureFlag'] = pe.sign(ControlPanelToReport['KondorExposures']).abs()
+        ControlPanelToReport = ControlPanelToReport.sort_values(by='HaveExposureFlag', ascending=False)
+        ControlPanelToReport = ControlPanelToReport.drop(["HaveExposureFlag", "exposureSharesEMSX","Kondor_vs_EMSX", "Kondor_vs_EMSX_FLAG"],axis=1)
+
         pe.RefreshableFile([[ControlPanelToReport, 'QuantitativeStrategiesControlPanel']],
                         self.GreenBoxFolder + 'QuantitativeStrategies_ControlPanel.html',
                         5, cssID='QuantitativeStrategies',  addButtons="QuantStrategies")
+
+        ##########################################################################################################################################################################
+        #print(ControlPanelToReport)
+        ControlPanelToReport_ActivePositions = ControlPanelToReport.loc[ControlPanelToReport.iloc[:,1] != 0,["Asset",ControlPanelToReport.columns[1],"CurrentPositionKondor","PositionAdjustment"]]
+        ControlPanelToReport_ActivePositions = ControlPanelToReport_ActivePositions.set_index("Asset",drop=True)
+        ControlPanelToReport_ActivePositions.index.names = ["ticker"]
+        ControlPanelToReport_ActivePositions = pd.concat([ControlPanelToReport_ActivePositions,self.ActiveAssetsReferenceData.loc[ControlPanelToReport_ActivePositions.index, ["CRNCY","CURR_GENERIC_FUTURES_SHORT_NAME"]]], axis=1)
+        Active_FUT_CONT_SIZES = pd.read_sql('SELECT * FROM HistContractValues', sqlite3.connect("DataDeck.db"))
+        Active_FUT_CONT_SIZES = Active_FUT_CONT_SIZES.loc[Active_FUT_CONT_SIZES.index[-1],list(ControlPanelToReport_ActivePositions.index)]
+        ControlPanelToReport_ActivePositions["CONT_SIZES"] = Active_FUT_CONT_SIZES
+        ControlPanelToReport_ActivePositions["Notionals"] = ControlPanelToReport_ActivePositions.iloc[:,0] * ControlPanelToReport_ActivePositions["CONT_SIZES"]
+        ControlPanelToReport_ActivePositions[["Notionals","CONT_SIZES"]] = ControlPanelToReport_ActivePositions[["Notionals","CONT_SIZES"]].astype(float).round()
+        cta_lookbacks = pd.read_sql('SELECT * FROM HealthCheck_1_1', sqlite3.connect(self.AlternativeStorageLocation+"HealthChecks.db")).set_index("date",drop=True)
+        cta_lookbacks = cta_lookbacks.loc[cta_lookbacks.index[-1], ControlPanelToReport_ActivePositions.index]
+        cta_lookbacks.name = "Lookbacks"
+        ControlPanelToReport_ActivePositions = pd.concat([ControlPanelToReport_ActivePositions, cta_lookbacks], axis=1)
+        ControlPanelToReport_ActivePositions["Trading Style (Monthly Horizon)"] = "Trend Following"
+        ControlPanelToReport_ActivePositions.loc[ControlPanelToReport_ActivePositions["Lookbacks"] <= 25, "Trading Style (Monthly Horizon)"] = "Mean Reversion"
+        ControlPanelToReport_ActivePositions = ControlPanelToReport_ActivePositions.drop(["CurrentPositionKondor","PositionAdjustment","Lookbacks"],axis=1)
+        ControlPanelToReport_ActivePositions = ControlPanelToReport_ActivePositions.reset_index()
+        ControlPanelToReport_ActivePositions = ControlPanelToReport_ActivePositions.dropna(subset=["CONT_SIZES"])
+
+        ##########################################################################################################################################################################
+
+        "Get Credit Trader Signals in the Report"
+        CreditTraderControlPanelExcel = "F:\Dealing\TRADING\High Yield Desk\Credit_Trader_Python\Credit_Trader_Control_Panel.xlsx"
+        AssetsSpecsSheet = pd.read_excel(CreditTraderControlPanelExcel, sheet_name="AssetsSpecs",engine='openpyxl').set_index("Asset", drop=True).dropna()
+        CreditTraderSignals = pd.read_sql('SELECT * FROM RedPill_LiveSignal',sqlite3.connect("F:/Dealing/TRADING/High Yield Desk/Credit_Trader_Python/CreditTrader.db")).set_index("index",drop=True)
+        CreditTraderSignals = CreditTraderSignals.astype(float) * 10000000
+        CreditTraderSignals["Risk On/Off"] = None
+        CreditTraderSignals.loc[CreditTraderSignals[CreditTraderSignals.columns[0]] < 0, "Risk On/Off"] = "Risk On"
+        CreditTraderSignals.loc[CreditTraderSignals[CreditTraderSignals.columns[0]] > 0, "Risk On/Off"] = "Risk Off"
+        CreditTraderSignals.loc[CreditTraderSignals[CreditTraderSignals.columns[0]] == 0, "Risk On/Off"] = "Neutral"
+        CreditTraderSignals = pd.concat([AssetsSpecsSheet["Description"], CreditTraderSignals],axis=1)
+        CreditTraderSignals = CreditTraderSignals.reset_index()
+        CreditTraderSignals.columns = ["Credit Trader : Tickers", "Name", "Position (Notional) : "+CreditTraderSignals.columns[1], "Risk On/Off"]
+        CreditTraderSignals["Trading Style (Monthly Horizon)"] = "Mean Reversion"
+
+        ##########################################################################################################################################################################
+
+        "Get SOV Trader Signals in the Report"
+        SOVTraderControlPanelExcel = "F:\Dealing\TRADING\Govies\QIS\DevQuantSystems\SOV_Trader_Control_Panel_Dev.xlsx"
+        SOV_AssetsSpecsSheet = pd.read_excel(SOVTraderControlPanelExcel, sheet_name="ActiveStrategies",engine='openpyxl').set_index("Govies", drop=True)
+        SOV_TraderConn = sqlite3.connect("F:\Dealing\TRADING\Govies\QIS\DevQuantSystems\SOV_TraderDev.db")
+        SOVTraderSignals = pd.read_sql('SELECT * FROM Govies_LiveSignal',SOV_TraderConn).set_index("index",drop=True)
+        SOVTraderSignals = (SOVTraderSignals.astype(float) * 10000000 * (-1)).fillna(0)
+        SOVTraderSignals["Risk On/Off"] = "Neutral"
+        SOVTraderSignals.loc[SOVTraderSignals[SOVTraderSignals.columns[0]] > 0, "Risk On/Off"] = "Risk On"
+        SOVTraderSignals.loc[SOVTraderSignals[SOVTraderSignals.columns[0]] < 0, "Risk On/Off"] = "Risk Off"
+        SOVTraderSignals.loc[SOVTraderSignals[SOVTraderSignals.columns[0]] == 0, "Risk On/Off"] = "Neutral"
+        SOV_AssetsSpecsSheet = SOV_AssetsSpecsSheet.loc[SOVTraderSignals.index]
+        SOVTraderSignals = pd.concat([SOV_AssetsSpecsSheet["Description"], SOVTraderSignals],axis=1)
+        SOVTraderSignals = SOVTraderSignals.reset_index()
+        SOVTraderSignals.columns = ["SOV Trader : Tickers", "Name", "Position (Notional) : "+SOVTraderSignals.columns[1], "Risk On/Off"]
+        SOVTraderSignals = SOVTraderSignals.set_index("SOV Trader : Tickers",drop=True)
+        SOVTrader_lookbacks = pd.read_sql('SELECT * FROM Govies_LookBacks', SOV_TraderConn).set_index("date", drop=True)
+        SOVTrader_lookbacks = SOVTrader_lookbacks.loc[SOVTrader_lookbacks.index[-1], :]
+        SOVTrader_lookbacks.name = "Lookbacks"
+        SOVTraderSignals = pd.concat([SOVTraderSignals, SOVTrader_lookbacks], axis=1)
+        SOVTraderSignals["Trading Style (Monthly Horizon)"] = "Trend Following"
+        SOVTraderSignals.loc[SOVTraderSignals["Lookbacks"] <= 25, "Trading Style (Monthly Horizon)"] = "Mean Reversion"
+        SOVTraderSignals = SOVTraderSignals.reset_index()
+        SOVTraderSignals = SOVTraderSignals.drop(["Lookbacks"], axis=1)
+        ###############################################################################################################################################################
+
+        pe.RefreshableFile([[ControlPanelToReport_ActivePositions, 'QuantitativeStrategiesControlPanel'],
+                            [CreditTraderSignals, 'QuantitativeStrategiesControlPanel'],
+                            [SOVTraderSignals, 'QuantitativeStrategiesControlPanel']],
+                        self.GreenBoxFolder + 'QuantitativeStrategies_ControlPanel_ActivePositions.html',
+                        5, cssID='QuantitativeStrategies',  addButtons="QuantStrategiesHermes")
+
+        ###############################################################################################################################################################
 
         "EMSX Excel Trader"
         EMSX_Excel_Handler = ControlPanelToReport.copy().rename(columns={"Asset": "Ticker"})[["Ticker", "PositionAdjustment"]]
@@ -284,28 +324,28 @@ class TimeStories:
         print(EMSX_Excel_Handler)
 
 mode = "Live"
-#mode = "LiveNoDataUpdate"
 #mode = "Stage"
 #mode = "StageNoDataUpdate"
 #mode = "CheckPositionsOnly_STEALTH_YES"
 #mode = "CheckPositionsOnly_STEALTH_NO"
 
-if mode == "Live":
-    tradingObj = TimeStories("Yes", "ActiveStrategies")
-elif (mode == "LiveNoDataUpdate")|("CheckPositionsOnly" in mode):
-    tradingObj = TimeStories("No", "ActiveStrategies")
+if (mode == "Live")|("CheckPositionsOnly" in mode):
+    tradingObj = TimeStories("ActiveStrategies")
 elif mode == "Stage":
-    tradingObj = TimeStories("Yes", "StagedStrategies")
+    tradingObj = TimeStories("StagedStrategies")
 elif mode == "StageNoDataUpdate":
-    tradingObj = TimeStories("No", "StagedStrategies")
+    tradingObj = TimeStories("StagedStrategies")
 
 if "CheckPositionsOnly" not in mode:
     tradingObj.LiveStrategiesRun()
-    tradingObj.ControlPanel(LiveFuturesMaturity="M3", Stealth="NO") #Stealth="NO","YES"
+    tradingObj.ControlPanel(LiveFuturesMaturity="M4", Stealth="NO") #Stealth="NO","YES"
 else:
     print("Running CheckPositions with EMSX Stealth Mode = ", mode.split("_")[2])
-    tradingObj.ControlPanel(LiveFuturesMaturity="M3", Stealth=mode.split("_")[2])  # Stealth="NO","YES"
+    tradingObj.ControlPanel(LiveFuturesMaturity="M4", Stealth=mode.split("_")[2])  # Stealth="NO","YES"
 
-if mode == "Live":
+if "Live" in mode:
     #pass
-    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import RiskStatusIdentification
+    #from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import RiskStatusIdentification
+    #################################################################################################
+    print("Hermes is sending emails ... ")
+    from PyEurobankBloomberg.PySystems.PyLiveTradingSystems import Hermes
