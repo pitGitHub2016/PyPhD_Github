@@ -7,6 +7,7 @@ from datetime import timedelta
 from scipy.stats import norm
 import pickle
 import pandas as pd, numpy as np, sqlite3, matplotlib.pyplot as plt, matplotlib as mpl
+from scipy.interpolate import interp1d
 dir_path = os.path.dirname(os.path.realpath(__file__))
 os.chdir(dir_path)
 sys.path.insert(0,'F:/Dealing/Panagiotis Papaioannou/pyerb/')
@@ -100,7 +101,7 @@ class VolatilityScanner:
         self.Assets = self.ExcelDF["Assets"].dropna().tolist()
         self.tenorList = ["1W","2W","1M","2M","3M","6M","9M","1Y","2Y","3Y"]# ||||| "ON","1D","3W","2M","4M","5M","18M","2Y","3Y","4Y","5Y","6Y","7Y","10Y","15Y","20Y","25Y","30Y"
         #self.tenorList = ["1W"] #DEBUGGER
-        self.DeltaSpanList = ["25"]#"5","10","35"
+        self.DeltaSpanList = ["5","10","25","35"]#
         self.workConn = sqlite3.connect(DB,detect_types=sqlite3.PARSE_DECLTYPES)
         self.PuntNotional = self.ExcelControlPanel.loc["Punt Notional", "Value"]
         self.TimeOverridesList = self.ExcelControlPanel.loc["TimeOverrideSettings", "Value"].split("|")
@@ -113,9 +114,14 @@ class VolatilityScanner:
         self.FWDSetup = 0
         ##########################################################################################################################
         self.PySystemsPath = "F:/Dealing/Panagiotis Papaioannou/pyerb/PyEurobankBloomberg/PySystems/"
+        self.DataDeckDF = pd.read_sql('SELECT * FROM DataDeck', sqlite3.connect(self.PySystemsPath + "PyLiveTradingSystems/DataDeck.db")).set_index('date', drop=True)
+        self.DataDeckDF.index = pd.DatetimeIndex(self.DataDeckDF.index)
         self.IndicatorsDF = pd.read_sql('SELECT * FROM IndicatorsDeck', sqlite3.connect(self.PySystemsPath+"PyLiveTradingSystems/DataDeck.db")).set_index('date', drop=True)
         self.IndicatorsDF.index = pd.DatetimeIndex(self.IndicatorsDF.index)
-        self.BenchmarkDF = pe.dlog(self.IndicatorsDF["NEIXCTA Index"]).fillna(0)#NEIXSTTI Index
+        try:
+            self.BenchmarkDF = pe.dlog(self.IndicatorsDF["NEIXCTA Index"]).fillna(0)#NEIXSTTI Index
+        except:
+            self.BenchmarkDF = pe.dlog(self.DataDeckDF["RX1 Comdty"]).fillna(0)
         self.BenchmarkDF_Vol = self.BenchmarkDF.std()
         ############################################################################################################################################################
         self.SubAllocations = pd.concat([self.LiveStrategies['SingleGenerics'], self.LiveStrategies_SubAllocations['SingleGenerics']], axis=1)
@@ -340,6 +346,11 @@ class VolatilityScanner:
         quoteC = ConfigIn["Pair"][3:].replace(" Curncy", "")
 
         BaseDF = self.GGCDF[[ConfigIn["Pair"], ConfigIn["Pair"].split(" ")[0]+"V"+ConfigIn['Tenor']+" Curncy"]]
+        VolSurface = self.GGCDF[[c for c in self.GGCDF.columns if baseC+quoteC in c]].ffill().bfill()
+
+        "Get Risk Reversals"
+        self.RR_25D = pd.read_sql('SELECT * FROM DataDeck_RiskReversals', self.workConn).set_index('date', drop=True).sort_index()
+        self.RR_25D = self.RR_25D[[c for c in self.RR_25D.columns if baseC + quoteC + "25R" in c]]
 
         for timeOverridePack in self.TimeOverridesList:
             timeOverrideSettings = [int(x) for x in timeOverridePack.split(",")]
@@ -426,7 +437,8 @@ class VolatilityScanner:
             self.GGCDF_Trade["fwd"] = None
             self.GGCDF_Trade["MaturityDate"] = None
             self.GGCDF_Trade[self.OptionsCols] = None
-            self.GGCDF_Trade["AdjustedVol"] = None
+            self.GGCDF_Trade["AdjustedVol_call"] = None
+            self.GGCDF_Trade["AdjustedVol_put"] = None
 
         self.GGCDF_Trade.loc[self.GGCDF_Trade["HitFlag"].shift() == 0, "HitFlag"] = 1
 
@@ -444,7 +456,10 @@ class VolatilityScanner:
             processIndexes = self.GGCDF_Trade.index
             T = T_Base
 
+        VolObsSeries_List = []
+        SmileObsSeries_List = []
         IVcol = [x for x in self.GGCDF_Trade.columns if (ConfigIn["Pair"].split(" ")[0]+"V" in x)]
+        RR_25d_col = ConfigIn["Pair"].split(" ")[0]+"25R"+ConfigIn['Tenor']+" Curncy"
         for idx, row in tqdm(self.GGCDF_Trade.iterrows()):
             if idx in processIndexes:
                 ############################################################################################################################
@@ -476,33 +491,113 @@ class VolatilityScanner:
                     Kc = K
                     Kp = K
                 ############################################################################################################################
-                sigma = row[IVcol].values[0] / 100
-                ############################################################################################################################
-                "Linear depreciation of vol"
-                #sigma *= (T/(T_Base-1))
-                ############################################################################################################################
-                self.GGCDF_Trade.loc[idx, "AdjustedVol"] = sigma*100
-                ############################################################################################################################
                 if ConfigIn["FwdCalculator"] == "Market":
                     fwd = self.GGCDF_Trade.loc[idx, "MarketFwd"]
                 else:
                     fwd = row[ConfigIn["Pair"]] * math.exp((r2 - r1) * (T / 365))
+                ##################################### VOLS INTERPOLATORS #######################################
+                VolObsSeries = VolSurface.loc[idx]
+                print(VolObsSeries)
+                VolSpanSeries = pd.DataFrame([i for i in range(3*365)])
+                VolSpanSeries['Vols'] = np.nan
+                VolSpanSeries.loc[VolSpanSeries.index[0], 'Vols'] = 0.5
+                VolSpanSeries.loc[VolSpanSeries.index[7], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V1W Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[14], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V2W Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V1M Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[2*30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V2M Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[3*30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V3M Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[6*30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V6M Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[9*30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V9M Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[12*30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V1Y Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[2*12*30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V2Y Curncy"]
+                VolSpanSeries.loc[VolSpanSeries.index[3*12*30], 'Vols'] = VolObsSeries.loc[baseC+quoteC+"V3Y Curncy"]
+                VolSpanSeriesDF = VolSpanSeries['Vols'].interpolate(method='polynomial', order=2)
+                VolSpanSeriesDF = VolSpanSeriesDF.ffill() #forward fill the end tail of the surface
+                VolSpanSeriesDF.name = idx
+                VolObsSeries_List.append(VolSpanSeriesDF)
+                ##################################### SMILE INTERPOLATORS#######################################
+                try:
+                    SmileObsSeries = self.RR_25D.loc[idx]
+                    SmileSpanSeries = pd.DataFrame([i for i in range(3 * 365)])
+                    SmileSpanSeries['RR'] = np.nan
+                    SmileSpanSeries.loc[SmileSpanSeries.index[0], 'RR'] = 0
+                    SmileSpanSeries.loc[SmileSpanSeries.index[7], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R1W Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[14], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R2W Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R1M Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[2 * 30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R2M Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[3 * 30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R3M Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[6 * 30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R6M Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[9 * 30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R9M Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[12 * 30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R1Y Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[2 * 12 * 30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R2Y Curncy"]
+                    SmileSpanSeries.loc[SmileSpanSeries.index[3 * 12 * 30], 'RR'] = SmileObsSeries.loc[baseC + quoteC + "25R3Y Curncy"]
+                    SmileSpanSeriesDF = SmileSpanSeries['RR'].interpolate(method='polynomial', order=2)
+                    SmileSpanSeriesDF = SmileSpanSeriesDF.ffill()  # forward fill the end tail of the surface
+                    SmileSpanSeriesDF.name = idx
+                    SmileObsSeries_List.append(SmileSpanSeriesDF)
+                except Exception as e:
+                    print(e)
+                ############################################################################################################################
+                if T > 0:
+                    atm_vol = VolSpanSeriesDF.iloc[int(T)]/ 100
+                    risk_reversal_25d = SmileSpanSeriesDF.iloc[int(T)]/ 100
+                else:
+                    atm_vol = row[IVcol].values[0] / 100
+                    risk_reversal_25d = self.RR_25D.loc[idx,RR_25d_col]/ 100
+                print(ConfigIn['Pair'])
+                print("Spot = ", BaseDF.loc[idx, ConfigIn['Pair']])
+                print("T = ", T)
+                print("fwd = ", fwd)
+                print("r1 = ", r1, ", r2 = ", r2)
+                print("atm_vol = ", atm_vol)
+                print("risk_reversal_25d = ", risk_reversal_25d)
+                ############################################################################################################################
+                delta = 0.25
+                call_vol = atm_vol + risk_reversal_25d / 2
+                put_vol = atm_vol - risk_reversal_25d / 2
+                if call_vol == put_vol:
+                    call_vol += 0.0001
+                if idx == '2000-01-14 00:00:00':
+                    print(row)
+                print("call_vol = ", call_vol, ", put_vol = ", put_vol)
+                ############################################################################################################################
+                call_strike = pe.calculate_strike(fwd, call_vol, delta, T / 365, is_call=True)
+                put_strike = pe.calculate_strike(fwd, put_vol, delta, T / 365, is_call=False)
+                if call_strike == put_strike:
+                    call_vol += 0.000001
+                print(idx,", call_strike = ", call_strike, ", put_strike = ", put_strike)
+                print("call_strike_p = ", (call_strike/BaseDF.loc[idx, ConfigIn['Pair']])*100, "%, put_strike_p = ", (put_strike/BaseDF.loc[idx, ConfigIn['Pair']])*100, "%")
+                ############################################################################################################################
+                if call_strike != put_strike:
+                    vol_smile = interp1d(np.array([put_strike, fwd, call_strike]), np.array([put_vol, atm_vol, call_vol]), kind='quadratic', bounds_error=False, fill_value="extrapolate")
+                    implied_vol_call = vol_smile(Kc)
+                    implied_vol_put = vol_smile(Kp)
+                else:
+                    implied_vol_call = atm_vol
+                    implied_vol_put = atm_vol
+                ############################################################################################################################
+                "Linear depreciation of vol"
+                #sigma = row[IVcol].values[0] / 100 # simple ATM vol pricing
+                #sigma *= (T/(T_Base-1))
+                ############################################################################################################################
+                self.GGCDF_Trade.loc[idx, "AdjustedVol_call"] = implied_vol_call*100
+                self.GGCDF_Trade.loc[idx, "AdjustedVol_put"] = implied_vol_put*100
                 ############################################################################################################################
                 self.GGCDF_Trade.loc[idx, "fwd"] = fwd
                 ############################################################################################################################
                 if ConfigIn["Optionality_Type"] == "Vanillas":
-                    self.GGCDF_Trade.loc[idx, "CallsPrices"] = pe.black_scholes(fwd, Kc, T / 365, r2, sigma, "call")
-                    self.GGCDF_Trade.loc[idx, "PutsPrices"] = pe.black_scholes(fwd, Kp, T / 365, r2, sigma, "put")
+                    self.GGCDF_Trade.loc[idx, "CallsPrices"] = pe.black_scholes(fwd, Kc, T / 365, r2, self.GGCDF_Trade.loc[idx, "AdjustedVol_call"], "call")
+                    self.GGCDF_Trade.loc[idx, "PutsPrices"] = pe.black_scholes(fwd, Kp, T / 365, r2, self.GGCDF_Trade.loc[idx, "AdjustedVol_put"], "put")
                     self.GGCDF_Trade.loc[idx, "StraddlePrices"] = self.GGCDF_Trade.loc[idx, "CallsPrices"] + self.GGCDF_Trade.loc[idx, "PutsPrices"]
                     ########################################################################################################################
-                    delta_call, gamma_call, theta_call, vega_call, rho_call = pe.black_scholes_greeks(fwd, Kc, T / 365, r2, sigma, "call")
+                    delta_call, gamma_call, theta_call, vega_call, rho_call = pe.black_scholes_greeks(fwd, Kc, T / 365, r2, self.GGCDF_Trade.loc[idx, "AdjustedVol_call"], "call")
                     self.GGCDF_Trade.loc[idx, "DeltaCalls"] = delta_call
                     self.GGCDF_Trade.loc[idx, "GammaCalls"] = gamma_call
                     self.GGCDF_Trade.loc[idx, "ThetaCalls"] = theta_call
                     self.GGCDF_Trade.loc[idx, "VegaCalls"] = vega_call
                     self.GGCDF_Trade.loc[idx, "RhoCalls"] = rho_call
                     ########################################################################################################################
-                    delta_put, gamma_put, theta_put, vega_put, rho_put = pe.black_scholes_greeks(fwd, Kp, T / 365, r2, sigma, "put")
+                    delta_put, gamma_put, theta_put, vega_put, rho_put = pe.black_scholes_greeks(fwd, Kp, T / 365, r2, self.GGCDF_Trade.loc[idx, "AdjustedVol_put"], "put")
                     self.GGCDF_Trade.loc[idx, "DeltaPuts"] = delta_put
                     self.GGCDF_Trade.loc[idx, "GammaPuts"] = gamma_put
                     self.GGCDF_Trade.loc[idx, "ThetaPuts"] = theta_put
@@ -510,6 +605,8 @@ class VolatilityScanner:
                     self.GGCDF_Trade.loc[idx, "RhoPuts"] = rho_put
                     ########################################################################################################################
                     self.GGCDF_Trade.loc[idx, self.OptionsCols] *= self.PuntNotional
+                    #print(self.GGCDF_Trade.loc[idx, self.OptionsCols])
+                    #time.sleep(34000)
                     ########################################################################################################################
                 elif ConfigIn["Optionality_Type"] == "Barriers":
                     ########################################################################################################################
@@ -587,13 +684,16 @@ class VolatilityScanner:
                         self.GGCDF_Trade.loc[idx, "ThetaPuts"] = np.nan
                         self.GGCDF_Trade.loc[idx, "VegaPuts"] = np.nan
                         self.GGCDF_Trade.loc[idx, "RhoPuts"] = np.nan
+        ######################################################################################################
+        VolObsSeriesDataFrame = pd.concat(VolObsSeries_List)
+        VolObsSeriesDataFrame.to_sql("VolObsSeriesDataFrame_" + self.ID, self.workConn, if_exists='replace')
         # ////////////////////////////////////////////////////////////////////////////////////////////////////
         self.GGCDF_Trade["MaturityDate"] = pd.to_datetime(self.GGCDF_Trade["MaturityDate"])
 
         "Fixing the Columns Order"
         self.GGCDF_Trade = self.GGCDF_Trade[[ConfigIn["Pair"], 'fwd', 'T_Adj', 'MaturityDate', StrikeColName,
                                             'CallsPrices', 'PutsPrices', 'StraddlePrices',
-                                            'ThetaDecayDays','HitFlag', IVcol[0], "AdjustedVol", 'r1', 'r2',
+                                            'ThetaDecayDays','HitFlag', IVcol[0], "AdjustedVol_call","AdjustedVol_put", 'r1', 'r2',
                                             'DeltaCalls', 'GammaCalls', 'ThetaCalls', 'VegaCalls', 'RhoCalls',
                                             'DeltaPuts', 'GammaPuts', 'ThetaPuts', 'VegaPuts', 'RhoPuts',
                                             'index_col', 'index_Dt']]
@@ -657,9 +757,9 @@ class VolatilityScanner:
             NotYetProcessed = []
             for Pair in tqdm(["EURUSD Curncy","GBPUSD Curncy","USDCAD Curncy","EURGBP Curncy"]):#"EURUSD Curncy","GBPUSD Curncy",
                 for TenorPack in [["1W", "1W"],
-                                  #["1W", "2W"],["1W", "1M"],
-                                  #["2W", "1W"],["2W", "2W"],["2W", "1M"],
-                                  #["1M", "1W"],["1M", "2W"],["1M", "1M"],
+                                  ["1W", "2W"],["1W", "1M"],
+                                  ["2W", "1W"],["2W", "2W"],["2W", "1M"],
+                                  ["1M", "1W"],["1M", "2W"],["1M", "1M"],
                                   ]: #self.tenorList,"2W"
                     Hitman = TenorPack[0]
                     Tenor  = TenorPack[1]
@@ -715,20 +815,20 @@ class VolatilityScanner:
             HitFlagList = []
             LatestTradeInfoList = []
             for subInputConfig in NotYetProcessed:
-                try:
-                    ################################################################################################
-                    VolatilityScanner.CreateOptionsGenerics(self, subInputConfig, 0)
-                    ################################################################################################
-                    self.GGCDF_Trade = self.GGCDF_Trade[self.GGCDF_Trade["T_Adj"] >= 0]
-                    subStraddle = self.GGCDF_Trade["StraddlePrices"]
-                    subStraddle.name = self.ID
-                    subHitFlag = self.GGCDF_Trade["HitFlag"]
-                    subHitFlag.name = self.ID
-                    StraddlesList.append(subStraddle)
-                    HitFlagList.append(subHitFlag)
-                    LatestTradeInfoList.append(self.LatestTradeInfo)
-                except Exception as e:
-                    print(e)
+                #try:
+                ################################################################################################
+                VolatilityScanner.CreateOptionsGenerics(self, subInputConfig, 0)
+                ################################################################################################
+                self.GGCDF_Trade = self.GGCDF_Trade[self.GGCDF_Trade["T_Adj"] >= 0]
+                subStraddle = self.GGCDF_Trade["StraddlePrices"]
+                subStraddle.name = self.ID
+                subHitFlag = self.GGCDF_Trade["HitFlag"]
+                subHitFlag.name = self.ID
+                StraddlesList.append(subStraddle)
+                HitFlagList.append(subHitFlag)
+                LatestTradeInfoList.append(self.LatestTradeInfo)
+                #except Exception as e:
+                #    print(e)
             ########################################################################################################
             OptionalityTradeDF = pd.concat(StraddlesList, axis=1).sort_index()
             OptionalityHitDF = pd.concat(HitFlagList, axis=1).sort_index()
@@ -925,6 +1025,9 @@ class VolatilityScanner:
                 ################################################################################################
                 if StratSpace in ["SingleGenerics"]:
                     StratContributionsPnL.to_sql("StratContributionsPnL_Net_"+StratSpace, self.workConn, if_exists='replace')
+                    StratContributionsPnL_Rets = StratContributionsPnL / self.AUM
+                    for c in StratContributionsPnL_Rets.columns:
+                        qs.reports.html(StratContributionsPnL_Rets[c], compounded=False,title=c,output="StrategiesFactSheets/" + c + ".html")
                 ################################################################################################
                 subDF = StratPortfolioWeight * pe.rs(StratContributionsPnL)
                 subDF.name = StratSpace
@@ -1256,6 +1359,31 @@ class VolatilityScanner:
             #fig, ax = plt.subplots(nrows=3,ncols=1,sharex=True)
             pe.cs(PnlDF).plot()
             plt.show()
+        elif StrategyConfigIn['Strategy'] == "PlotGreeks":
+            pair = "EURUSD"
+            tnr0 = "1W"
+            tnr1 = "1M"
+            Voltnr0 = pd.read_sql("SELECT * FROM GGCDF_Trade_" + pair + "_Curncy_"+tnr0+"_" + tnr0 +"_"+ strID,self.workConn).set_index("date", drop=True)
+            Voltnr1 = pd.read_sql("SELECT * FROM GGCDF_Trade_" + pair + "_Curncy_"+tnr1+"_" + tnr1 +"_"+ strID,self.workConn).set_index("date", drop=True)
+            TotalGammatnr0 = Voltnr0["GammaCalls"]+Voltnr0["GammaPuts"]
+            TotalGammatnr1 = Voltnr1["GammaCalls"]+Voltnr1["GammaPuts"]
+            TotalVegatnr0 = Voltnr0["VegaCalls"]+Voltnr0["VegaPuts"]
+            TotalVegatnr1 = Voltnr1["VegaCalls"]+Voltnr1["VegaPuts"]
+
+            fig1,ax1 = plt.subplots(nrows=2, ncols=1)
+            pd.concat([TotalGammatnr0,TotalGammatnr1],axis=1).plot(ax=ax1[0])
+            pd.concat([TotalVegatnr0,TotalVegatnr1],axis=1).plot(ax=ax1[1])
+
+            fig2, ax2 = plt.subplots(nrows=2, ncols=1)
+            (TotalVegatnr0/TotalGammatnr0).plot(ax=ax2[0])
+            (TotalVegatnr1/TotalGammatnr1).plot(ax=ax2[1])
+
+            fig3, ax3 = plt.subplots(nrows=2, ncols=1)
+            (TotalGammatnr0-TotalGammatnr1).abs().plot(ax=ax3[0])
+            (TotalVegatnr0-TotalVegatnr1).abs().plot(ax=ax3[1])
+
+
+            plt.show()
 
 #//////////////////////////////////// DATA PREPARE / GET ////////////////////////////////////////////
 obj = VolatilityScanner("VolatilityScanner", "VolatilityScanner.db")
@@ -1264,13 +1392,14 @@ obj = VolatilityScanner("VolatilityScanner", "VolatilityScanner.db")
 #obj.CreateVolatilityGenerics() #"Run once"
 #//////////////////////////////////// GEKKO CHOOSES //////////////////////////////////////////////////
 #"""#
-obj.getData()
-#RunMode = "forceReRunAll"
-RunMode = "update"
+#obj.getData()
+RunMode = "forceReRunAll"
+#RunMode = "update"
 obj.RunBuilder("Run", RunMode) #Optionality_UpdateStatus="",or "update"
-obj.RunBuilder("Trade", RunMode, skipReadCalc="NO", DailyDeltaHedgeFlag="NO", TCA_Mode="PriceCharge", ECO_Relevance_Filter=["NO",90]) #skipReadCalc="YES", "NO |||| TCA_Mode = None, VegaCharge, PriceCharge
+#obj.RunBuilder("Trade", RunMode, skipReadCalc="NO", DailyDeltaHedgeFlag="NO", TCA_Mode="PriceCharge", ECO_Relevance_Filter=["NO",90]) #skipReadCalc="YES", "NO |||| TCA_Mode = None, VegaCharge, PriceCharge
 #obj.RunBuilder("Trade", RunMode, skipReadCalc="NO", DailyDeltaHedgeFlag="YES", TCA_Mode="PriceCharge") #skipReadCalc="YES", "NO
 #obj.StrategyTester({"Strategy": "Plot_IV_HV_Spreads", "StrategyID":""})
+#obj.StrategyTester({"Strategy": "PlotGreeks", "StrategyID":"Vanillas_Latest_Spot_Native"})
 #//////////////////////////////////// RUN LATEST HFT //////////////////////////////////////////////////
 #os.chdir("F:/Dealing/Panagiotis Papaioannou/MT5/HTML_Reports/LIVE/")
 #import ERB_Py_Reporter
